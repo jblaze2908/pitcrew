@@ -8,6 +8,12 @@ base_url = "https://openrouter.ai/api/v1"
 env_key = "OPENROUTER_API_KEY"
 wire_api = "responses"
 
+[model_providers.aigateway]
+name = "Vercel AI Gateway"
+base_url = "https://ai-gateway.vercel.sh/v1"
+env_key = "AI_GATEWAY_API_KEY"
+wire_api = "responses"
+
 [mcp_servers.playwright]
 command = "playwright-mcp"
 args = ["--headless", "--isolated", "--browser", "chromium", "--no-sandbox"]

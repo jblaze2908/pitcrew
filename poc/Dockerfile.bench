@@ -1,0 +1,11 @@
+# Browser-engine benchmark image: the bot image plus Firefox, WebKit and Lightpanda (same pin as v0.2).
+FROM pitcrew-bot:0.1
+USER root
+ARG LIGHTPANDA_VERSION=0.4.1
+ARG LIGHTPANDA_SHA=669df2d870e5dcc6de73b9346bb4ad2b4281e3ab8ef1f3d9e1f708eb6b575aad
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+ && curl -fsSLo /tmp/lp.deb "https://github.com/lightpanda-io/browser/releases/download/${LIGHTPANDA_VERSION}/lightpanda_${LIGHTPANDA_VERSION}_amd64.deb" \
+ && echo "${LIGHTPANDA_SHA}  /tmp/lp.deb" | sha256sum -c - && dpkg -i /tmp/lp.deb && rm -f /tmp/lp.deb \
+ && cd "$(npm root -g)/@playwright/mcp" && npx playwright install --with-deps firefox webkit \
+ && chmod -R a+rX /ms-playwright && rm -rf /var/lib/apt/lists/*
+USER probe

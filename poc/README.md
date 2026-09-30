@@ -55,6 +55,25 @@ Measured: boot to desktop-ready ~1.7–1.8 s; idle ~273–321 MiB RAM each.
 
 the host has no `/dev/kvm` (it is a KVM guest without nested virt), so microVMs (Firecracker/Kata) are out. gVisor is the upgrade path for kernel-level isolation.
 
+### Browser engines (`bench-browsers.mjs`, headless, same 4 pages, each alone in its own container)
+
+| Engine | cgroup peak over baseline | Form chore | Screenshot |
+|---|---|---|---|
+| Chromium (chrome-for-testing 154) | **244 MiB** | ok | yes |
+| Firefox | 669 MiB | ok | yes |
+| WebKit | 749 MiB | form didn't echo | yes |
+| Lightpanda 0.4.1 | 12 MiB | 0/4 pages loaded via Playwright 1.64-alpha CDP | no pixels |
+
+Chromium stays.
+
+### Providers
+
+- **Vercel AI Gateway** (`./run.sh p1 anthropic/claude-sonnet-5.5 aigateway`): the key authenticates, and Codex reaches `/v1/responses`. Every request returns **403 "requires a valid credit card on file"**, so p1 got 2/6. Not proven end to end until billing is enabled.
+
+### Not yet run
+
+- `devtools.mjs`: console, uncaught errors, network status, HAR and trace from a localhost app. Written but not run.
+
 ## Findings
 
 - The slim image needs `ca-certificates`, or Codex can't reach any API.
