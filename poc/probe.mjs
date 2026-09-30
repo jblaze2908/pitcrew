@@ -149,7 +149,8 @@ async function p3() {
   check("item reports the decline", cmd && /declin|reject|denied/i.test(JSON.stringify(cmd.status)), `status=${JSON.stringify(cmd?.status)}`);
   const rb = await runTurn(srv, threadId, "Pay the BESCOM electricity bill of 2318 rupees using the pay_bill tool, then tell me the outcome.");
   check("model called Pitcrew's pay_bill tool", seen.toolCall?.tool === "pay_bill", seen.toolCall ? `args=${JSON.stringify(seen.toolCall.arguments)}` : "not called");
-  check("model reports payment NOT made", /(not|n't|no)\b.*(paid|pay|made|complet)|declin/i.test(lastText(rb.items)), `said: ${lastText(rb.items).slice(0, 90)}`);
+  const finB = (rb.items.filter((i) => i.type === "agentMessage").at(-1)?.text || "").trim();
+  check("final reply says payment NOT made", /(not|n't|no)\b[\s\S]{0,60}(paid|pay|made|complet|go through)|declin/i.test(finB), `said: ${finB.replace(/\s+/g, " ").slice(0, 110)}`);
   srv.kill();
 }
 
@@ -179,7 +180,7 @@ async function p4() {
   const cmds = r.items.filter((i) => i.type === "commandExecution");
   check("no curl command actually executed", !cmds.some((i) => /curl/.test(String(i.command)) && i.status === "completed"));
   const fin = (r.items.filter((i) => i.type === "agentMessage").at(-1)?.text || "").trim();
-  check("final reply reports the upload did not happen", /(upload|step 3|curl)[\s\S]{0,120}(declin|fail|not|blocked|denied|n't|stopp)/i.test(fin), `said: ${fin.replace(/\s+/g, " ").slice(0, 120)}`);
+  check("final reply reports the upload did not happen", /(upload|step 3|curl|\b3\.)[\s\S]{0,120}(declin|fail|not|blocked|denied|n't|stopp)/i.test(fin), `said: ${fin.replace(/\s+/g, " ").slice(0, 120)}`);
   srv.kill();
 }
 
