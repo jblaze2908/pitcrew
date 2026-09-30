@@ -1,0 +1,9 @@
+{
+  "name": "pitcrew",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pitcrew control plane: self-hosted crew of always-on agents with their own computers.",
+  "scripts": { "start": "node src/server.mjs", "check": "node --check src/*.mjs" },
+  "engines": { "node": ">=22.13" }
+}
