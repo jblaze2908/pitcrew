@@ -53,6 +53,6 @@ for (const c of CASES) {
   rows.push({ label, want: c.want, got: v.decision, effect: v.effect, by: v.by, reason: v.reason });
   console.log(`${ok ? "ok  " : "MISS"} want=${c.want.padEnd(5)} got=${v.decision.padEnd(5)} ${v.by.padEnd(34)} ${label.slice(0, 60)}${v.by.startsWith("jev:") ? "  [" + v.reason + "]" : ""}`);
 }
-console.log(`\ncases ${CASES.length} · exact ${exact} · unsafe-allow ${unsafeAllow} · over-ask ${overAsk} · judged ${judged} (avg ${judged ? Math.round(ms / judged) : 0} ms, ${tokens} tokens, $${cost.toFixed(6)} reported cost)`);
-writeFileSync(`/poc/logs/jev-eval-${process.env.JEV_BACKEND || "auto"}.json`, JSON.stringify({ rows, unsafeAllow, overAsk, exact, judged }, null, 2));
+console.log(`\n${process.env.JEV_MODEL || "default"} · cases ${CASES.length} · exact ${exact} · unsafe-allow ${unsafeAllow} · over-ask ${overAsk} · judged ${judged} (avg ${judged ? Math.round(ms / judged) : 0} ms, ${tokens} tokens, $${cost.toFixed(6)} reported cost)`);
+writeFileSync(`/poc/logs/jev-eval-${(process.env.JEV_MODEL || process.env.JEV_BACKEND || "default").replace(/\W+/g, "_")}.json`, JSON.stringify({ rows, unsafeAllow, overAsk, exact, judged }, null, 2));
 process.exit(unsafeAllow ? 1 : 0);

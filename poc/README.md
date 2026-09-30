@@ -11,18 +11,30 @@ Throwaway probes that decide the harness. They run on the host in one resource-c
 ```
 
 - `probe.mjs`: a minimal `codex app-server` JSON-RPC client.
-- `jev.mjs`: the approval decider. Declared effect → rules → TypeSafe Jev (`typesafe/jev-1.13` via OpenRouter `/api/v1/systemone`). It fails closed to a pit stop.
+- `jev.mjs`: the approval decider. Declared effect → rules → a System One decision model via OpenRouter `/api/v1/systemone` (default `~typesafe/jev-latest`; override with `JEV_MODEL`). It fails closed to a pit stop.
 
 ## Results, 2026-09-30 (Codex 0.156.1)
 
-| Probe | Model | Result |
+| Probe | OpenRouter (Claude Sonnet 5.5; p1 also DeepSeek V4.1 Flash) | ChatGPT subscription (gpt-6-astra, device login) |
 |---|---|---|
-| p1 any model | claude-sonnet-5.5, deepseek-v4.1-flash | 6/6 each |
-| p2 computer | claude-sonnet-5.5 | 3/3 |
-| p3 pit stops | claude-sonnet-5.5 | 5/5 |
-| p4 jev live | claude-sonnet-5.5 | 5/5 |
-| jev-eval | Jev 1.13 | 30/30 exact, 0 unsafe-allow, 0 over-ask, avg 486 ms, $0.000482 for 12 judged calls |
-| jev-eval | deepseek-v4.1-flash judge | 30/30, avg 2,292 ms |
+| p1 any model | 6/6 (both models) | 6/6 |
+| p2 computer | 3/3 | 3/3 |
+| p3 pit stops | 5/5 | 5/5 |
+| p4 jev live | 5/5 | 5/5 |
+
+### jev: decision models on the same 30 cases (12 reach the model)
+
+| Model | Exact | Unsafe-allow | Over-ask | Avg ms | Reported cost (12 calls) |
+|---|---|---|---|---|---|
+| **~typesafe/jev-latest** (→ jev-1.13) | **30** | **0** | 0 | **327** | $0.000470 |
+| typesafe/jev-1.13 | 30 | 0 | 0 | 486 | $0.000482 |
+| upstage/solar-decide | 28 | 0 | 2 (fail-closed timeouts) | 2,447 | $0.000537 |
+| jaredpalmer/kev-4b | 25 | 0 | 5 (low confidence) | 969 | $0.000242 |
+| respan/span-01 (noul-only) | 24 | **3** | 3 | 2,051 | $0.000036 |
+| respan/span-01-lite (noul-only) | 26 | **3** | 1 | 1,430 | $0.000000 |
+| deepseek-v4.1-flash (general LLM judge) | 30 | 0 | 0 | 2,292 | n/a |
+
+These are single runs, so latency varies run to run. The Respan models let a Pay/Order/Send click through: never use them as the gate. OpenAI's Decisions API (GPT-6 Luna, ~150 ms claimed) is in limited preview; add it as another `JEV_MODEL` backend when it opens.
 
 ## Findings
 

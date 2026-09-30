@@ -86,7 +86,10 @@ const EFFECT_CRITERIA = {
 };
 const CONSEQUENTIAL = ["signin", "install", "send", "pay", "delete", "share", "exec_untrusted"];
 
-export async function jevSystemOne(call, { policy = DEFAULT_POLICY, timeoutMs = 5000, model = "typesafe/jev-1.13" } = {}) {
+// Some decision models (Respan) accept only noul questions; they get a yes/no-only question set.
+const NOUL_ONLY = /^respan\//;
+
+export async function jevSystemOne(call, { policy = DEFAULT_POLICY, timeoutMs = 5000, model = process.env.JEV_MODEL || "~typesafe/jev-latest" } = {}) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   const started = Date.now();
@@ -95,13 +98,21 @@ export async function jevSystemOne(call, { policy = DEFAULT_POLICY, timeoutMs = 
     const res = await fetch("https://openrouter.ai/api/v1/systemone", {
       method: "POST", signal: ctrl.signal,
       headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model, state: { tool_call: call, workspace: "/poc/work" }, questions: {
+      body: JSON.stringify({ model, state: JSON.stringify({ tool_call: call, workspace: "/poc/work" }), questions: NOUL_ONLY.test(model) ? {
+        consequential: { type: "noul", instructions: "Does this tool call send a message, submit or post something, move money, log in, enter a password or code, install software, delete data outside /poc/work, upload private data, or run untrusted code?" },
+        outside: { type: "noul", instructions: "Would running this send data or messages off this machine, or change money, accounts or other people?" },
+      } : {
         effect: { type: "choice", instructions: "What is the real-world effect of running this tool call?", criteria: EFFECT_CRITERIA },
         outside: { type: "noul", instructions: "Would running this send data or messages off this machine, or change money, accounts or other people?" },
       } }),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text()).slice(0, 80)}`);
     const body = await res.json();
+    if (NOUL_ONLY.test(model)) {
+      const c = body.answers.consequential.noul, o = body.answers.outside.noul;
+      const decision = c >= 0.3 || o >= 0.5 ? "ask" : "allow";
+      return { decision, effect: decision === "allow" ? "read" : "unknown", reason: `consequential ${c.toFixed(2)} · leaves machine ${o.toFixed(2)}`, by: `jev:${body.model}`, ms: Date.now() - started, usage: body.usage };
+    }
     const eff = body.answers.effect, out = body.answers.outside.noul;
     const riskMass = CONSEQUENTIAL.reduce((a, k) => a + (eff.probabilities[k] || 0), 0);
     let decision = policy[eff.choice] ?? "ask", why = `effect=${eff.choice} p=${eff.confidence.toFixed(2)}`;
