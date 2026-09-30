@@ -36,6 +36,8 @@ export function ruleVerdict(call, policy = DEFAULT_POLICY) {
     if (parts.every((p) => READ_ONLY.test(p)) && !/>/.test(cmd)) return { decision: "allow", effect: "read", reason: "read-only commands", by: "rule" };
     return null;
   }
+  if (call.kind === "mcp" && call.server === "computer" && /^(screenshot|scroll)$/.test(call.tool))
+    return { decision: "allow", effect: "browse", reason: "observes the screen", by: "rule" };
   if (call.kind === "mcp" && /^browser_(navigate|snapshot|take_screenshot|wait_for|evaluate|console_messages|network_requests|tabs|hover|resize)$/.test(call.tool))
     return { decision: "allow", effect: "browse", reason: "observes the page", by: "rule" };
   return null;
@@ -116,7 +118,8 @@ export async function jevSystemOne(call, { policy = DEFAULT_POLICY, timeoutMs = 
     const eff = body.answers.effect, out = body.answers.outside.noul;
     const riskMass = CONSEQUENTIAL.reduce((a, k) => a + (eff.probabilities[k] || 0), 0);
     let decision = policy[eff.choice] ?? "ask", why = `effect=${eff.choice} p=${eff.confidence.toFixed(2)}`;
-    if (eff.confidence < 0.75) { decision = stricter(decision, "ask"); why += " · low confidence"; }
+    // Uncertainty between safe classes is harmless; only probability on consequential classes escalates.
+    if (eff.confidence < 0.75 && riskMass >= 0.05) { decision = stricter(decision, "ask"); why += " · low confidence"; }
     if (riskMass >= 0.15) { decision = stricter(decision, "ask"); why += ` · risk mass ${riskMass.toFixed(2)}`; }
     if (out >= 0.5) { decision = stricter(decision, "ask"); why += ` · leaves machine ${out.toFixed(2)}`; }
     return { decision, effect: eff.choice, reason: why, by: `jev:${body.model}`, ms: Date.now() - started, usage: body.usage, probabilities: eff.probabilities };

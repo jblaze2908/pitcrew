@@ -1,0 +1,15 @@
+# Computer-use config: no DOM browser tools, only the bot's own pixel-level computer.
+model = "anthropic/claude-sonnet-5.5"
+model_provider = "openrouter"
+
+[model_providers.openrouter]
+name = "OpenRouter"
+base_url = "https://openrouter.ai/api/v1"
+env_key = "OPENROUTER_API_KEY"
+wire_api = "responses"
+
+[mcp_servers.computer]
+command = "node"
+args = ["/poc/computer-mcp.mjs"]
+env = { DISPLAY = ":1" }
+tool_timeout_sec = 60

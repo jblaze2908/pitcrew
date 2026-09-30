@@ -1,0 +1,11 @@
+# One crew member's computer: virtual display, window manager, Chromium, live view, and the harness.
+FROM pitcrew-poc:0.1
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      xvfb openbox x11vnc novnc websockify xdotool imagemagick fonts-dejavu-core \
+ && rm -rf /var/lib/apt/lists/*
+COPY bot-desktop.sh /usr/local/bin/bot-desktop
+RUN chmod 755 /usr/local/bin/bot-desktop && mkdir -p /bot && chown probe /bot
+USER probe
+ENV DISPLAY=:1
+ENTRYPOINT ["/usr/local/bin/bot-desktop"]
