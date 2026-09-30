@@ -1,0 +1,15 @@
+# Isolated CODEX_HOME config for the probes. The key comes from OPENROUTER_API_KEY in the environment.
+model = "anthropic/claude-sonnet-5.5"
+model_provider = "openrouter"
+
+[model_providers.openrouter]
+name = "OpenRouter"
+base_url = "https://openrouter.ai/api/v1"
+env_key = "OPENROUTER_API_KEY"
+wire_api = "responses"
+
+[mcp_servers.playwright]
+command = "playwright-mcp"
+args = ["--headless", "--isolated", "--browser", "chromium", "--no-sandbox"]
+# Codex gives MCP servers a filtered environment, so the browser path must be passed explicitly.
+env = { PLAYWRIGHT_BROWSERS_PATH = "/ms-playwright" }
