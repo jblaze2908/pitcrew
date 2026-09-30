@@ -1,0 +1,19 @@
+# Pitcrew on the host. Only the control plane runs persistently; crew computers are started on demand by it.
+name: pitcrew
+services:
+  app:
+    image: pitcrew-app:1
+    container_name: pitcrew-app
+    restart: unless-stopped
+    ports:
+      - "172.17.0.1:8330:8330"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Same path inside and out, so bind mounts the app asks Docker for resolve on the host.
+      - /srv/pitcrew:/srv/pitcrew
+    environment:
+      PITCREW_HOST: pitcrew.example.com
+      PITCREW_MAX_COMPUTERS: "3"
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }

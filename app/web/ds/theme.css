@@ -1,0 +1,69 @@
+/* Pitcrew design system v3, exported from Draft (PhXyO3uxpm). Fonts load via Google Fonts in index.html. */
+:root {
+  --ground: #0f0f12;
+  --ground-deep: #0a0a0c;
+  --surface: #18181d;
+  --surface-2: #202026;
+  --surface-3: #2b2b33;
+  --line: #25252c;
+  --line-2: #36363f;
+  --ink: #f0f0f3;
+  --ink-2: #a9a9b4;
+  --ink-3: #76767f;
+  --btn: #f0f0f3;
+  --on-btn: #111114;
+  --signal: #ff6a3d;
+  --signal-soft: rgba(255,106,61,.14);
+  --on-signal: #150600;
+  --data: #7196ff;
+  --in: #3ad483;
+  --bad: #ff6b5e;
+  --warn: #f2c14e;
+  --c1: #4f7dff;
+  --c2: #16c2c2;
+  --c3: #2fcc80;
+  --c5: #ff6fab;
+  --c6: #9577ff;
+  --bar: #000000;
+  --on-bar: #f0f0f3;
+  --bar-3: #6f6f78;
+  --feat: #26262e;
+  --on-feat: #f0f0f3;
+  --font-display: 'Bricolage Grotesque', ui-sans-serif, sans-serif;
+  --font-body: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  --font-data: 'IBM Plex Mono', ui-monospace, monospace;
+  --radius: 18px;
+  --radius-sm: 12px;
+  --radius-xs: 4px;
+}
+[data-theme="light"]{--ground:#f1f1f4;--ground-deep:#e8e8ed;--surface:#ffffff;--surface-2:#f6f6f9;--surface-3:#e6e6ec;--line:#e3e3e9;--line-2:#cfcfd8;--ink:#141418;--ink-2:#4a4a55;--ink-3:#80808b;--btn:#141418;--on-btn:#ffffff;--signal:#ff4f1f;--signal-soft:rgba(255,79,31,.1);--on-signal:#ffffff;--data:#2f63ff;--in:#0f9a5a;--bad:#e0412f;--warn:#b98300;--c1:#2f63ff;--c2:#00a8a8;--c3:#1db36b;--c5:#ff5c9d;--c6:#7d5cff;--bar:#141418;--on-bar:#f1f1f4;--bar-3:#8b8b95;--feat:#141418;--on-feat:#ffffff}
+html,body,[data-theme]{background:var(--ground);color:var(--ink)}
+body{font-family:var(--font-body);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.pc-d{font-family:var(--font-display)}
+.num,.pc-m{font-family:var(--font-data);font-variant-numeric:tabular-nums}
+.pc-lab{font:500 10.5px/1 var(--font-data);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+.pc-hello{font:800 46px/.98 var(--font-display);letter-spacing:-.04em}
+.pc-hello em{font-style:normal;color:var(--signal)}
+.pc-h2{font:800 22px/1.15 var(--font-display);letter-spacing:-.03em}
+.pc-h3{font:700 16px/1.25 var(--font-display)}
+.pc-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius)}
+.pc-feat{background:var(--feat);color:var(--on-feat);border-radius:var(--radius)}
+.pc-tile{background:color-mix(in srgb,var(--hue,var(--ink-3)) 15%,var(--surface));border-radius:var(--radius-sm)}
+.pc-quote{background:var(--surface-2);border-radius:var(--radius-sm);padding:12px;color:var(--ink-2)}
+.pc-chip{display:inline-flex;align-items:center;height:20px;padding:0 6px;border-radius:var(--radius-xs);font:600 10px/1 var(--font-data);letter-spacing:.06em;text-transform:uppercase;box-shadow:inset 0 0 0 1px var(--line-2);color:var(--ink-2);white-space:nowrap}
+.pc-chip.hot{background:var(--signal);box-shadow:none;color:var(--on-signal)}
+.pc-chip.blue{box-shadow:inset 0 0 0 1px var(--data);color:var(--data)}
+.pc-chip.ok{box-shadow:inset 0 0 0 1px var(--in);color:var(--in)}
+.pc-chip.bad{box-shadow:inset 0 0 0 1px var(--bad);color:var(--bad)}
+.pc-pill{display:inline-flex;align-items:center;justify-content:center;height:38px;padding:0 18px;border-radius:99px;font:600 13.5px/1 var(--font-body);background:var(--btn);color:var(--on-btn);white-space:nowrap}
+.pc-pill.o{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1px var(--line-2)}
+.pc-pill.sig{background:var(--signal);color:var(--on-signal)}
+.pc-pill.s{height:32px;padding:0 14px;font-size:12.5px}
+.pc-bar{display:flex;align-items:center;justify-content:space-between;height:38px;padding:0 20px;background:var(--bar);color:var(--on-bar);font:500 10.5px/1 var(--font-data);letter-spacing:.06em;text-transform:uppercase}
+.pc-bar .dim{color:var(--bar-3)}
+.pc-row{display:grid;align-items:center;border-top:1px solid var(--line)}
+.pc-nav{display:flex;align-items:center;gap:10px;height:36px;padding:0 12px;border-radius:10px;font:500 13.5px/1 var(--font-body);color:var(--ink-2)}
+.pc-nav.on{background:var(--btn);color:var(--on-btn)}
+.pc-burst{position:relative}
+.pc-burst i{position:absolute;width:6px;height:6px;border-radius:1.5px}
+.up{color:var(--in)}.down{color:var(--bad)}

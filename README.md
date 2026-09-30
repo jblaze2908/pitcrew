@@ -24,4 +24,13 @@ See [`docs/brief.md`](docs/brief.md) for the product brief.
 
 ## Status
 
-Pre-code. Product brief and design system are done. The harness decision (Codex app-server vs Hermes, behind a seam Pitcrew owns) waits on three probes listed in the brief.
+**v1 is live** at https://pitcrew.example.com (on the host). See [`docs/v1-build.md`](docs/v1-build.md) for what's in it, the defaults taken, and what's next.
+
+| Path | What |
+|---|---|
+| `app/` | Control plane: Node 22, no npm dependencies. Auth, crew, threads, jev pit stops, telemetry, generative UI, scheduler, live-view bridge. Web app in `app/web/` (Pitcrew design system from Draft). |
+| `computer/` | One computer per crew member: desktop, Chromium, Codex app-server, Playwright MCP and pixel computer MCP. Started on demand, stopped when idle. |
+| `deploy/` | `deploy.sh` (sync, build, restart on the host), `compose.yml`, `e2e.mjs` (end-to-end check), `shots.mjs` (UI screenshots). |
+| `poc/` | The harness, jev, isolation and browser POCs that v1 is built on. |
+
+First run: open the site, paste the setup token from `/srv/pitcrew/data/setup-token` on the host, choose a password, then connect a provider in Settings.
