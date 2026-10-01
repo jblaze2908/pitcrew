@@ -176,7 +176,8 @@ function pitCard(p, { onDone } = {}) {
   const body = p.kind === "command" ? h("pre", {}, String(d.command || "").replace(/^\/bin\/(ba)?sh -l?c /, ""))
     : p.kind === "mcp" ? h("pre", {}, `${d.server || ""}.${d.tool || ""}\n${JSON.stringify(d.args || d.message || {}, null, 1).slice(0, 1200)}`)
     : p.kind === "file" ? h("pre", {}, (d.paths || []).join("\n"))
-    : p.kind === "hire" ? hireSummary(d.spec || {}) : null;
+    : p.kind === "hire" ? hireSummary(d.spec || {})
+    : p.kind === "site" ? siteSummary(d) : null;
   const noAlways = ["pay", "delete", "share"].includes(p.effect) || p.kind === "hire";
   const el = h("div", { class: `pit ${done ? "done" : ""}` },
     h("div", { class: "spread" }, h("div", { class: "row" }, face(b, "sm", done ? "idle" : "needs"), h("b", {}, b?.name || p.bot_id), effectChip(p.effect)),
@@ -187,7 +188,13 @@ function pitCard(p, { onDone } = {}) {
     !done && p.kind === "hire" && h("div", { class: "acts" }, h("a", { class: "pc-pill sig s", href: `#/hire/${p.id}` }, "Review & hire"), h("button", { class: "pc-pill o s", onclick: () => decide("deny") }, "Decline")),
     !done && p.kind === "lease" && h("div", { class: "acts" }, h("button", { class: "pc-pill sig s", onclick: () => decide("approve", "once") }, "Hand it back"), h("button", { class: "pc-pill o s", onclick: () => decide("deny") }, "Keep control"),
       h("a", { class: "small faint", href: `#/live/${p.bot_id}`, style: "margin-left:auto" }, "Open live view")),
-    !done && !["hire", "lease"].includes(p.kind) && [note, h("div", { class: "acts" },
+    !done && p.kind === "site" && [note, h("div", { class: "acts" },
+      p.thread_id && h("button", { class: "pc-pill o s", onclick: () => decide("approve", "thread") }, "Allow once (this thread)"),
+      h("button", { class: "pc-pill sig s", onclick: () => decide("approve", "site") }, "Allow site"),
+      h("button", { class: "pc-pill o s", onclick: () => decide("approve", "full") }, "Allow site fully"),
+      h("button", { class: "pc-pill o s", onclick: () => decide("deny", "block") }, "Block site"),
+      p.thread_id && h("a", { class: "small faint", href: `#/t/${p.thread_id}`, style: "margin-left:auto" }, "Open thread"))],
+    !done && !["hire", "lease", "site"].includes(p.kind) && [note, h("div", { class: "acts" },
       h("button", { class: "pc-pill sig s", onclick: () => decide("approve", "once") }, "Approve once"),
       p.thread_id && h("button", { class: "pc-pill o s", onclick: () => decide("approve", "thread") }, "For this thread"),
       !noAlways && h("button", { class: "pc-pill o s", onclick: () => decide("approve", "always") }, "Always for this member"),
@@ -195,6 +202,14 @@ function pitCard(p, { onDone } = {}) {
       p.thread_id && h("a", { class: "small faint", href: `#/t/${p.thread_id}`, style: "margin-left:auto" }, "Open thread"))],
     done && p.note && h("p", { class: "small faint" }, p.note));
   return el;
+}
+// A domain pit stop: the exact address, https or not, and any look-alike warning, before the four choices.
+function siteSummary(d) {
+  const warn = d.homograph || d.lookalike;
+  return h("div", { class: "col", style: "gap:4px" },
+    warn && h("p", { class: "badc small" }, `Looks like ${d.lookalike?.brand || d.homograph?.brand || "another site"}${d.lookalike?.domain ? ` (${d.lookalike.domain})` : ""}: ${[d.homograph?.why, d.lookalike?.why].filter(Boolean).join("; ")}${d.homograph?.unicode ? `. Shown as ${d.homograph.unicode}` : ""}.`),
+    h("pre", {}, `${d.url || d.host}\n${d.https ? "https" : "NOT https: anything typed here can be read in transit"}`),
+    h("p", { class: "small faint" }, "Allow site: browse it; other effects follow this member's permissions. Fully: every effect allowed there except paying, which always asks."));
 }
 function hireSummary(s) {
   const p = s.personality || {};
@@ -235,7 +250,7 @@ function crewCard(b) {
 async function crewView(id, tab = "threads", ...rest) {
   const d = await api("GET", `/api/bots/${id}`);
   const b = d.bot;
-  const tabs = h("div", { class: "tabs" }, ["threads", "files", "computer", "profile", "memory", "schedules", "rules"].map((t) => h("a", { href: `#/crew/${id}/${t}`, class: tab === t ? "on" : "" }, t[0].toUpperCase() + t.slice(1))));
+  const tabs = h("div", { class: "tabs" }, ["threads", "files", "computer", "profile", "memory", "schedules", "rules", "sites"].map((t) => h("a", { href: `#/crew/${id}/${t}`, class: tab === t ? "on" : "" }, t[0].toUpperCase() + t.slice(1))));
   const newThread = async () => { const r = await api("POST", "/api/threads", { botId: id, title: "New thread" }); location.hash = `#/t/${r.id}`; };
   let body;
   // Threads carry no outcome of their own; only a live run (working, or waiting on a pit stop) earns a chip.
@@ -263,6 +278,7 @@ async function crewView(id, tab = "threads", ...rest) {
   else if (tab === "profile") body = await profileEditor(b);
   else if (tab === "memory") body = memoryEditor(b, d.memory);
   else if (tab === "schedules") body = schedulesEditor(b, d.schedules);
+  else if (tab === "sites") body = await sitesEditor(b.id, `Sites for ${b.name}. These win over the crew-wide list in Settings, except a crew-wide block.`);
   else body = h("div", { class: "col" }, rulesList(d.rules, () => renderView()), learnedList(d.learned, () => renderView()));
   return h("div", { class: "page" },
     h("div", { class: "spread" }, h("div", { class: "row", style: "gap:16px" }, face(b, "lg"), h("div", { class: "col", style: "gap:4px" }, h("h1", { class: "pc-h2" }, b.name), h("p", { class: "muted" }, b.job), h("div", { class: "row" }, h("span", { class: "pc-chip" }, b.provider), h("span", { class: "pc-chip" }, b.model), h("span", { class: "pc-chip" }, `${usd(b.spend)} / ${usd(b.weekly_cap_usd)} wk`)))),
@@ -342,6 +358,39 @@ function learnedList(items, after) {
         h("td", { class: "num" }, on && h("button", { class: "small sig", onclick: async () => { await api("POST", `/api/learned/${l.id}/reset`); toast("It will ask again"); after(); } }, "Ask again")));
     })))
     : h("p", { class: "empty" }, "Nothing learned yet. Approve the same kind of action twice in a row and the crew stops asking, unless it signs in, installs, sends, pays, deletes or shares."));
+}
+// ---------- sites ----------
+// Per-domain policy, crew-wide (scope "global") or one member's. An override replaces that effect's permission on
+// pages of the domain; pay always asks.
+const SITE_EFFECTS = ["read", "draft", "browse", "write_workspace", "signin", "install", "send", "delete", "share", "exec_untrusted"];
+const MODE_LABEL = { allowed: "allowed", read: "read only", blocked: "blocked" };
+async function sitesEditor(scope, help) {
+  const d = await api("GET", `/api/sites?scope=${encodeURIComponent(scope)}`);
+  const save = async (domain, mode, overrides) => { await api("PUT", "/api/sites", { scope, domain, mode, overrides }); toast("Saved"); renderView({ keepScroll: true }); };
+  const domain = h("input", { placeholder: "example.com, or app.example.com for one subdomain" });
+  const mode = h("select", {}, [["allowed", "Allowed"], ["full", "Allowed fully (all but pay)"], ["read", "Read only"], ["blocked", "Blocked"]].map(([v, l]) => h("option", { value: v }, l)));
+  const fullO = () => Object.fromEntries(SITE_EFFECTS.map((e) => [e, "allow"]));
+  const add = () => save(domain.value, mode.value === "full" ? "allowed" : mode.value, mode.value === "full" ? fullO() : {});
+  const chips = (o) => Object.entries(o || {}).map(([e, v]) => h("span", { class: "row", style: "gap:4px" }, h("pc-effect", { kind: e }, e.replace("_", " ")), h("span", { class: "small faint" }, v)));
+  const row = (r) => {
+    const cell = h("td", {}, h("div", { class: "row", style: "flex-wrap:wrap;gap:6px" }, r.mode === "allowed" ? chips(r.overrides) : h("span", { class: "small faint" }, r.mode === "read" ? "browse and read only; everything else asks" : "never opened")));
+    const edit = () => {
+      const m = h("select", {}, Object.entries(MODE_LABEL).map(([v, l]) => h("option", { value: v, selected: v === r.mode }, l)));
+      const sel = Object.fromEntries(SITE_EFFECTS.map((e) => [e, h("select", { class: "small" }, [["", "member's"], ["allow", "allow"], ["ask", "ask"]].map(([v, l]) => h("option", { value: v, selected: (r.overrides?.[e] || "") === v }, l)))]));
+      cell.replaceChildren(h("div", { class: "col", style: "gap:6px" }, m,
+        h("div", { class: "grid3", style: "gap:4px 12px" }, SITE_EFFECTS.map((e) => h("label", { class: "row small", style: "gap:6px" }, h("pc-effect", { kind: e }, e.replace("_", " ")), sel[e]))),
+        h("p", { class: "small faint" }, "Overrides apply when the mode is allowed. Pay always asks."),
+        h("div", { class: "row" }, h("button", { class: "pc-pill s", onclick: () => save(r.domain, m.value, Object.fromEntries(Object.entries(sel).filter(([, x]) => x.value).map(([e, x]) => [e, x.value]))) }, "Save"))));
+    };
+    return h("tr", {}, h("td", { class: "pc-m" }, r.domain), h("td", {}, h("span", { class: `pc-chip ${r.mode === "blocked" ? "hot" : r.mode === "allowed" ? "ok" : ""}` }, MODE_LABEL[r.mode] || r.mode), r.by === "preset" ? h("span", { class: "pc-chip", style: "margin-left:4px" }, "preset") : null),
+      cell, h("td", { class: "small faint" }, when(r.updated_at)),
+      h("td", { class: "num" }, h("div", { class: "row", style: "justify-content:flex-end" }, h("button", { class: "small faint", onclick: edit }, "Edit"),
+        h("button", { class: "small sig", onclick: async (e) => { if (!confirmInline(e.target, "Remove?")) return; await api("DELETE", `/api/sites?scope=${encodeURIComponent(scope)}&domain=${encodeURIComponent(r.domain)}`); toast("Removed"); renderView({ keepScroll: true }); } }, "Remove"))));
+  };
+  return h("div", { class: "col" }, help && h("p", { class: "small muted" }, help),
+    h("div", { class: "row" }, h("div", { style: "flex:1" }, domain), mode, h("button", { class: "pc-pill s", onclick: add }, "Add")),
+    h("div", { class: "pc-card tight scrollx" }, d.sites.length ? h("table", { class: "tbl" }, h("thead", {}, h("tr", {}, h("th", {}, "Domain"), h("th", {}, "Mode"), h("th", {}, "Overrides"), h("th", {}, "Updated"), h("th"))), h("tbody", {}, d.sites.map(row)))
+      : h("p", { class: "empty" }, "No sites yet. A site the crew hasn't been allowed to open asks you first.")));
 }
 function rulesList(rules, after) {
   return h("div", { class: "pc-card tight" }, rules.length ? h("table", { class: "tbl" }, h("thead", {}, h("tr", {}, h("th", {}, "Standing approval"), h("th", {}, "Effect"), h("th", {}, "Crew"), h("th", {}, "Since"), h("th"))), h("tbody", {}, rules.map((r) => h("tr", {}, h("td", { class: "pc-m" }, r.label), h("td", {}, h("pc-effect", { kind: r.effect }, r.effect)), h("td", {}, r.bot_name || r.bot_id), h("td", { class: "small faint" }, when(r.created_at)),
@@ -666,6 +715,7 @@ async function settingsView() {
     h("div", { class: "grid2" }, h("div", { class: "pc-card col" }, lab("Your name", name), lab("Default provider for new crew members", defProv), h("label", { class: "row small" }, plain, "Plain voice for the whole crew"),
       h("button", { class: "pc-pill s", onclick: async () => { S = await api("PATCH", "/api/settings", { driverName: name.value, defaultProvider: defProv.value, plainVoice: plain.checked }); renderChrome(); toast("Saved"); } }, "Save")),
       h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "Appearance"), theme, h("p", { class: "pc-lab" }, "Password"), cur, nxt, h("div", { class: "row" }, h("button", { class: "pc-pill o s", onclick: async () => { await api("POST", "/api/password", { current: cur.value, next: nxt.value }); location.reload(); } }, "Change password"), h("button", { class: "pc-pill o s", onclick: async () => { await api("POST", "/api/logout"); location.reload(); } }, "Sign out")))),
+    h("p", { class: "pc-lab" }, "Sites (whole crew)"), await sitesEditor("global", "Every crew member gets these. A member's own entry wins, except a crew-wide block. Loopback (the crew's own file server) is always allowed; private network addresses never are."),
     h("p", { class: "pc-lab" }, "Kill switch"),
     h("div", { class: "pc-card spread" }, h("div", { class: "col", style: "gap:4px;flex:1" }, h("b", { class: "pc-h3" }, S.paused ? "The crew is stopped" : "Stop every crew member now"), h("p", { class: "small muted" }, "Interrupts every run, denies every pending pit stop, stops every computer and pauses schedules until you resume.")),
       S.paused ? h("button", { class: "pc-pill", onclick: async () => { S = await api("POST", "/api/resume"); renderChrome(); renderView(); } }, "Resume the crew")

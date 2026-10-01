@@ -2,6 +2,8 @@
 // Order: declared effect class → deterministic rules → LLM judge (only for what's left). Fails closed to "ask".
 // v1: the control plane passes the OpenRouter key (opts.apiKey); browser_evaluate runs page JS, so it is judged, never auto-allowed.
 
+import { checkoutWhy } from "./sites.mjs";
+
 const ORDER = { allow: 0, ask: 1, block: 2 };
 const stricter = (a, b) => (ORDER[a] >= ORDER[b] ? a : b);
 
@@ -49,6 +51,7 @@ const looksSecret = (s) => { const t = String(s); CARDISH.lastIndex = KEYISH.las
 // Clicks that change nothing but what's on screen. Names match whole (bar a shortcut hint), so "Open account" isn't "Open".
 const SAFE_NAME = /^(open|close|show|hide|(show|see|view|load|read) (more|less|all|details|preview)|more|less|next|previous|prev|back|go back|cancel|reset|clear|expand( all)?|collapse( all)?|menu|dismiss|got it|accept( all)? cookies|reject all( cookies)?|zoom (in|out))$/i;
 const UNSAFE_NAME = /\b(send|submit|pay|buy|order|purchase|checkout|confirm|delete|remove|share|publish|post|sign ?in|log ?in|sign ?up|subscribe|unsubscribe|transfer|book|reserve|apply|approve|agree)\b/i;
+const OBSERVE = /^browser_(navigate|navigate_back|snapshot|take_screenshot|wait_for|console_messages|network_requests|network_request|find|tabs|hover|resize)$/;
 const STATE_ROLES = new Set(["radio", "checkbox", "combobox", "tab"]);
 const NAV_KEY = /^(Escape|Tab|Shift\+Tab|Arrow(Up|Down|Left|Right)|Page(Up|Down)|Home|End)$/;
 const parseEl = (e) => { const m = /^([a-z]+)\b(?:\s+"((?:[^"\\]|\\.)*)")?/.exec(e || ""); return { role: m?.[1] ?? null, name: (m?.[2] ?? "").replace(/\s+(ctrl|cmd|alt|shift|⌘|⌥|⇧)\s*\+?\s*\S+$/i, "").trim() }; };
@@ -57,6 +60,9 @@ const safeName = (n) => n && n.split(/\s*\/\s*/).every((p) => SAFE_NAME.test(p))
 // Stage 1+2: returns a verdict or null when the rules can't decide. Rule allows go through the member's policy, so a
 // stricter policy (draft: ask) still wins; anything unusual returns null and goes to jev, never straight to allow.
 export function ruleVerdict(call, policy = DEFAULT_POLICY) {
+  // Checkout and payment pages: no rule allows a browser action there, so every click and fill reaches jev.
+  const checkout = call.kind === "mcp" && call.server === "browser" && !OBSERVE.test(call.tool) && (call.arguments?.page_checkout || checkoutWhy({ url: call.arguments?.page_url }));
+  if (checkout && (!call.effect || (policy[call.effect] ?? "ask") === "allow")) return null;
   if (call.effect) {
     const d = policy[call.effect] ?? "ask";
     return { decision: d, effect: call.effect, reason: `declared ${call.effect} → policy ${d}`, by: "policy" };
@@ -75,7 +81,7 @@ export function ruleVerdict(call, policy = DEFAULT_POLICY) {
   }
   if (call.kind === "mcp" && call.server === "computer" && /^(screenshot|scroll)$/.test(call.tool))
     return { decision: "allow", effect: "browse", reason: "observes the screen", by: "rule" };
-  if (call.kind === "mcp" && /^browser_(navigate|navigate_back|snapshot|take_screenshot|wait_for|console_messages|network_requests|network_request|find|tabs|hover|resize)$/.test(call.tool))
+  if (call.kind === "mcp" && OBSERVE.test(call.tool))
     return { decision: "allow", effect: "browse", reason: "observes the page", by: "rule" };
   if (call.kind === "mcp" && call.server === "browser") {
     const a = call.arguments || {}, els = (a.grounded_elements || []).map((e) => e.element);

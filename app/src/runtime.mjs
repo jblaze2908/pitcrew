@@ -5,7 +5,9 @@ import { posix } from "node:path";
 import { execFs } from "./execfs.mjs";
 import { one, all, run, now, uid, json, getSetting, setSetting, audit, pruneLabels } from "./db.mjs";
 import { getSecret } from "./auth.mjs";
-import { jev, redact } from "./jev.mjs";
+import { jev, redact, jevSystemOne, secretKind } from "./jev.mjs";
+import { checkoutWhy, confirmationOf } from "./sites.mjs";
+import { siteVerdict, siteTag, applySiteChoice, recordVisit } from "./domains.mjs";
 import { getBot, listBots, instructions, dynamicTools, normaliseSpec, createBot } from "./crew.mjs";
 import { brainFor, computerFor, allComputers, allBrains, botDir, ensureDirs, usageLog, toolManifest, PW_OUT, PW_SETTLE_MS } from "./computer.mjs";
 import { providerReady, estimateCost } from "./providers.mjs";
@@ -45,7 +47,7 @@ const isBusy = (c) => [...active.keys()].some((t) => getThread(t)?.bot_id === c.
 
 // `live` rides on the SSE payload only (the pit stop or surface row), so an open thread draws it without a refetch.
 function addEvent(threadId, turnId, kind, data, live = null) {
-  const r = run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES(?,?,?,?,?)", threadId, turnId, kind, JSON.stringify(data), now());
+  const r = run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES(?,?,?,?,?)", threadId, turnId ?? null, kind, JSON.stringify(data), now());
   run("UPDATE threads SET updated_at=? WHERE id=?", now(), threadId);
   bus.emit("event", { id: Number(r.lastInsertRowid), threadId, turnId, kind, data, ts: now(), ...live });
 }
@@ -491,7 +493,8 @@ export function ground(snap, tool, args) {
   const find = (ref) => snap?.lines.find((l) => l.includes(`[ref=${ref}]`))?.replace(/\[ref=[^\]]+\]/, "").replace(/^\s*-\s*/, "").trim().slice(0, 160);
   const refs = [args.target, args.ref, ...(Array.isArray(args.fields) ? args.fields.map((f) => f.target || f.ref) : [])].filter(Boolean);
   const elements = refs.map((r) => ({ ref: r, element: find(r) || "(not in the last snapshot)" }));
-  const grounded = { ...args, page_url: snap?.url || null, ...(elements.length ? { grounded_elements: elements } : {}) };
+  const why = checkoutWhy({ url: snap?.url, title: snap?.title, lines: snap?.lines });
+  const grounded = { ...args, page_url: snap?.url || null, ...(snap?.title ? { page_title: snap.title } : {}), ...(why ? { page_checkout: why } : {}), ...(elements.length ? { grounded_elements: elements } : {}) };
   let effect = null;
   const label = elements.map((e) => tidyElement(e.element)).join(" ");
   // A plain link click is navigation; links that pay, send or delete still get their consequential class.
@@ -565,33 +568,122 @@ async function waitLease(botId, threadId, call) {
   return Promise.race([new Promise((res) => l.waiters.push(res)), l.ask]);
 }
 
-// Decides one tool call. Returns true to run it. Rules and standing approvals first, then jev, then the driver.
+// Decides one tool call. Returns true to run it. The site policy first (browser and pixel tools), then rules and
+// standing approvals, then jev, then the driver.
 async function gate(c, threadId, call, pit) {
   const b = getBot(c.bot.id);
   if (call.kind === "mcp" && ["browser", "computer"].includes(call.server) && !(await waitLease(b.id, threadId, call))) return false;
-  const sig = signature(call), pat = pattern(call);
-  const v = await jev(call, { policy: b.policy, apiKey: getSecret("openrouter") || "missing" });
+  const site = await siteStep(b, threadId, call);
+  if (!site) return false;
+  const policy = site.policy, sig = signature(call), pat = pattern(call), browser = call.kind === "mcp" && call.server === "browser";
+  // A fully allowed site skips jev, except for anything that looks like paying (checkout pages never count as full).
+  if (browser && site.full && call.effect !== "pay" && !/^(card|cvv)$/.test(secretKind(JSON.stringify(call.arguments?.grounded_elements || [])) || ""))
+    return logDecision(threadId, b.id, { decision: "allow", effect: call.effect || "browse", reason: `${site.site.domain} is fully allowed`, by: "site" }, call);
+  const v = await jev(call, { policy, apiKey: getSecret("openrouter") || "missing" });
   if (v.decision === "block") { logDecision(threadId, b.id, v, call); addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Blocked by jev: ${v.reason}. Nothing ran.`, tone: "bad" }); return false; }
-  if (v.decision === "allow") return logDecision(threadId, b.id, v, call);
-  // A standing approval covers repeats of the same action, but never money, deletion or sharing.
-  const standing = ruleFor(b.id, threadId, [pat, sig], v.effect === "unknown" ? "ask" : v.effect);
+  if (v.decision === "allow") { const lid = uid("jl"), ok = logDecision(threadId, b.id, v, call, { id: lid }); shadowVerify(lid, call, v, policy); return ok; }
+  // A standing approval covers repeats of the same action, but never money, deletion or sharing. Browser approvals
+  // match only by their host-bearing pattern, so one granted on a.example never covers b.example; on a checkout page
+  // nothing stands in for the driver on pay or send.
+  const effect = v.effect === "unknown" ? "ask" : v.effect;
+  const standing = site.checkout && ["pay", "send"].includes(effect) ? null : standingRule(b.id, threadId, call, effect);
   if (standing && !["pay", "delete", "share"].includes(v.effect)) return logDecision(threadId, b.id, v, call, { decision: "allow", by: `rule:${standing.label}`, source: "standing" });
-  const learned = learnedTrust(b, pat, v);
+  const learned = site.checkout ? null : learnedTrust(b, pat, v);
   if (learned) return logDecision(threadId, b.id, v, call, { decision: "allow", by: `learned:${pat} (${learned.approvals} approvals)`, source: "learned" });
   // Logged before the pit stop opens, so decide() always finds the label row to fill in.
   const id = uid("ps");
   logDecision(threadId, b.id, v, call, { decision: "ask", pitstop: id });
-  const decision = await pitStop({ id, botId: b.id, threadId, kind: pit.kind, effect: v.effect === "unknown" ? "ask" : v.effect, title: pit.title, detail: { ...pit.detail, signature: sig, pattern: pat }, jev: v });
+  // Sign-in, payment, send and share pit stops name the exact registrable domain and https, so the driver checks the site.
+  const sensitive = ["signin", "pay", "send", "share"].includes(v.effect) || !!secretKind((call.arguments?.grounded_elements || []).map((e) => e.element).join(" "));
+  const verify = site.site?.domain && (sensitive || site.checkout) ? ` · verify: ${siteTag(site.site)}${site.checkout ? ` · checkout page (${site.checkout})` : ""}` : "";
+  const siteDetail = site.site?.domain ? { site: { domain: site.site.domain, host: site.site.host, https: site.site.https, checkout: site.checkout || null } } : {};
+  const decision = await pitStop({ id, botId: b.id, threadId, kind: pit.kind, effect, title: `${pit.title}${verify}`, detail: { ...pit.detail, ...siteDetail, signature: sig, pattern: pat }, jev: v });
   return decision === "approved";
+}
+export const standingRule = (botId, threadId, call, effect) => ruleFor(botId, threadId, call.kind === "mcp" && call.server === "browser" ? [pattern(call)] : [pattern(call), signature(call)], effect);
+
+// ---------- site policy at the gate ----------
+// Browser and pixel actions pass the member's per-domain policy first: blocked or private targets are refused, an
+// unknown domain waits on one "open this site?" pit stop (shared by every action that lands on it meanwhile), and the
+// rest go on with that page's effective policy. Observing an undecided page (snapshot, screenshot) doesn't ask.
+// Per call: in-memory lookups (domains.mjs); a pit stop only for an undecided domain.
+const refusals = new Map(); // thread id → why the last browser action was refused, for the agent's tool result
+const siteAsks = new Map(); // bot|thread|domain → pending pit stop
+const takeRefusal = (threadId) => { const r = refusals.get(threadId); refusals.delete(threadId); return r; };
+export async function siteStep(b, threadId, call) {
+  if (call.kind !== "mcp" || !["browser", "computer"].includes(call.server)) return { policy: b.policy };
+  const a = call.arguments || {};
+  const navigating = call.tool === "browser_navigate" || (call.tool === "browser_tabs" && a.action === "new" && !!a.url);
+  const observing = !navigating && (call.server === "computer" ? /^(screenshot|scroll)$/.test(call.tool) : /^browser_(snapshot|take_screenshot|wait_for|console_messages|tabs|resize|navigate_back)$/.test(call.tool));
+  const opts = { navigating, typing: /^browser_(type|fill_form|press_key)$|^(type|key)$/.test(call.tool), pageCheckout: a.page_checkout, title: a.page_title };
+  const url = navigating ? a.url : a.page_url;
+  let sv = siteVerdict(b, threadId, url, opts);
+  if (sv.action === "go" || (observing && sv.action === "ask")) return sv;
+  if (sv.action === "ask") {
+    const key = `${b.id}|${threadId}|${sv.site.domain}`;
+    if (!siteAsks.has(key)) siteAsks.set(key, pitStop({ botId: b.id, threadId, kind: "site", effect: sv.warn ? "ask" : "browse", title: sv.title, detail: sv.detail }).finally(() => siteAsks.delete(key)));
+    const d = await siteAsks.get(key);
+    sv = d === "approved" ? siteVerdict(b, threadId, url, opts) : { action: "refuse", site: sv.site, why: `the driver didn't allow ${sv.site.domain}${d === "expired" ? " (the pit stop expired)" : ""}` };
+    if (sv.action === "go") return sv;
+  }
+  refusals.set(threadId, `Not done: ${sv.why}. Don't try to reach it another way; tell the driver if you need it.`);
+  audit("jev", "site.refused", { botId: b.id, threadId, tool: call.tool, host: sv.site?.host || null, why: sv.why });
+  addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Not opened: ${sv.why}.`, tone: "bad" });
+  return null;
+}
+
+// After every browser action: if it landed on a blocked or private site (redirect, link, popup), go back or close that
+// tab at once; an undecided domain is flagged (its next action waits on the driver); a page that reads like an order or
+// payment confirmation raises a bad-tone system event and an audit entry, once per page. Per action: a regex pass over
+// the title and snapshot (capped at 60 KB), plus one browser call only when a blocked landing has to be undone.
+const confirmSeen = new Map(); // thread id → last confirmation (url|phrase) alerted
+export async function afterAction(b, threadId, codexId, mcp, { tool, text, snap, url, before = null, tabsBefore = null }) {
+  const title = /^- Page Title: (.*)$/m.exec(text || "")?.[1] || null, notes = [];
+  const seen = snapshots.get(codexId);
+  if (seen && seen.url === url) seen.title = title;
+  if (url && url !== before) {
+    const sv = siteVerdict(b, threadId, url, {});
+    if (sv.action === "refuse") {
+      const tabs = readTabs(text)?.count, newTab = !!(tabs && tabsBefore && tabs > tabsBefore);
+      try { await mcp.request("tools/call", newTab ? { name: "browser_tabs", arguments: { action: "close" } } : { name: "browser_navigate_back", arguments: {} }, 30000); } catch {}
+      snapshots.delete(codexId);
+      audit("jev", "site.left", { botId: b.id, threadId, tool, host: sv.site?.host || null, why: sv.why, closedTab: newTab });
+      addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Left ${sv.site?.host || "a page"}: ${sv.why}.`, tone: "bad" });
+      notes.push(`Blocked: that landed on ${sv.site?.host || url}, and ${sv.why}. ${newTab ? "The new tab was closed" : "The browser went back"}; take a fresh snapshot, and don't try to reach it another way.`);
+    } else if (sv.action === "ask") notes.push(`Note: ${sv.site.domain} isn't approved for you yet; your next action on it waits for the driver.`);
+    else if (sv.site?.domain && !sv.local) recordVisit(b.id, sv.site.domain);
+  }
+  const phrase = confirmationOf(`${title || ""}\n${String(snap || "").slice(0, 60000)}`)?.slice(0, 80);
+  if (phrase && url && confirmSeen.get(threadId) !== `${url}|${phrase}`) {
+    confirmSeen.set(threadId, `${url}|${phrase}`);
+    const host = hostOf(url);
+    audit("jev", "page.confirmation", { botId: b.id, threadId, tool, host, phrase });
+    addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `${b.name} is on what looks like an order or payment confirmation on ${host} (“${phrase}”). Check that this was meant to happen.`, tone: "bad" });
+  }
+  return notes.join("\n") || null;
+}
+
+// Shadow jev: a background second opinion on every rule-allowed browser or shell call, stored on that call's label row
+// (jev_labels.shadow). The gate never awaits it, so it adds no latency; it costs one remote jev call per rule allow, with
+// at most SHADOW_MAX in flight (the rest are dropped, not queued). PITCREW_JEV_SHADOW=0 turns it off.
+const SHADOW = process.env.PITCREW_JEV_SHADOW !== "0", SHADOW_MAX = Number(process.env.PITCREW_JEV_SHADOW_MAX || 4);
+let shadowing = 0;
+export function shadowVerify(labelId, call, v, policy) {
+  if (!SHADOW || !["rule", "policy"].includes(v.by) || shadowing >= SHADOW_MAX || !(call.kind === "shell" || (call.kind === "mcp" && call.server === "browser"))) return null;
+  shadowing++;
+  return jevSystemOne(call, { apiKey: getSecret("openrouter") || "missing", policy }).then((j) => {
+    const decision = j.by === "fail-closed" ? null : j.decision === "allow" && (policy[j.effect] ?? "ask") === "allow" ? "allow" : j.decision === "block" ? "block" : "ask";
+    run("UPDATE jev_labels SET shadow=? WHERE id=?", JSON.stringify({ effect: j.effect, decision, by: j.by, ms: j.ms ?? null, agree: decision == null ? null : decision === v.decision, sameEffect: j.effect === v.effect }), labelId);
+  }).catch(() => {}).finally(() => { shadowing--; });
 }
 // Every gate decision lands in the audit log and jev_labels, so "why did this run without asking?" always has an answer.
 // Per gate call: one redaction walk and two small INSERTs. v is the rules'/jev's verdict; the options are what overrode it.
 const labelSource = (by) => (by === "fail-closed" ? "fail-closed" : /^(jev|judge):/.test(by || "") ? "jev" : "rule");
-export function logDecision(threadId, botId, v, call, { decision = v.decision, by = v.by, source = labelSource(v.by), pitstop = null } = {}) {
+export function logDecision(threadId, botId, v, call, { decision = v.decision, by = v.by, source = labelSource(v.by), pitstop = null, id = uid("jl") } = {}) {
   const safe = redact(call);
   audit("jev", `gate.${decision}`, { threadId, effect: v.effect, by, reason: v.reason, ms: v.ms ?? null, call: gateSummary(safe), ...(pitstop ? { pitstop } : {}) });
   const verdict = { effect: v.effect, decision: v.decision, reason: v.reason, by: v.by, model: /^(jev|judge):/.test(v.by || "") ? v.by.replace(/^\w+:/, "") : null, ms: v.ms ?? null, answers: v.answers ?? null, probabilities: v.probabilities ?? null };
-  run("INSERT INTO jev_labels(id,ts,bot_id,thread_id,source,call,verdict,decision,pitstop_id) VALUES(?,?,?,?,?,?,?,?,?)", uid("jl"), now(), botId, threadId ?? null, source,
+  run("INSERT INTO jev_labels(id,ts,bot_id,thread_id,source,call,verdict,decision,pitstop_id) VALUES(?,?,?,?,?,?,?,?,?)", id, now(), botId, threadId ?? null, source,
     JSON.stringify({ ...safe, host: hostOf(call.arguments?.page_url) || null }), JSON.stringify(verdict), decision, pitstop);
   if (decision === "allow") bus.emit("jev", { threadId, effect: v.effect, by, ms: v.ms ?? null });
   return decision === "allow";
@@ -628,6 +720,7 @@ export async function decide(id, decision, { scope = "once", note = "", spec = n
   if (status === "approved" && ["thread", "always"].includes(scope) && match && !["pay", "delete", "share"].includes(ps.effect)) {
     run("INSERT INTO rules(id,bot_id,thread_id,effect,match,label,created_at) VALUES(?,?,?,?,?,?,?)", uid("ru"), ps.bot_id, scope === "thread" ? ps.thread_id : null, ps.effect, match, `${describePattern(match)}${scope === "thread" ? " (this thread)" : ""}`, now());
   }
+  if (ps.kind === "site") applySiteChoice(ps, status, scope);
   if (detail.pattern && ps.kind !== "hire" && (status === "approved" || status === "denied") && note !== "Kill switch" && learnable(getBot(ps.bot_id)?.policy, ps.effect, json(ps.jev, {}).by)) learn(ps, detail, status);
   run("UPDATE pitstops SET status=?, scope=?, note=?, decided_at=? WHERE id=?", status, scope, String(note).slice(0, 500), now(), id);
   // A kill-switch denial judges nothing about the call, so it trains as no answer.
@@ -755,13 +848,13 @@ async function runtimeTool(br, threadId, p) {
   const { snapshot: snapArg, ...given } = p.arguments || {};
   const tool = reading ? "browser_snapshot" : kind === "browser" ? p.tool : p.tool.replace(/^computer_/, "");
   const args = reading ? (given.target ? { target: String(given.target) } : {}) : tool === "browser_take_screenshot" && !given.type && !given.filename ? { ...given, type: "jpeg" } : given;
-  const g = kind === "browser" ? ground(snapshots.get(p.threadId), tool, args) : { grounded: args, effect: null, label: "" };
+  const g = kind === "browser" ? ground(snapshots.get(p.threadId), tool, args) : { grounded: pixelContext(args, snapshots.get(p.threadId)), effect: null, label: "" };
   const host = hostOf(g.grounded.page_url);
   const title = `${reading ? "read" : tool.replace(/^browser_/, "").replace(/_/g, " ")} ${short(g.label || summariseArgs(args), 140)}${host ? ` on ${host}` : ""}`.trim();
   bus.emit("activity", { threadId, botId: b.id, text: title });
   const ok = await gate(br, threadId, { kind: "mcp", server: kind, tool, arguments: g.grounded, ...(g.effect ? { effect: g.effect } : {}) }, { kind: "mcp", title, detail: { server: kind, tool, args: g.grounded } });
   const timing = { gate: Date.now() - t0 }; // includes a lease wait and jev's remote check (p50 336 ms for browser, measured)
-  if (!ok) { addEvent(threadId, turnId, "tool", { type: kind, title, status: "declined", timing }); return say("Not done: this action was declined at a pit stop. Don't retry it another way; tell the driver what didn't happen.", false); }
+  if (!ok) { addEvent(threadId, turnId, "tool", { type: kind, title, status: "declined", timing }); return say(takeRefusal(threadId) || "Not done: this action was declined at a pit stop. Don't retry it another way; tell the driver what didn't happen.", false); }
   const comp = computer(b);
   try {
     if (!comp.desktopUp) bus.emit("activity", { threadId, botId: b.id, text: comp.up ? "Starting the desktop…" : "Starting the computer…" });
@@ -784,6 +877,8 @@ async function runtimeTool(br, threadId, p) {
       if (reading) out = snap == null ? text : `${pageHead(text)}\n\n${snapshotToText(snap)}`;
       else out = `${SNAP_LINK.test(text) ? `${verifyLine(tool, text, { before: prev?.url, tabsBefore })}\n` : ""}${shapeSnapshot(text, snap, { prev, url, mode })}`;
       noteSnapshot(p.threadId, snap, url, { scoped: !!(args.target || args.depth), seen: !reading && mode !== "none" });
+      const post = await afterAction(b, threadId, p.threadId, mcp, { tool, text, snap, url, before: prev?.url, tabsBefore });
+      if (post) out = `${post}\n\n${out}`;
       const tb = readTabs(text); if (tb) tabCounts.set(mcp, tb.count);
     }
     addEvent(threadId, turnId, "tool", { type: kind, title, status: r.isError ? "failed" : "completed", output: text.slice(0, 1500), timing });
@@ -793,6 +888,9 @@ async function runtimeTool(br, threadId, p) {
     return say(`The computer couldn't run ${tool}: ${e.message}`, false);
   }
 }
+// Pixel actions carry the browser page the agent last saw (URL, title, checkout signal) plus its own `target` words, so
+// the site policy and jev judge them in context. The screen may have moved on since; there's no OCR in the image.
+const pixelContext = (args, snap) => (snap?.url ? { ...args, page_url: snap.url, ...(snap.title ? { page_title: snap.title } : {}), ...((w) => (w ? { page_checkout: w } : {}))(checkoutWhy({ url: snap.url, title: snap.title, lines: snap.lines })) } : args);
 const pageHead = (text) => { const t = /^- Page Title: (.*)$/m.exec(text)?.[1], u = /^- Page URL: (.*)$/m.exec(text)?.[1]; return `Page: ${[t, u && `(${u})`].filter(Boolean).join(" ") || "unknown"}`; };
 
 // Codex hands a dynamic tool's result to an exec script (nested call ids "exec-…") as ONE string, its text and image
