@@ -12,6 +12,7 @@ import { mkdirSync, chownSync, chmodSync, writeFileSync, existsSync, lstatSync, 
 import { getSecret } from "./auth.js";
 import { execFs } from "./execfs.js";
 import { policyMount } from "./domains.js";
+import { brainMcp, type McpServer } from "./engramStore.js";
 import type { Bot } from "../shared/types.js";
 import type { ToolManifest, McpTool } from "./crew.js";
 
@@ -64,7 +65,7 @@ function ensureBrainDir(b: { id: string }) {
 }
 
 // Codex config for one crew member's brain; regenerated at every brain start.
-function writeBrainConfig(b: Bot) {
+export function brainConfig(b: Bot, servers: McpServer[] = brainMcp(b)) {
   const q = (s: string) => JSON.stringify(String(s));
   const lines = [
     `# Written by the Pitcrew control plane at brain start. Edits here are overwritten.`,
@@ -81,12 +82,12 @@ function writeBrainConfig(b: Bot) {
     `[model_providers.openrouter]`, `name = "OpenRouter"`, `base_url = "http://127.0.0.1:8788/${b.id}/openrouter"`, `env_key = "OPENROUTER_API_KEY"`, `wire_api = "responses"`, ``,
     `[model_providers.aigateway]`, `name = "Vercel AI Gateway"`, `base_url = "http://127.0.0.1:8788/${b.id}/aigateway"`, `env_key = "AI_GATEWAY_API_KEY"`, `wire_api = "responses"`, ``,
   ];
-  for (const m of b.mcp || []) {
-    if (!/^[a-z][a-z0-9_-]{0,31}$/.test(m.name) || !/^https:\/\//.test(m.url)) continue;
-    lines.push(`[mcp_servers.${m.name}]`, `url = ${q(m.url)}`, ...(m.tokenSecret ? [`bearer_token_env_var = ${q("MCP_TOKEN_" + m.name.toUpperCase().replace(/-/g, "_"))}`] : []), ``);
-  }
+  for (const m of servers) lines.push(`[mcp_servers.${m.name}]`, `url = ${q(m.url)}`, ...(m.envVar ? [`bearer_token_env_var = ${q(m.envVar)}`] : []), ``);
+  return lines.join("\n");
+}
+function writeBrainConfig(b: Bot, servers: McpServer[]) {
   const p = `${brainDir(b.id)}/config.toml`;
-  writeFileSync(p, lines.join("\n"));
+  writeFileSync(p, brainConfig(b, servers));
   chownSync(p, brainUid(b.id), CREW_UID);
 }
 
@@ -173,12 +174,12 @@ export class Brain {
   // Starts a stopped brain without refreshing a running one's idle clock (the thread view calls this on every open).
   prewarm() { if (!this.ready) this.ensure().catch(() => {}); }
   async #start() {
-    const b = this.bot, uid = ensureBrainDir(b);
-    ensureDirs(b.id); writeBrainConfig(b); linkChatgpt(b.id);
+    const b = this.bot, uid = ensureBrainDir(b), servers = brainMcp(b);
+    ensureDirs(b.id); writeBrainConfig(b, servers); linkChatgpt(b.id);
     const env: Record<string, string | undefined> = { PATH: process.env.PATH }, envArgs = ["-e", `CODEX_HOME=/brains/${b.id}`, "-e", `HOME=/brains/${b.id}/home`];
     const put = (k: string, v: string | null) => { if (v) { env[k] = v; envArgs.push("-e", k); } };
     put("OPENROUTER_API_KEY", getSecret("openrouter")); put("AI_GATEWAY_API_KEY", getSecret("aigateway"));
-    for (const m of b.mcp || []) if (m.tokenSecret) put("MCP_TOKEN_" + m.name.toUpperCase().replace(/-/g, "_"), getSecret(m.tokenSecret));
+    for (const m of servers) if (m.envVar) put(m.envVar, m.token);
     // Keys reach the brain as `-e NAME` read from this process's env, never on the command line; computers never get them.
     // The native binary, not npm's node wrapper: ~45 ms and ~47 MB RSS less per member. The image sets the wrapper's env.
     const proc = spawn("docker", ["exec", "-i", "--user", `${uid}:${CREW_UID}`, "-w", `/brains/${b.id}`, ...envArgs, BRAIN, CODEX_BIN, "app-server"], { stdio: ["pipe", "pipe", "pipe"], env });

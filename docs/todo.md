@@ -17,4 +17,8 @@ Small things to pick up later. Bigger work lives in `features.md`; what shipped 
 - [ ] Plan card: the Chief-run count lags one wake (computed before the wake's turn starts).
 - [ ] Plans: walkthroughs 2 (dispute: pit stop, days of waiting, chase) and 3 (private-member consent) not yet tested;
       `waiting-until` timers and per-plan private consent aren't built. See Obsidian "Research - orchestration".
-- [ ] MCP connectors move to the Engram gateway (see Obsidian "Engram - Spec" §13) instead of per-member tokens.
+- [x] MCP connectors move to the Engram gateway (see Obsidian "Engram - Spec" §13) instead of per-member tokens: built
+      (v1-build.md, 2026-10-02); not yet run against the live Engram.
+- [ ] Engram skills live in the brain's home, which the computer's shell can't read, and Codex's own skills catalogue
+      is off (`[skills] include_instructions = false`). Pitcrew lists them in the instructions; check on the live brain
+      that `$name` loads one, and that Codex 0.156.1 reads `$HOME/.agents/skills`.

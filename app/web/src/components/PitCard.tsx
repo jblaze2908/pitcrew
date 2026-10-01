@@ -1,16 +1,17 @@
 // A pit stop: what the member wants to do, why jev stopped it, and the choices that fit its kind.
 import { useEffect, useState } from "react";
-import type { Personality, PitStop } from "../../../shared/types";
+import type { EngramDecision, Personality, PitStop } from "../../../shared/types";
 import { api } from "../lib/api";
 import { ago, usd, when } from "../lib/format";
 import { useStore } from "../lib/store";
 import { toast } from "../lib/toast";
+import { ProposalSummary } from "./Engram";
 import { EffectChip, Face } from "./ui";
 
 type Scope = "once" | "thread" | "always" | "site" | "full" | "block";
 
 export function PitCard({ p: given, onDone }: { p: PitStop; onDone?: (r: PitStop) => void }) {
-  const { bot } = useStore();
+  const { bot, S } = useStore();
   // The decided card replaces itself in place; nothing around it needs a refetch.
   const [p, setP] = useState(given);
   useEffect(() => setP(given), [given]);
@@ -25,6 +26,13 @@ export function PitCard({ p: given, onDone }: { p: PitStop; onDone?: (r: PitStop
     if (r?.id) setP(r);
     onDone?.(r);
   };
+  // Engram proposals are decided in Engram; the card only forwards the choice.
+  const engram = async (decision: EngramDecision) => {
+    const r = await api.post<PitStop>(`/api/engram/inbox/${p.id}`, { decision });
+    toast(decision === "accept" ? "Accepted in Engram" : decision === "keep" ? "Kept the current one" : "Rejected in Engram");
+    if (r?.id) setP(r);
+    onDone?.(r);
+  };
   const btn = (label: string, onClick: () => void, sig = false) => <button className={`pc-pill ${sig ? "sig" : "o"} s`} onClick={onClick}>{label}</button>;
   const openLink = (label: string) => p.thread_id && <a className="small faint" href={`#/t/${p.thread_id}`} style={{ marginLeft: "auto" }}>{label}</a>;
   const noteInput = <input placeholder="Note for the crew (optional)" className="small" value={note} onChange={(e) => setNote(e.target.value)} />;
@@ -34,11 +42,17 @@ export function PitCard({ p: given, onDone }: { p: PitStop; onDone?: (r: PitStop
     : p.kind === "mcp" ? <pre>{`${d.server || ""}.${d.tool || ""}\n${JSON.stringify(d.args || d.message || {}, null, 1).slice(0, 1200)}`}</pre>
     : p.kind === "file" ? <pre>{(d.paths || []).join("\n")}</pre>
     : p.kind === "hire" ? <HireSummary s={d.spec || {}} />
-    : p.kind === "site" ? <SiteSummary d={d} /> : null;
+    : p.kind === "site" ? <SiteSummary d={d} />
+    : p.kind === "engram" && d.proposal ? <ProposalSummary x={d.proposal} /> : null;
 
   let actions = null;
   if (!done) {
-    if (p.kind === "hire") actions = <div className="acts"><a className="pc-pill sig s" href={`#/hire/${p.id}`}>Review &amp; hire</a>{btn("Decline", () => decide("deny"))}</div>;
+    if (p.kind === "engram") actions = <div className="acts">
+      {d.proposal?.replaces && btn("Keep current", () => engram("keep"))}
+      {btn("Accept", () => engram("accept"), true)}
+      {btn("Reject", () => engram("reject"))}
+      <a className="small faint" href={`${S.engram.url}/#/inbox`} target="_blank" rel="noopener noreferrer" style={{ marginLeft: "auto" }}>Open in Engram</a></div>;
+    else if (p.kind === "hire") actions = <div className="acts"><a className="pc-pill sig s" href={`#/hire/${p.id}`}>Review &amp; hire</a>{btn("Decline", () => decide("deny"))}</div>;
     else if (p.kind === "lease") actions = <div className="acts">{btn("Hand it back", () => decide("approve", "once"), true)}{btn("Keep control", () => decide("deny"))}<a className="small faint" href={`#/live/${p.bot_id}`} style={{ marginLeft: "auto" }}>Open live view</a></div>;
     else if (p.kind === "site") actions = <>{noteInput}<div className="acts">
       {p.thread_id && btn("Allow once (this thread)", () => decide("approve", "thread"))}
@@ -62,7 +76,7 @@ export function PitCard({ p: given, onDone }: { p: PitStop; onDone?: (r: PitStop
     <div className={`pit ${done ? "done" : ""}`}>
       <div className="spread">
         <div className="row"><Face b={b} size="sm" mood={done ? "idle" : "needs"} /><b>{b?.name || p.bot_id}</b><EffectChip kind={p.effect} /></div>
-        <span className="pc-m small faint">{done ? `${p.status} ${ago(p.decided_at)}` : `expires ${when(p.expires_at)}`}</span>
+        <span className="pc-m small faint">{done ? `${p.kind === "engram" && p.note ? p.note : p.status} ${ago(p.decided_at)}` : p.kind === "engram" ? "from Engram" : `expires ${when(p.expires_at)}`}</span>
       </div>
       <p className="t">{p.title}</p>
       {body}

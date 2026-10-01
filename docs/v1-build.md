@@ -79,6 +79,26 @@ Known: Codex's `aggregatedOutput` on remote commands can miss the first lines (t
   "Research - orchestration".
 - Designs: Draft canvas "Pitcrew — Screens", boards 20–22.
 
+## 2026-10-02 — Engram link (Engram M3–M5, Pitcrew side)
+
+Off until Settings → Engram has a URL (default `https://engram.example.com`) and a link token; the token is
+tested (`GET /link/inbox`) before it is saved, encrypted like provider keys. Private members never join.
+
+- **Inbox mirror:** every 60 s, `/link/inbox` → pit stops of kind and effect `engram` (id `eg_<proposal id>`, so no
+  duplicates); Keep current / Accept / Reject go to `POST /link/inbox/:id`; a proposal gone from Engram (or a 404/409 on
+  deciding) closes its pit stop. The kill switch, batch decide and restarts leave them alone.
+- **Digest card** on the Pit wall from `/link/digest`, fetched at most hourly, last one kept.
+- **Members:** each gets its own token (`POST /link/members`, Rotate in Settings; a 409 means revoked in Engram and is
+  not retried). With a token, its Codex config has only `[mcp_servers.engram]` (`<url>/mcp`, `MCP_TOKEN_ENGRAM`); no
+  upstream connector token reaches the brain. Without one (unlinked, private, revoked) the old connector list is used.
+- **Thread start/resume:** `GET /link/sync` (at most once per member per 5 min): the Chief's instructions get the
+  profile (cut to 6 KB), every linked member a skills index (2 KB), and the skills are written to
+  `<brain home>/.agents/skills/<name>/SKILL.md` with a `.engram-managed` marker; unmarked skills are never touched.
+- **Move memories to Engram** (Settings): memories with their `created_at`, then Library files from `out/` and
+  `downloads/` (≤ 6 MB) per member; what was sent is recorded (`engram_sent`), so a rerun sends only what's new.
+  Pitcrew's own memories stay.
+- Tests: `tests/engram.test.mjs` against a stub link server.
+
 ## Status — deployed 2026-10-01
 
 Live at https://pitcrew.example.com (Traefik file-provider router → `172.17.0.1:8330`, Let's Encrypt cert issued on first request). First-run setup (setup token → password) is left for Jai.

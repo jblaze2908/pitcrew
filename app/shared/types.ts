@@ -5,7 +5,7 @@ export type Hue = "c1" | "c2" | "c3" | "c5" | "c6";
 export type Shape = "square" | "round" | "blob";
 export type Mood = "idle" | "working" | "needs" | "done" | "failed" | "sleep";
 export type ProviderId = "openrouter" | "aigateway" | "openai";
-export type Effect = "read" | "draft" | "browse" | "write_workspace" | "signin" | "install" | "send" | "pay" | "delete" | "share" | "exec_untrusted" | "hire" | "plan_limit" | "unknown";
+export type Effect = "read" | "draft" | "browse" | "write_workspace" | "signin" | "install" | "send" | "pay" | "delete" | "share" | "exec_untrusted" | "hire" | "plan_limit" | "engram" | "unknown";
 export type Decision = "allow" | "ask" | "block";
 
 export interface Personality {
@@ -37,7 +37,7 @@ export interface ProviderStatus {
 
 export interface PitStop {
   id: string; bot_id: string; thread_id: string | null; turn_id: string | null;
-  kind: "command" | "mcp" | "file" | "hire" | "lease" | "site" | "plan" | string;
+  kind: "command" | "mcp" | "file" | "hire" | "lease" | "site" | "plan" | "engram" | string;
   effect: Effect | string; title: string; detail: Record<string, any>; jev: Record<string, any>;
   status: "pending" | "approved" | "denied" | "expired"; scope: string | null; note: string | null;
   created_at: number; expires_at: number; decided_at: number | null;
@@ -48,6 +48,7 @@ export interface State {
   driverName: string; paused: boolean; defaultProvider: ProviderId; plainVoice: boolean; plans: boolean;
   bots: BotCard[]; pitstops: PitStop[]; providers: Record<ProviderId, ProviderStatus>;
   today: { usd: number; runs: number }; week: { usd: number; runs: number }; weekCap: number; computersUp: number;
+  engram: { linked: boolean; url: string };
 }
 
 export type ThreadStatus = "idle" | "running" | "needs";
@@ -159,3 +160,31 @@ export interface StreamEvents {
   context: { threadId: string; tokens: number; window: number };
 }
 export type StreamType = keyof StreamEvents;
+
+// ---------- Engram link (Engram's own shapes, as Pitcrew keeps them) ----------
+/** An Engram proposal mirrored as a pit stop: PitStop.detail.proposal for kind "engram". */
+export interface EngramProposal {
+  id: string; kind: string; title: string; scope: string; area: string; reasons: string[]; held: boolean;
+  source: { kind: string; label: string } | null; replaces: { text: string; source: string | null } | null; text: string | null;
+}
+export type EngramDecision = "accept" | "keep" | "reject";
+export interface EngramDigest {
+  week: string; from: string; to: string; built_at: number;
+  waiting: { open: number; held: number };
+  runningOut: { date: string; text: string; area: string }[];
+  changed: { text: string; detail: string; tone: "normal" | "bad" }[];
+  openLoops: { text: string; area: string }[];
+  journal: { day: string; lines: string[] }[];
+}
+export interface EngramMigration {
+  running: boolean; line: string; startedAt: number | null; endedAt: number | null;
+  summary: { name: string; memories: number; files: number; skipped: number; tooBig: number; failed: number }[] | null;
+}
+export interface EngramStatus {
+  linked: boolean; url: string; defaultUrl: string; updatedAt: number | null;
+  test: { ok: boolean; detail: string; at: number } | null;
+  poll: { ok: boolean; detail: string; at: number } | null;
+  members: { id: string; name: string; hue: Hue; shape: Shape; private: boolean; linked: boolean; revoked: boolean; agent: string | null; prefix: string | null; at: number | null }[];
+  sent: { memories: number; files: number };
+  migration: EngramMigration;
+}

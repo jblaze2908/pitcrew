@@ -12,7 +12,8 @@ import { tickSchedules } from "./schedules.js";
 export async function killSwitch() {
   setSetting("paused", "1");
   const inFlight = [...active.keys()].map((t) => ({ threadId: t, title: getThread(t)?.title }));
-  for (const ps of all<{ id: string }>("SELECT id FROM pitstops WHERE status='pending' AND kind!='hire'")) await decide(ps.id, "deny", { note: "Kill switch" });
+  // Hires and Engram proposals hold no running work; the kill switch leaves them for the driver.
+  for (const ps of all<{ id: string }>("SELECT id FROM pitstops WHERE status='pending' AND kind NOT IN ('hire','engram')")) await decide(ps.id, "deny", { note: "Kill switch" });
   await Promise.all([...active.keys()].map((t) => interrupt(t)));
   await Promise.all([...allComputers().map((c) => c.stop()), ...allBrains().map((x) => x.stop())]);
   audit("driver", "killswitch", { inFlight });
@@ -23,7 +24,7 @@ export function resumeCrew() { setSetting("paused", "0"); audit("driver", "crew.
 
 export function bootRuntime() {
   // Pit stops from a previous process can't be answered: their Codex requests died with the computers.
-  for (const ps of all<{ id: string }>("SELECT id,thread_id FROM pitstops WHERE status='pending' AND kind!='hire'")) run("UPDATE pitstops SET status='expired', note='Control plane restarted', decided_at=? WHERE id=?", now(), ps.id);
+  for (const ps of all<{ id: string }>("SELECT id,thread_id FROM pitstops WHERE status='pending' AND kind NOT IN ('hire','engram')")) run("UPDATE pitstops SET status='expired', note='Control plane restarted', decided_at=? WHERE id=?", now(), ps.id);
   run("UPDATE turns SET status='failed', error='Control plane restarted', ended_at=? WHERE status IN ('starting','running')", now());
   run("UPDATE threads SET status='idle' WHERE status!='idle'"); // also clears pre-v1.2 'done'/'failed' thread states
   // Name threads left untitled (from before naming existed, or still on small talk) from their first real message.

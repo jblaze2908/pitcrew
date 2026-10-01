@@ -11,7 +11,7 @@ import { onRequest } from "./requests.js";
 import { releaseLease } from "./lease.js";
 import type { Bot } from "../../shared/types.js";
 
-export function isBusy(c: Computer) { return [...active.keys()].some((t) => getThread(t)?.bot_id === c.bot.id) || one("SELECT 1 FROM pitstops WHERE bot_id=? AND status='pending' AND kind!='hire'", c.bot.id); }
+export function isBusy(c: Computer) { return [...active.keys()].some((t) => getThread(t)?.bot_id === c.bot.id) || one("SELECT 1 FROM pitstops WHERE bot_id=? AND status='pending' AND kind NOT IN ('hire','engram')", c.bot.id); }
 export const isThinking = (botId: string) => [...active.keys()].some((t) => getThread(t)?.bot_id === botId);
 
 const brainHooks: BrainHooks = {

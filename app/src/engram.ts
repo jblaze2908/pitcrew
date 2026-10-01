@@ -1,0 +1,415 @@
+// The Engram link (Engram milestones M3–M5): Engram's inbox mirrored as pit stops, the weekly digest, a token and MCP
+// server per member, profile and skills at thread start, and the one-shot memory move. Off until a link token is saved.
+// Engram's answers are untrusted data: size-capped, zod-shaped, cut to length; tokens never leave the secret store.
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, lstatSync, existsSync, chownSync, realpathSync, openSync, fstatSync, closeSync, constants, type Stats } from "node:fs";
+import { createHash } from "node:crypto";
+import { basename } from "node:path";
+import { z } from "zod";
+import { one, all, run, now, json, audit, getSetting, setSetting } from "./db.js";
+import { getSecret, putSecret, deleteSecret, secretMeta, httpErr, type HttpError } from "./auth.js";
+import { listBots } from "./crew.js";
+import { botDir, brainDir, brainUid, listFiles, allBrains } from "./computer.js";
+import { DEFAULT_URL, LINK_SECRET, memberSecret, engramUrl, linked, normaliseUrl } from "./engramStore.js";
+import { bus } from "./runtime/bus.js";
+import { active } from "./runtime/state.js";
+import type { Bot, EngramDecision, EngramDigest, EngramMigration, EngramProposal, EngramStatus, PitStop } from "../shared/types.js";
+import type { PitstopRow, MemoryRow } from "./models.js";
+
+const MAX_BYTES = 2 << 20, FILE_MAX = 6 << 20, PROFILE_MAX = 6000, SKILLS_INDEX_MAX = 2000;
+const POLL_MS = 60000, DIGEST_MS = 3600000, SYNC_MS = 5 * 60000;
+const GONE = "Decided in Engram", MARKER = ".engram-managed";
+const TOKEN = /^[\x21-\x7e]{16,500}$/;
+
+// ---------- HTTP ----------
+const clean = (s: string, n: number) => s.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "").slice(0, n);
+type Upstream = HttpError & { upstream?: number };
+interface CallOpts { method?: string; body?: unknown; token?: string | null; base?: string; timeoutMs?: number }
+async function readCapped(res: Response) {
+  const chunks: Buffer[] = []; let n = 0;
+  if (res.body) for await (const ch of res.body as unknown as AsyncIterable<Uint8Array>) { n += ch.length; if (n > MAX_BYTES) throw httpErr(502, "Engram's answer was too large"); chunks.push(Buffer.from(ch)); }
+  return Buffer.concat(chunks);
+}
+// One request to Engram's link API. redirect: "error" so the bearer never follows a redirect to another host.
+async function call(path: string, { method = "GET", body, token, base = engramUrl(), timeoutMs = 10000 }: CallOpts = {}): Promise<unknown> {
+  const key = token ?? getSecret(LINK_SECRET);
+  if (!key) throw httpErr(400, "Engram isn't linked");
+  const ctrl = new AbortController(), t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${base}${path}`, { method, redirect: "error", signal: ctrl.signal, body: body === undefined ? undefined : JSON.stringify(body),
+      headers: { Authorization: `Bearer ${key}`, Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }) } });
+    const buf = await readCapped(res);
+    let data: any = null; try { data = buf.length ? JSON.parse(buf.toString("utf8")) : null; } catch {}
+    if (!res.ok) { const e: Upstream = httpErr(502, `Engram said ${res.status}${typeof data?.error === "string" ? `: ${clean(data.error, 160)}` : ""}`); e.upstream = res.status; throw e; }
+    return data;
+  } catch (e: any) {
+    if (e.status) throw e;
+    throw httpErr(502, `Couldn't reach Engram: ${e.name === "AbortError" ? "timed out" : clean(String(e.message), 120)}`);
+  } finally { clearTimeout(t); }
+}
+function shape<S extends z.ZodType>(schema: S, data: unknown, what: string): z.output<S> {
+  const r = schema.safeParse(data);
+  if (!r.success) throw httpErr(502, `Engram sent an unexpected ${what}`);
+  return r.data;
+}
+
+// ---------- shapes (Engram's app/shared/types.ts, trimmed to what Pitcrew uses) ----------
+const cut = (n: number) => z.string().transform((s) => clean(s, n));
+// An array whose bad items are dropped, not fatal, then capped.
+const list = <T extends z.ZodType>(item: T, n: number) => z.array(z.unknown()).catch([]).transform((a) => a.flatMap((x) => { const r = item.safeParse(x); return r.success ? [r.data as z.output<T>] : []; }).slice(0, n));
+const Id = z.string().regex(/^[\w-]{1,100}$/);
+const Src = z.object({ kind: cut(20), label: cut(200) }).nullish().catch(null);
+const ProposalZ = z.object({
+  id: Id, kind: cut(20), agent: z.string().nullish().catch(null), title: cut(300), scope: cut(20), area: cut(60).catch(""),
+  data: z.record(z.string(), z.unknown()).nullish().catch(null), source: Src, reasons: list(cut(300), 10), held: z.boolean().catch(false),
+  replaces: z.object({ text: cut(1000), source: Src }).nullish().catch(null), status: z.string().optional(),
+});
+const InboxZ = z.object({ proposals: z.array(z.unknown()).max(1000) });
+const DigestZ = z.object({
+  week: cut(20), from: cut(20), to: cut(20), built_at: z.number().catch(0),
+  waiting: z.object({ open: z.number(), held: z.number() }).catch({ open: 0, held: 0 }),
+  runningOut: list(z.object({ date: cut(20), text: cut(300), area: cut(60).catch("") }), 20),
+  changed: list(z.object({ text: cut(300), detail: cut(300).catch(""), tone: z.enum(["normal", "bad"]).catch("normal") }), 20),
+  openLoops: list(z.object({ text: cut(300), area: cut(60).catch("") }), 20),
+  journal: list(z.object({ day: cut(20), lines: list(cut(300), 20) }), 7),
+});
+const NewTokenZ = z.object({ agent: z.object({ id: Id, token_prefix: z.string().max(40).nullish().catch(null) }), token: z.string().regex(TOKEN) });
+const SkillZ = z.object({ name: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/), version: z.number().catch(1), body: z.string().max(64 << 10) });
+const SyncZ = z.object({ profile: z.object({ text: z.string() }).catch({ text: "" }), skills: list(SkillZ, 30) });
+
+// ---------- settings ----------
+let lastTest: EngramStatus["test"] = null, lastPoll: EngramStatus["poll"] = null;
+
+async function testWith(base: string, token: string) {
+  try {
+    const r = shape(InboxZ, await call("/link/inbox", { base, token }), "inbox");
+    lastTest = { ok: true, detail: `Linked · ${r.proposals.length} open in Engram's inbox`, at: now() };
+  } catch (e: any) { lastTest = { ok: false, detail: e.upstream === 401 || e.upstream === 403 ? "Engram refused the token" : e.message, at: now() }; }
+  return lastTest;
+}
+export const testLink = () => { const k = getSecret(LINK_SECRET); if (!k) throw httpErr(400, "Engram isn't linked"); return testWith(engramUrl(), k); };
+
+// Nothing is saved unless Engram accepts the token. A new address drops the old address's member tokens.
+export async function setLink(urlIn: unknown, tokenIn: unknown) {
+  const url = normaliseUrl(urlIn || DEFAULT_URL);
+  if (!url) throw httpErr(400, "Use an https:// address for Engram");
+  const given = typeof tokenIn === "string" ? tokenIn.trim() : "", key = given || (url === engramUrl() ? getSecret(LINK_SECRET) : null);
+  if (!key) throw httpErr(400, "Paste the link token from Engram → Agents → Link Pitcrew");
+  if (!TOKEN.test(key)) throw httpErr(400, "That doesn't look like an Engram token");
+  const t = await testWith(url, key);
+  if (!t.ok) return status();
+  if (url !== engramUrl()) dropMembers();
+  setSetting("engram_url", url); putSecret(LINK_SECRET, key);
+  audit("driver", "engram.linked", { url });
+  await linkMissing();
+  tick().catch(() => {});
+  return status();
+}
+
+export function unlink() {
+  const ids = dropMembers();
+  deleteSecret(LINK_SECRET);
+  run("DELETE FROM settings WHERE key='engram_digest'");
+  for (const p of all<{ id: string }>("SELECT id FROM pitstops WHERE kind='engram' AND status='pending'")) closePit(p.id, "Engram unlinked");
+  for (const id of ids) try { writeSkills(id, []); } catch {}
+  lastTest = lastPoll = null;
+  audit("driver", "engram.unlinked");
+  return status();
+}
+function dropMembers() {
+  const ids = all<{ name: string }>("SELECT name FROM secrets WHERE name LIKE 'engram_member:%'").map((r) => r.name.slice("engram_member:".length));
+  for (const id of ids) { deleteSecret(memberSecret(id)); restartIdle(id); }
+  run("DELETE FROM engram_members"); run("DELETE FROM settings WHERE key LIKE 'engram_revoked:%'");
+  synced.clear();
+  return ids;
+}
+
+export function status(): EngramStatus {
+  const meta = secretMeta(LINK_SECRET);
+  const rows = new Map(all<{ bot_id: string; agent_id: string; token_prefix: string | null; created_at: number }>("SELECT * FROM engram_members").map((r) => [r.bot_id, r]));
+  const sent = (kind: string) => one<{ n: number }>("SELECT COUNT(*) n FROM engram_sent WHERE kind=?", kind)!.n;
+  return {
+    linked: !!meta, url: engramUrl(), defaultUrl: DEFAULT_URL, updatedAt: meta?.updated_at ?? null, test: lastTest, poll: lastPoll,
+    members: listBots().map((b) => {
+      const r = secretMeta(memberSecret(b.id)) ? rows.get(b.id) : undefined;
+      return { id: b.id, name: b.name, hue: b.hue, shape: b.shape, private: b.private, linked: !!r, revoked: !r && revoked(b.id), agent: r?.agent_id ?? null, prefix: r?.token_prefix ?? null, at: r?.created_at ?? null };
+    }),
+    sent: { memories: sent("memory"), files: sent("file") }, migration: job,
+  };
+}
+
+// ---------- members ----------
+// Creates or rotates the member's Engram agent. Its new token reaches Codex at the next brain start, so an idle brain stops now.
+export async function linkMember(b: Bot, by = "driver") {
+  if (b.private) throw httpErr(400, `${b.name} is private: private members aren't linked to Engram`);
+  let res: unknown;
+  try { res = await call("/link/members", { method: "POST", body: { pitcrew_id: b.id, name: b.name, hue: b.hue, area: null } }); }
+  catch (e: any) {
+    // Revoked in Engram: never retried on its own; the driver's Rotate asks again.
+    // Its old token is dead too, so the member goes back to its own connectors.
+    if (e.upstream === 409) { unlinkMember(b.id); setSetting(`engram_revoked:${b.id}`, "1"); throw httpErr(409, `${b.name} was revoked in Engram`); }
+    throw e;
+  }
+  const r = shape(NewTokenZ, res, "member token");
+  run("DELETE FROM settings WHERE key=?", `engram_revoked:${b.id}`);
+  putSecret(memberSecret(b.id), r.token);
+  run("INSERT INTO engram_members(bot_id,agent_id,token_prefix,created_at) VALUES(?,?,?,?) ON CONFLICT(bot_id) DO UPDATE SET agent_id=excluded.agent_id, token_prefix=excluded.token_prefix, created_at=excluded.created_at",
+    b.id, r.agent.id, r.agent.token_prefix ?? null, now());
+  audit(by, "engram.member.token", { botId: b.id, agent: r.agent.id });
+  synced.delete(b.id); restartIdle(b.id);
+}
+// Called before a member's brain starts: a network call only the first time a linked member has no token.
+export async function ensureMemberToken(b: Bot) {
+  if (!linked() || b.private || secretMeta(memberSecret(b.id)) || revoked(b.id)) return;
+  await linkMember(b, "system").catch(() => {});
+}
+const revoked = (botId: string) => getSetting(`engram_revoked:${botId}`) === "1";
+// A member turned private leaves Engram: its token, its Engram skills and its Engram MCP server go at the next brain start.
+export function unlinkMember(botId: string) {
+  if (!secretMeta(memberSecret(botId))) return;
+  deleteSecret(memberSecret(botId)); run("DELETE FROM engram_members WHERE bot_id=?", botId);
+  synced.delete(botId); try { writeSkills(botId, []); } catch {}
+  audit("driver", "engram.member.unlinked", { botId }); restartIdle(botId);
+}
+// After a HIRE pit stop is approved: links whoever has no token yet (one POST per new member).
+export async function linkMissing() {
+  if (!linked()) return;
+  for (const b of listBots()) await ensureMemberToken(b);
+}
+// After a hire or a privacy change, in the background: the member's next brain start has the right connectors.
+export function memberChanged(b: Bot | undefined) {
+  if (!b || !linked()) return;
+  if (b.private) unlinkMember(b.id); else ensureMemberToken(b).catch(() => {});
+}
+function restartIdle(botId: string) {
+  const br = allBrains().find((x) => x.bot.id === botId);
+  if (br?.up && ![...active.keys()].some((t) => one("SELECT 1 FROM threads WHERE id=? AND bot_id=?", t, botId))) br.stop();
+}
+
+// ---------- inbox mirror ----------
+const pitView = (p: PitstopRow): PitStop => ({ ...p, detail: json(p.detail, {}), jev: {}, learn: null });
+function emitPit(id: string) {
+  const p = one<PitstopRow>("SELECT * FROM pitstops WHERE id=?", id);
+  if (p) bus.emit("pitstop", { id, botId: p.bot_id, threadId: null, status: p.status, pitstop: pitView(p) });
+}
+function closePit(id: string, note: string) {
+  run("UPDATE pitstops SET status='expired', note=?, decided_at=? WHERE id=? AND status='pending'", note, now(), id);
+  emitPit(id);
+}
+function toProposal(x: z.output<typeof ProposalZ>): EngramProposal {
+  const text = typeof x.data?.text === "string" ? clean(x.data.text, 1000) : null;
+  return { id: x.id, kind: x.kind, title: x.title, scope: x.scope, area: x.area, reasons: x.reasons, held: x.held, text,
+    source: x.source ? { kind: x.source.kind, label: x.source.label } : null, replaces: x.replaces ? { text: x.replaces.text, source: x.replaces.source?.label ?? null } : null };
+}
+// One proposal, one pit stop (id eg_<proposal id>), however often it is seen. One that comes back after a "gone" reopens.
+function openProposal(x: z.output<typeof ProposalZ>, agents: Map<string, string>) {
+  const id = `eg_${x.id}`, prev = one<{ status: string; note: string | null }>("SELECT status, note FROM pitstops WHERE id=?", id);
+  if (prev) {
+    if (prev.status !== "expired" || prev.note !== GONE) return false;
+    run("UPDATE pitstops SET status='pending', note=NULL, decided_at=NULL WHERE id=?", id);
+  } else {
+    const botId = (x.agent && agents.get(x.agent)) || "chief";
+    run("INSERT INTO pitstops(id,bot_id,thread_id,turn_id,kind,effect,title,detail,jev,created_at,expires_at) VALUES(?,?,NULL,NULL,'engram','engram',?,?,'{}',?,?)",
+      id, botId, x.title || "Engram proposal", JSON.stringify({ proposal: toProposal(x) }), now(), now() + 365 * 86400000);
+    audit("engram", "pitstop.opened", { id, kind: "engram", title: x.title });
+  }
+  emitPit(id);
+  return true;
+}
+export async function mirrorInbox() {
+  const inbox = shape(InboxZ, await call("/link/inbox"), "inbox");
+  const agents = new Map(all<{ bot_id: string; agent_id: string }>("SELECT bot_id, agent_id FROM engram_members").map((r) => [r.agent_id, r.bot_id]));
+  const present = new Set<string>(); let opened = 0, closed = 0;
+  for (const raw of inbox.proposals as any[]) {
+    if (typeof raw?.id === "string" && (raw.status === undefined || raw.status === "open")) present.add(raw.id);
+    const p = ProposalZ.safeParse(raw);
+    if (p.success && p.data.scope !== "private" && (!p.data.status || p.data.status === "open") && openProposal(p.data, agents)) opened++;
+  }
+  for (const ps of all<{ id: string; detail: string }>("SELECT id, detail FROM pitstops WHERE kind='engram' AND status='pending'"))
+    if (!present.has(json(ps.detail, {}).proposal?.id)) { closePit(ps.id, GONE); closed++; }
+  return { open: present.size, opened, closed };
+}
+
+export async function decideProposal(id: string, decision: EngramDecision) {
+  const ps = one<PitstopRow>("SELECT * FROM pitstops WHERE id=? AND kind='engram'", id);
+  if (!ps) throw httpErr(404, "No such pit stop");
+  if (ps.status !== "pending") return pitView(ps);
+  const pid = String(json(ps.detail, {}).proposal?.id || "");
+  try { await call(`/link/inbox/${encodeURIComponent(pid)}`, { method: "POST", body: { decision } }); }
+  catch (e: any) { if (e.upstream === 404 || e.upstream === 409) { closePit(id, GONE); return pitView(one<PitstopRow>("SELECT * FROM pitstops WHERE id=?", id)!); } throw e; }
+  const note = decision === "accept" ? "Accepted" : decision === "keep" ? "Kept current" : "Rejected";
+  run("UPDATE pitstops SET status=?, scope='once', note=?, decided_at=? WHERE id=? AND status='pending'", decision === "accept" ? "approved" : "denied", note, now(), id);
+  audit("driver", `engram.${decision}`, { id, title: ps.title });
+  emitPit(id);
+  return pitView(one<PitstopRow>("SELECT * FROM pitstops WHERE id=?", id)!);
+}
+
+// ---------- digest ----------
+type Cached = { at: number; digest: EngramDigest };
+let digesting: Promise<unknown> | null = null;
+export async function refreshDigest() {
+  const d = shape(DigestZ, await call("/link/digest"), "digest");
+  setSetting("engram_digest", JSON.stringify({ at: now(), digest: d }));
+  return d;
+}
+// Fetched at most hourly (the poll refreshes it); a failed refresh keeps showing the last digest.
+export async function digest(): Promise<Cached | null> {
+  if (!linked()) return null;
+  const c = json<Cached | null>(getSetting("engram_digest"), null);
+  if (!c || now() - c.at > DIGEST_MS) try { await (digesting ??= refreshDigest().finally(() => { digesting = null; })); } catch {}
+  return json<Cached | null>(getSetting("engram_digest"), null) ?? c;
+}
+
+// ---------- profile and skills at thread start ----------
+interface Ctx { profile: string | null; skills: { name: string; description: string }[] }
+const synced = new Map<string, { tried: number; good: Ctx | null }>();
+// Per thread start or resume (never per turn): at most one GET /link/sync per member per 5 minutes, 4 s timeout;
+// a failure keeps the last good bundle. The Chief also gets the profile, cut on a line to PROFILE_MAX.
+export async function threadContext(b: Bot): Promise<Ctx | null> {
+  if (!linked() || b.private || !secretMeta(memberSecret(b.id))) return null;
+  let s = synced.get(b.id);
+  if (!s || now() - s.tried > SYNC_MS) {
+    const tried = now();
+    try {
+      const bundle = shape(SyncZ, await call(`/link/sync?pitcrew_id=${encodeURIComponent(b.id)}`, { timeoutMs: 4000 }), "sync bundle");
+      s = { tried, good: { profile: fitProfile(bundle.profile.text), skills: writeSkills(b.id, bundle.skills) } };
+    } catch { s = { tried, good: s?.good ?? null }; }
+    synced.set(b.id, s);
+  }
+  return s.good && { profile: b.kind === "chief" ? s.good.profile : null, skills: s.good.skills };
+}
+function fitProfile(text: string) {
+  const t = clean(text, 1 << 20).trim();
+  if (t.length <= PROFILE_MAX) return t || null;
+  return `${t.slice(0, t.lastIndexOf("\n", PROFILE_MAX) > 0 ? t.lastIndexOf("\n", PROFILE_MAX) : PROFILE_MAX)}\n(cut to fit)`;
+}
+export const skillsIndex = (skills: Ctx["skills"]) => {
+  let out = "";
+  for (const s of skills) { const line = `- $${s.name}: ${s.description}\n`; if (out.length + line.length > SKILLS_INDEX_MAX) break; out += line; }
+  return out.trimEnd();
+};
+
+// Codex reads user skills from $HOME/.agents/skills; HOME is the member's brain home (computer.ts).
+export const skillsDir = (botId: string) => `${brainDir(botId)}/home/.agents/skills`;
+// The brain's uid can write its own home, so every path component is checked for symlinks before root writes through it.
+function realDir(p: string) {
+  try { if (lstatSync(p).isSymbolicLink()) return false; } catch { mkdirSync(p); }
+  return lstatSync(p).isDirectory();
+}
+function skillFile(s: z.output<typeof SkillZ>) {
+  const fm = /^---\n([\s\S]*?)\n---\n/.exec(s.body);
+  const desc = fm && /^description:\s*(.+)$/m.exec(fm[1])?.[1];
+  if (fm && /^name:/m.test(fm[1]) && desc) return { text: s.body, description: clean(desc.replace(/^["']|["']$/g, ""), 200) };
+  const first = s.body.split("\n").map((l) => l.replace(/^#+\s*/, "").trim()).find(Boolean) || s.name, description = clean(first, 200);
+  return { text: `---\nname: ${s.name}\ndescription: ${JSON.stringify(description)}\n---\n\n${s.body}`, description };
+}
+// Writes each granted skill with a marker; removes marked skills no longer granted; never touches a skill without the marker.
+export function writeSkills(botId: string, skills: z.output<typeof SkillZ>[]) {
+  const home = `${brainDir(botId)}/home`, root = skillsDir(botId), uid = brainUid(botId);
+  const own = (p: string) => { try { chownSync(p, uid, 1500); } catch {} };
+  mkdirSync(home, { recursive: true });
+  if (!realDir(home) || !realDir(`${home}/.agents`) || !realDir(root)) return [];
+  own(`${home}/.agents`); own(root);
+  const keep = new Set<string>(), index: Ctx["skills"] = [];
+  for (const s of skills) {
+    const dir = `${root}/${s.name}`;
+    let st: Stats | null = null; try { st = lstatSync(dir); } catch {}
+    if (st && (!st.isDirectory() || !existsSync(`${dir}/${MARKER}`))) continue;
+    if (!st) mkdirSync(dir);
+    own(dir);
+    const f = skillFile(s);
+    for (const [name, text] of [["SKILL.md", f.text], [MARKER, `engram skill v${s.version}\n`]]) {
+      rmSync(`${dir}/${name}`, { force: true }); // a link planted here is removed, never written through
+      writeFileSync(`${dir}/${name}`, text, { flag: "wx" }); own(`${dir}/${name}`);
+    }
+    keep.add(s.name); index.push({ name: s.name, description: f.description });
+  }
+  for (const e of readdirSync(root, { withFileTypes: true }))
+    if (e.isDirectory() && !keep.has(e.name) && existsSync(`${root}/${e.name}/${MARKER}`)) rmSync(`${root}/${e.name}`, { recursive: true, force: true });
+  return index;
+}
+
+// ---------- Move memories to Engram ----------
+let job: EngramMigration = { running: false, line: "", startedAt: null, endedAt: null, summary: null };
+const sha = (b: string | Buffer) => createHash("sha256").update(b).digest("hex");
+const wasSent = (botId: string, kind: string, ref: string) => !!one("SELECT 1 FROM engram_sent WHERE bot_id=? AND kind=? AND ref=?", botId, kind, ref);
+const markSent = (botId: string, kind: string, ref: string) => run("INSERT OR IGNORE INTO engram_sent(bot_id,kind,ref,sent_at) VALUES(?,?,?,?)", botId, kind, ref, now());
+const MIME: Record<string, string> = { pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif", txt: "text/plain", md: "text/markdown", csv: "text/csv", html: "text/html", json: "application/json" };
+const mimeOf = (p: string) => MIME[p.split(".").pop()!.toLowerCase()] || "application/octet-stream";
+const kindOf = (p: string, mime: string) => /receipt|invoice|bill|order/i.test(p) ? "receipt" : /statement/i.test(p) ? "statement" : /report/i.test(p) ? "report" : mime.startsWith("image/") ? "screenshot" : "document";
+
+// Library receipts: what the member made for the driver (out/) or downloaded (downloads/).
+const libraryFiles = (botId: string) => listFiles(botId).filter((f) => /^(out|downloads)\//.test(f.path));
+// Read inside the member's workspace only: the path resolves under work/ and the file itself is no link.
+function readWork(botId: string, rel: string) {
+  const base = realpathSync(`${botDir(botId)}/work`), full = realpathSync(`${base}/${rel}`);
+  if (!full.startsWith(base + "/")) return null;
+  const fd = openSync(full, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try { const st = fstatSync(fd); return st.isFile() && st.size <= FILE_MAX ? readFileSync(fd) : null; } finally { closeSync(fd); }
+}
+
+export const migration = () => job;
+// Runs in the background; GET /api/engram shows its progress line. Private members are skipped, and nothing in
+// Pitcrew is deleted. What was sent is recorded, so a second run sends only what's new (Engram dedupes as well).
+export function startMigration() {
+  if (!linked()) throw httpErr(400, "Link Engram first");
+  if (job.running) return job;
+  job = { running: true, line: "Starting…", startedAt: now(), endedAt: null, summary: [] };
+  migrating = migrate().catch((e) => { job.line = `Stopped: ${e.message}`; }).finally(() => {
+    job.running = false; job.endedAt = now();
+    audit("driver", "engram.migrated", { members: job.summary?.map((s) => ({ name: s.name, memories: s.memories, files: s.files, failed: s.failed })) });
+  });
+  return job;
+}
+let migrating: Promise<void> | null = null;
+export const migrationDone = () => migrating;
+async function migrate() {
+  for (const b of listBots().filter((x) => !x.private)) {
+    const row = { name: b.name, memories: 0, files: 0, skipped: 0, tooBig: 0, failed: 0 };
+    job.summary!.push(row);
+    if (!secretMeta(memberSecret(b.id))) try { await linkMember(b); } catch (e: any) { job.line = `${b.name}: ${e.message}`; }
+    const mems = all<Pick<MemoryRow, "id" | "text" | "created_at">>("SELECT id,text,created_at FROM memory WHERE bot_id=? AND forgotten_at IS NULL ORDER BY created_at", b.id);
+    const ref = (m: { id: string; text: string }) => `${m.id}:${sha(m.text).slice(0, 16)}`;
+    const todo = mems.filter((m) => !wasSent(b.id, "memory", ref(m)));
+    row.skipped += mems.length - todo.length;
+    for (let i = 0; i < todo.length; i += 50) {
+      const batch = todo.slice(i, i + 50);
+      job.line = `${b.name}: memories ${i + batch.length} of ${todo.length}`;
+      try {
+        const res: any = await call("/link/import/memories", { method: "POST", timeoutMs: 30000, body: { pitcrew_id: b.id, items: batch.map((m) => ({ text: m.text, created_at: m.created_at })) } });
+        for (const m of batch) markSent(b.id, "memory", ref(m));
+        const dup = Number.isInteger(res?.duplicates) ? Math.min(res.duplicates, batch.length) : 0;
+        row.memories += batch.length - dup; row.skipped += dup;
+      } catch { row.failed += batch.length; }
+    }
+    const files = libraryFiles(b.id);
+    for (const [i, f] of files.entries()) {
+      job.line = `${b.name}: files ${i + 1} of ${files.length}`;
+      if (f.size > FILE_MAX) { row.tooBig++; continue; }
+      let buf: Buffer | null = null; try { buf = readWork(b.id, f.path); } catch {}
+      if (!buf) { row.failed++; continue; }
+      const r = `${f.path}#${sha(buf).slice(0, 16)}`;
+      if (wasSent(b.id, "file", r)) { row.skipped++; continue; }
+      const mime = mimeOf(f.path);
+      try {
+        await call("/link/import/artifacts", { method: "POST", timeoutMs: 60000, body: { pitcrew_id: b.id, title: basename(f.path), kind: kindOf(f.path, mime), mime, content_base64: buf.toString("base64"), created_at: Math.round(f.mtime) } });
+        markSent(b.id, "file", r); row.files++;
+      } catch { row.failed++; }
+    }
+  }
+  const t = job.summary!.reduce((a, s) => ({ m: a.m + s.memories, f: a.f + s.files, x: a.x + s.failed }), { m: 0, f: 0, x: 0 });
+  job.line = `Done: ${t.m} memories and ${t.f} files sent${t.x ? `, ${t.x} failed (run it again to retry)` : ""}.`;
+}
+
+// ---------- the poll ----------
+let ticking = false;
+// Every 60 s: when unlinked, one secret lookup and nothing else; linked, one GET /link/inbox and the digest when stale.
+export async function tick() {
+  if (!linked() || ticking) return;
+  ticking = true;
+  try {
+    const r = await mirrorInbox();
+    lastPoll = { ok: true, detail: `${r.open} open in Engram`, at: now() };
+  } catch (e: any) { lastPoll = { ok: false, detail: e.message, at: now() }; }
+  try { await digest(); } catch {} finally { ticking = false; }
+}
+export function startEngram() { setInterval(() => { tick().catch(() => {}); }, POLL_MS).unref(); setTimeout(() => { tick().catch(() => {}); }, 5000).unref(); }

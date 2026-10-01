@@ -10,6 +10,7 @@ import { crewRoutes } from "./crew.js";
 import { threadRoutes } from "./threads.js";
 import { pitstopRoutes } from "./pitstops.js";
 import { fileRoutes } from "./files.js";
+import { engramRoutes } from "./engram.js";
 
 export const api = new Hono<Env>()
   .use("/api/*", deliver)
@@ -18,7 +19,8 @@ export const api = new Hono<Env>()
   .route("/", crewRoutes)
   .route("/", threadRoutes)
   .route("/", pitstopRoutes)
-  .route("/", fileRoutes);
+  .route("/", fileRoutes)
+  .route("/", engramRoutes);
 export type AppType = typeof api;
 
 api.notFound((c) => c.json({ error: "Not found" }, 404));

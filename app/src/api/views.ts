@@ -5,11 +5,13 @@ import * as P from "../providers.js";
 import * as R from "../runtime/index.js";
 import { getBot, listBots, plansOn } from "../crew.js";
 import { allComputers, allBrains } from "../computer.js";
+import { linked, engramUrl } from "../engramStore.js";
 import type { Bot, BotCard, Mood, PitStop, ProviderId, State, ThreadSummary, ThreadView, ThreadEvent } from "../../shared/types.js";
 import type { PitstopRow, EventRow, LearnedRow, SurfaceRow } from "../models.js";
 
-function mood(b: Bot, threads: ThreadSummary[], pending: { bot_id: string }[], up: boolean): Mood {
-  if (pending.some((p) => p.bot_id === b.id)) return "needs";
+// An Engram proposal waits on the driver, not on the member it's filed under, so it doesn't make that member "needs".
+function mood(b: Bot, threads: ThreadSummary[], pending: { bot_id: string; kind?: string }[], up: boolean): Mood {
+  if (pending.some((p) => p.bot_id === b.id && p.kind !== "engram")) return "needs";
   if (threads.some((t) => t.status === "running")) return "working";
   const last = one<{ status: string }>("SELECT status FROM turns WHERE bot_id=? ORDER BY started_at DESC LIMIT 1", b.id)?.status;
   if (last === "failed") return "failed";
@@ -17,7 +19,7 @@ function mood(b: Bot, threads: ThreadSummary[], pending: { bot_id: string }[], u
   return last === "completed" ? "done" : "idle";
 }
 // /api/state needs at most 9 threads a member (wall, sidebar, thread panel); the crew view asks for all of them.
-export function botCard(b: Bot, pending: { bot_id: string }[], limit = -1): BotCard {
+export function botCard(b: Bot, pending: { bot_id: string; kind?: string }[], limit = -1): BotCard {
   const threads = all<ThreadSummary>("SELECT id,title,status,created_at,updated_at,pinned FROM threads WHERE bot_id=? AND archived=0 ORDER BY pinned DESC, updated_at DESC LIMIT ?", b.id, limit);
   const c = allComputers().find((x) => x.bot.id === b.id), br = allBrains().find((x) => x.bot.id === b.id);
   return { ...b, threads, mood: mood(b, threads, pending, !!c?.up || !!br?.up), spend: R.weekSpend(b.id), computer: { up: !!c?.up, desktop: !!c?.desktopUp, startedAt: c?.startedAt ?? null, lease: R.leaseHeld(b.id) } };
@@ -36,6 +38,7 @@ export function state(): State {
     week: one<{ usd: number; runs: number }>("SELECT COALESCE(SUM(cost_usd),0) usd, COUNT(*) runs FROM turns WHERE started_at>=?", R.weekStart())!,
     weekCap: one<{ c: number }>("SELECT COALESCE(SUM(weekly_cap_usd),0) c FROM bots WHERE archived=0")!.c,
     computersUp: allComputers().filter((c) => c.up).length,
+    engram: { linked: linked(), url: engramUrl() },
   };
 }
 export function threadView(id: string): ThreadView {

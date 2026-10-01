@@ -40,7 +40,7 @@ export function PitStops() {
       {data.pending.length ? (
         <div className="col">{data.pending.map((p) => (
           <div key={p.id} className="row" style={{ alignItems: "flex-start", flexWrap: "nowrap" }}>
-            {p.kind !== "hire" ? <input type="checkbox" style={{ marginTop: 22 }} checked={picks.has(p.id)} onChange={(e) => toggle(p.id, e.target.checked)} /> : <span style={{ width: 13 }} />}
+            {p.kind !== "hire" && p.kind !== "engram" ? <input type="checkbox" style={{ marginTop: 22 }} checked={picks.has(p.id)} onChange={(e) => toggle(p.id, e.target.checked)} /> : <span style={{ width: 13 }} />}
             <div style={{ flex: 1 }}><PitCard p={p} /></div>
           </div>))}
         </div>
@@ -57,7 +57,7 @@ export function PitStops() {
             <tr key={p.id}>
               <td className="small faint">{when(p.created_at)}</td><td>{bot(p.bot_id)?.name || p.bot_id}</td><td><EffectChip kind={p.effect} /></td><td>{p.title}</td>
               <td><span className={`pc-chip ${p.status === "approved" ? "ok" : p.status === "denied" ? "bad" : ""}`}>{p.status}</span></td>
-              <td className="small faint">{p.status === "expired" ? "timeout" : p.scope || "once"}</td>
+              <td className="small faint">{p.kind === "engram" ? p.note || "Engram" : p.status === "expired" ? "timeout" : p.scope || "once"}</td>
             </tr>))}
           </tbody>
         </table>

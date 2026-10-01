@@ -1,8 +1,9 @@
-// The pit wall: the front door, your asks, what's waiting on you, spend, and the crew.
+// The pit wall: the front door, your asks, what's waiting on you, Engram's digest, spend, and the crew.
 import { useState } from "react";
 import { AskBox } from "../components/AskBox";
 import { AsksList } from "../components/AsksList";
 import { CrewCard } from "../components/CrewCard";
+import { DigestCard } from "../components/Engram";
 import { PitCard } from "../components/PitCard";
 import { Meter } from "../components/ui";
 import { api } from "../lib/api";
@@ -36,6 +37,7 @@ export function Wall() {
           <div className="spread"><p className="pc-lab">Box, box: waiting on you</p>{n > 1 && <a className="small faint" href="#/pitstops">Batch decide</a>}</div>
           <div className="grid2">{S.pitstops.slice(0, 6).map((p) => <PitCard key={p.id} p={p} />)}</div>
         </section>)}
+      {S.engram.linked && <DigestCard />}
       <div className="grid3">
         <div className="pc-card col"><p className="pc-lab">Today</p><span className="big num">{usd(S.today.usd)}</span><p className="small muted">{`${plural(S.today.runs, "run")} · billed cost where the provider reports it`}</p></div>
         <div className="pc-card col"><p className="pc-lab">This week</p><span className="big num">{usd(S.week.usd)}</span><Meter pct={(S.week.usd / (S.weekCap || 1)) * 100} /><p className="small muted">{`of ${usd(S.weekCap)} across the crew's caps`}</p></div>

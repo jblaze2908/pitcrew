@@ -6,6 +6,7 @@ import { httpErr } from "../auth.js";
 import * as R from "../runtime/index.js";
 import { getBot, updateBot, normaliseSpec, createBot } from "../crew.js";
 import { listProjects, openProject } from "../code.js";
+import { memberChanged } from "../engram.js";
 import { signedIn, type Env } from "../http/guard.js";
 import { readJson, jsonBody, raw, text, trimmed, flag, field } from "../http/body.js";
 import { botCard, LEARNED, liveLearned } from "./views.js";
@@ -29,13 +30,13 @@ export const crewRoutes = new Hono<Env>()
       schedules: all("SELECT * FROM schedules WHERE bot_id=? ORDER BY created_at DESC", id), rules: all("SELECT * FROM rules WHERE bot_id=? AND revoked_at IS NULL ORDER BY created_at DESC", id), learned: liveLearned(all<LearnedRow>(`${LEARNED} WHERE l.bot_id=? ORDER BY l.updated_at DESC`, id)) });
   })
   // The patch is normalised by updateBot itself (crew.ts), field by field.
-  .patch("/api/bots/:id", signedIn, async (c) => c.json(updateBot(c.req.param("id"), await readJson(c))))
+  .patch("/api/bots/:id", signedIn, async (c) => { const patch = await readJson(c), b = updateBot(c.req.param("id"), patch); if ("private" in patch) memberChanged(b); return c.json(b); })
   .post("/api/bots/:id/archive", signedIn, (c) => {
     const id = c.req.param("id"), b = getBot(id); if (!b || b.kind === "chief") throw httpErr(400, "The Crew Chief can't be retired");
     run("UPDATE bots SET archived=1 WHERE id=?", id); run("UPDATE schedules SET enabled=0 WHERE bot_id=?", id); audit("driver", "crew.retired", { id }); return c.json({ ok: true });
   })
   // Manual hire: the driver filled the form and pressed Hire on the review screen; that is the HITL step.
-  .post("/api/hire", signedIn, async (c) => { const s = normaliseSpec(await readJson(c)); const bot = createBot(s); if (s.schedule?.spec && s.schedule.prompt) R.addSchedule(bot.id, null, s.schedule.spec, s.schedule.prompt); return c.json(bot); })
+  .post("/api/hire", signedIn, async (c) => { const s = normaliseSpec(await readJson(c)); const bot = createBot(s); if (s.schedule?.spec && s.schedule.prompt) R.addSchedule(bot.id, null, s.schedule.spec, s.schedule.prompt); memberChanged(bot); return c.json(bot); })
   .get("/api/bots/:id/projects", signedIn, (c) => { const id = c.req.param("id"); member(id); return c.json(listProjects(id)); })
   .post("/api/bots/:id/projects/open", signedIn, async (c) => { const id = c.req.param("id"); member(id); const b = await jsonBody(c, Project); const r = await openProject(id, b.path); audit("driver", "code.opened", { botId: id, path: r.project.path }); return c.json(r); })
   .get("/api/bots/:id/threads", signedIn, (c) => { const id = c.req.param("id"); member(id); return c.json(R.findThreads(id, c.req.query("q") || "", { limit: 30 })); })
