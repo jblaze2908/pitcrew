@@ -1,6 +1,6 @@
 // SQLite store for the control plane. One file, WAL mode; every write is synchronous and small. synchronous=NORMAL skips
 // the per-commit fsync (0.56 → 0.005 ms, measured): a power cut can lose the last commits, never corrupt the file.
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { randomBytes } from "node:crypto";
 
 export const DATA = process.env.PITCREW_DATA || "/srv/pitcrew/data";
@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS surfaces (
   id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, bot_id TEXT NOT NULL, title TEXT NOT NULL, spec TEXT NOT NULL,
   saved INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, data TEXT NOT NULL);
--- One row per gate decision, for distilling a local classifier. call is redacted before insert (see jev.mjs redact).
+-- One row per gate decision, for distilling a local classifier. call is redacted before insert (see jev.ts redact).
 CREATE TABLE IF NOT EXISTS jev_labels (
   id TEXT PRIMARY KEY, ts INTEGER NOT NULL, bot_id TEXT NOT NULL, thread_id TEXT,
   source TEXT NOT NULL CHECK (source IN ('rule','jev','standing','learned','fail-closed')),
@@ -91,20 +91,27 @@ for (const sql of ["ALTER TABLE turns ADD COLUMN changes TEXT", "ALTER TABLE jev
   "ALTER TABLE plans ADD COLUMN live INTEGER", "ALTER TABLE plans ADD COLUMN swept INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE plans ADD COLUMN limits TEXT", "ALTER TABLE plans ADD COLUMN log TEXT", "ALTER TABLE plans ADD COLUMN sweep TEXT"]) { try { db.exec(sql); } catch {} }
 
-export const now = () => Date.now();
-export const uid = (p) => `${p}_${randomBytes(9).toString("base64url")}`;
-export const one = (sql, ...a) => db.prepare(sql).get(...a);
-export const all = (sql, ...a) => db.prepare(sql).all(...a);
-export const run = (sql, ...a) => db.prepare(sql).run(...a);
-export const json = (s, d = null) => { try { return JSON.parse(s); } catch { return d; } };
+// A row as SQLite returns it; callers name the shape they expect (models.ts).
+export type Row = Record<string, any>;
+type Param = SQLInputValue | undefined;
 
-export const getSetting = (k, d = null) => one("SELECT value FROM settings WHERE key=?", k)?.value ?? d;
-export const setSetting = (k, v) => run("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", k, String(v));
+export const now = () => Date.now();
+export const uid = (p: string) => `${p}_${randomBytes(9).toString("base64url")}`;
+export const one = <T = Row>(sql: string, ...a: Param[]) => db.prepare(sql).get(...(a as SQLInputValue[])) as T | undefined;
+export const all = <T = Row>(sql: string, ...a: Param[]) => db.prepare(sql).all(...(a as SQLInputValue[])) as T[];
+export const run = (sql: string, ...a: Param[]) => db.prepare(sql).run(...(a as SQLInputValue[]));
+// Parsed JSON columns are dynamic; callers that care name T.
+export const json = <T = any>(s: unknown, d: any = null): T => { try { return JSON.parse(s as string); } catch { return d; } };
+
+export function getSetting(k: string, d: string): string;
+export function getSetting(k: string): string | null;
+export function getSetting(k: string, d: string | null = null) { return one<{ value: string }>("SELECT value FROM settings WHERE key=?", k)?.value ?? d; }
+export const setSetting = (k: string, v: unknown) => run("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", k, String(v));
 
 export const LABEL_DAYS = 120;
 export const pruneLabels = (at = now()) => run("DELETE FROM jev_labels WHERE ts<?", at - LABEL_DAYS * 86400000).changes;
 
 // Append-only: nothing in the code base updates or deletes audit rows.
-export function audit(actor, action, data = {}) {
+export function audit(actor: string, action: string, data: Record<string, unknown> = {}) {
   run("INSERT INTO audit(ts,actor,action,data) VALUES(?,?,?,?)", now(), actor, action, JSON.stringify(data));
 }
