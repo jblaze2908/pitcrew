@@ -10,11 +10,11 @@ const root = mkdtempSync(`${tmpdir()}/pitcrew-sites-`);
 mkdirSync(`${root}/data`);
 writeFileSync(`${root}/chrome-policy.json`, JSON.stringify({ URLBlocklist: ["file://*"], SSLErrorOverrideAllowed: false }));
 Object.assign(process.env, { PITCREW_ROOT: root, PITCREW_DATA: `${root}/data`, PITCREW_CHROME_POLICY: `${root}/chrome-policy.json` });
-const S = await import("../app/src/sites.mjs");
-const D = await import("../app/src/domains.mjs");
-const J = await import("../app/src/jev.mjs");
-const R = await import("../app/src/runtime.mjs");
-const { run, one, all, json } = await import("../app/src/db.mjs");
+const S = await import("../app/dist/src/sites.js");
+const D = await import("../app/dist/src/domains.js");
+const J = await import("../app/dist/src/jev.js");
+const R = await import("../app/dist/src/runtime/index.js");
+const { run, one, all, json } = await import("../app/dist/src/db.js");
 
 const b = { id: "b_site", name: "Scout", policy: J.DEFAULT_POLICY };
 run("INSERT INTO bots(id,name,created_at) VALUES('b_site','Scout',0)");
@@ -167,7 +167,7 @@ test("seeded read sites browse freely but fills and posts ask; a deleted preset 
   assert.equal(J.ruleVerdict({ ...at("https://medium.com/new-story", 'button "Publish"'), effect: "send" }, { ...read.policy }).decision, "ask");
   assert.equal(D.effectivePolicy({ ...J.DEFAULT_POLICY, signin: "allow", send: "allow" }, { mode: "read" }).send, "ask");
   D.removeSite("global", "medium.com");
-  const again = await import("../app/src/domains.mjs?restarted");
+  const again = await import("../app/dist/src/domains.js?restarted");
   assert.equal(again.seedPresets(), 0);
   assert.equal(again.siteFor(b.id, "medium.com").mode, "unknown");
 });
