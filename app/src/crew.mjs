@@ -117,6 +117,8 @@ export function dynamicTools(b, manifest = { browser: [], computer: [] }) {
     { type: "function", name: "remember", description: "Save one durable fact or preference the driver told you (one sentence). Pass id to rewrite an existing memory.",
       inputSchema: { type: "object", properties: { text: { type: "string" }, id: { type: "string" } }, required: ["text"] } },
     { type: "function", name: "forget", description: "Forget a memory by id.", inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
+    { type: "function", name: "find_threads", description: "Search your own past threads (titles and transcripts) when the driver asks to find, reopen or resume an earlier conversation. Returns matching threads, best first, with links. Words, names and phrases from that conversation make good queries.",
+      inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "integer" } }, required: ["query"] } },
     { type: "function", name: "schedule_task", description: 'Run a prompt on a schedule in this thread. when: "daily HH:MM", "weekly mon HH:MM", "every N minutes|hours" (min 15 minutes). Times are Asia/Kolkata.',
       inputSchema: { type: "object", properties: { when: { type: "string" }, prompt: { type: "string" } }, required: ["when", "prompt"] } },
   ];
