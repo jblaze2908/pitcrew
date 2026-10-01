@@ -952,6 +952,7 @@ function dispatchPlan(planId) {
 async function startItem(p, it, items) {
   const chief = getBot(one("SELECT bot_id FROM threads WHERE id=?", p.thread_id).bot_id), owner = getBot(it.owner_bot), driver = getSetting("driver_name", "the driver");
   const end = (status, result, cost = 0) => {
+    if (one("SELECT status FROM plan_items WHERE id=?", it.id)?.status === "cancelled") { run("UPDATE plan_items SET cost_usd=cost_usd+? WHERE id=?", cost, it.id); return; }
     run("UPDATE plan_items SET status=?, result=?, cost_usd=cost_usd+?, ended_at=? WHERE id=?", status, JSON.stringify(result), cost, now(), it.id);
     const fresh = planRow(p.id); emitPlan(fresh);
     if (fresh.status !== "running") return;
@@ -1008,12 +1009,18 @@ function planTool(chief, threadId, a) {
     if (it.reopened >= PLAN.reopens) { errs.push(`reopen ${x.key}: already reopened ${PLAN.reopens} times; ask ${getSetting("driver_name", "the driver")} before going again`); continue; }
     run("UPDATE plan_items SET status='todo', task=?, why=?, reopened=reopened+1, history=?, result=NULL WHERE id=?", String(x.task).slice(0, 2000), String(x.why || "").slice(0, 300), JSON.stringify([...it.history, { task: it.task, result: it.result }]), it.id);
   }
-  for (const k of a.cancel || []) run("UPDATE plan_items SET status='cancelled' WHERE plan_id=? AND key=? AND status IN ('todo','failed')", p.id, String(k));
+  // Cancelling a running item stops its run; marked cancelled first so its ending doesn't wake the Chief as a result.
+  for (const k of a.cancel || []) {
+    const it = byKey.get(String(k));
+    if (!it?.status || ["done", "cancelled"].includes(it.status)) continue;
+    run("UPDATE plan_items SET status='cancelled', ended_at=? WHERE id=?", now(), it.id);
+    if (it.status === "doing" && it.to_thread) interrupt(it.to_thread).catch(() => {});
+  }
   if (a.finish) {
     const checks = (a.finish.constraints || []).map((c) => ({ text: String(c.text || "").slice(0, 300), status: ["met", "unmet", "untested"].includes(c.status) ? c.status : "untested", note: String(c.note || "").slice(0, 300) }));
     const missing = p.constraints.filter((c) => !checks.some((k) => k.text.trim().toLowerCase() === c.trim().toLowerCase()));
     if (missing.length) return say(`Not finished: mark every constraint, word for word. Missing: ${missing.join(" | ")}`, false);
-    if (planItems(p.id).some((i) => i.status === "doing")) return say("Not finished: items are still running. Cancel them or wait.", false);
+    if (planItems(p.id).some((i) => i.status === "doing")) return say("Not finished: items are still running. Cancel them (that stops them) or wait.", false);
     run("UPDATE plan_items SET status='cancelled' WHERE plan_id=? AND status='todo'", p.id);
     run("UPDATE plans SET status='done', answer=?, checks=?, ended_at=? WHERE id=?", String(a.finish.answer).slice(0, 4000), JSON.stringify(checks), now(), p.id);
     audit(chief.id, "plan.finished", { id: p.id, spend: planSpend(p).usd });
