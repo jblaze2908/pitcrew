@@ -18,8 +18,14 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
-      - name: Syntax check
-        run: for f in app/src/*.mjs app/web/*.js brain/*.mjs computer/*.mjs computer/pointer/*.js deploy/*.mjs; do node --check "$f"; done
+      - name: Install (control plane)
+        run: npm ci --no-audit --no-fund
+        working-directory: app
+      - name: Typecheck and build (server and web)
+        run: npm run typecheck && npm run build
+        working-directory: app
+      - name: Syntax check (plain JS outside the control plane)
+        run: for f in brain/*.mjs computer/*.mjs computer/pointer/*.js deploy/*.mjs; do node --check "$f"; done
       - name: Unit tests
         run: node --test tests/*.test.mjs
       - name: Shell scripts parse
