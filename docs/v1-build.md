@@ -51,7 +51,7 @@ Measured on the live instance (`deploy/e2e.mjs --only=browser --probe`, temporar
 | Check | Result |
 |---|---|
 | Chat-only turn | no computer started, 6 s |
-| Shell turn | computer up, desktop not; 21 s including cold boot |
+| Shell turn | computer up, desktop not; 6 s for the whole turn. Computer handover (container boot + exec-server session) 334 ms, of which boot 325 ms. A first run showed 21 s: a gateway bug waited out a 15 s timeout on the replayed `initialize`; fixed. |
 | Shell write shows in Files with a diff | yes |
 | Browser chore (navigate, fill, submit, read) | desktop booted on first browser tool; pit stop on `click button "Submit order" on httpbin.org` [send]; no page JS |
 | Cost of that chore | **$0.0315–0.0366 billed** (v1: $0.27 list-price estimate); ~22k input tokens per request with ~97% read from cache |
