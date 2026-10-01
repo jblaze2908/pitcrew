@@ -51,6 +51,14 @@ CREATE TABLE IF NOT EXISTS surfaces (
   id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, bot_id TEXT NOT NULL, title TEXT NOT NULL, spec TEXT NOT NULL,
   saved INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, data TEXT NOT NULL);
+-- One row per gate decision, for distilling a local classifier. call is redacted before insert (see jev.mjs redact).
+CREATE TABLE IF NOT EXISTS jev_labels (
+  id TEXT PRIMARY KEY, ts INTEGER NOT NULL, bot_id TEXT NOT NULL, thread_id TEXT,
+  source TEXT NOT NULL CHECK (source IN ('rule','jev','standing','learned','fail-closed')),
+  call TEXT NOT NULL, verdict TEXT NOT NULL, decision TEXT NOT NULL, pitstop_id TEXT,
+  driver_decision TEXT CHECK (driver_decision IN ('approved','denied','expired')), driver_scope TEXT);
+CREATE INDEX IF NOT EXISTS jev_labels_ts ON jev_labels(ts);
+CREATE INDEX IF NOT EXISTS jev_labels_pitstop ON jev_labels(pitstop_id);
 `);
 
 // Columns added after v1 shipped; ALTER fails harmlessly once they exist.
@@ -65,6 +73,9 @@ export const json = (s, d = null) => { try { return JSON.parse(s); } catch { ret
 
 export const getSetting = (k, d = null) => one("SELECT value FROM settings WHERE key=?", k)?.value ?? d;
 export const setSetting = (k, v) => run("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", k, String(v));
+
+export const LABEL_DAYS = 120;
+export const pruneLabels = (at = now()) => run("DELETE FROM jev_labels WHERE ts<?", at - LABEL_DAYS * 86400000).changes;
 
 // Append-only: nothing in the code base updates or deletes audit rows.
 export function audit(actor, action, data = {}) {
