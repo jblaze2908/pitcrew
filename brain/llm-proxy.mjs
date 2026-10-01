@@ -18,11 +18,11 @@ function rewrite(provider, body) {
   return turn;
 }
 
-function record(bot, provider, model, turn, usage, id, sizes) {
+function record(bot, provider, model, turn, usage, id, sizes, ms) {
   if (!usage) return;
   const d = usage.input_tokens_details || {};
   appendFileSync(`/brains/_usage/${bot}.jsonl`, JSON.stringify({ ts: Date.now(), provider, model, turn, id: id || null, input: usage.input_tokens || 0, cached: d.cached_tokens || 0,
-    cacheWrite: d.cache_write_tokens || 0, output: usage.output_tokens || 0, cost: typeof usage.cost === "number" ? usage.cost : null, sizes }) + "\n");
+    cacheWrite: d.cache_write_tokens || 0, output: usage.output_tokens || 0, cost: typeof usage.cost === "number" ? usage.cost : null, sizes, ms }) + "\n");
 }
 
 createServer(async (req, res) => {
@@ -41,6 +41,8 @@ createServer(async (req, res) => {
     } catch {}
   }
   const headers = { ...req.headers }; delete headers.host; delete headers["content-length"]; delete headers.connection; delete headers["accept-encoding"];
+  // Time to first byte and total, so a turn's wall time splits into model time and everything else.
+  const t0 = Date.now(), ms = { ttfb: null, total: null };
   let up;
   try { up = await fetch(UPSTREAM[provider] + path, { method: req.method, headers, body: ["GET", "HEAD"].includes(req.method) ? undefined : raw }); }
   catch (e) { res.writeHead(502, { "content-type": "application/json" }).end(JSON.stringify({ error: { message: `proxy: ${e.message}` } })); return; }
@@ -51,6 +53,7 @@ createServer(async (req, res) => {
   let tail = "", whole = "";
   const dec = new TextDecoder();
   for await (const chunk of up.body) {
+    ms.ttfb ??= Date.now() - t0;
     res.write(chunk);
     const text = dec.decode(chunk, { stream: true });
     if (sse) {
@@ -59,10 +62,10 @@ createServer(async (req, res) => {
       while ((i = tail.indexOf("\n")) >= 0) {
         const line = tail.slice(0, i); tail = tail.slice(i + 1);
         if (!line.startsWith("data: ") || !line.includes('"usage"')) continue;
-        try { const e = JSON.parse(line.slice(6)); if (/^response\.(completed|incomplete|failed)$/.test(e.type)) record(bot, provider, model, turn, e.response?.usage, e.response?.id, sizes); } catch {}
+        try { const e = JSON.parse(line.slice(6)); if (/^response\.(completed|incomplete|failed)$/.test(e.type)) { ms.total = Date.now() - t0; record(bot, provider, model, turn, e.response?.usage, e.response?.id, sizes, ms); } } catch {}
       }
     } else if (whole.length < 4 << 20) whole += text;
   }
   res.end();
-  if (!sse && whole.includes('"usage"')) { try { const b = JSON.parse(whole); record(bot, provider, model, turn, b.usage, b.id, sizes); } catch {} }
+  if (!sse && whole.includes('"usage"')) { try { const b = JSON.parse(whole); ms.total = Date.now() - t0; record(bot, provider, model, turn, b.usage, b.id, sizes, ms); } catch {} }
 }).listen(PORT, "127.0.0.1");

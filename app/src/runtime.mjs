@@ -564,7 +564,7 @@ async function dynamicTool(c, threadId, p) {
 // Browser and pixel tools run on the crew member's computer, booting it (and its desktop) on first use.
 // The gate sees the grounded element; the computer's MCP server sees only the model's own arguments.
 async function runtimeTool(br, threadId, p) {
-  const b = getBot(br.bot.id), args = p.arguments || {}, turnId = active.get(threadId)?.turnId;
+  const b = getBot(br.bot.id), args = p.arguments || {}, turnId = active.get(threadId)?.turnId, t0 = Date.now();
   const kind = p.tool.startsWith("browser_") ? "browser" : "computer";
   const tool = kind === "browser" ? p.tool : p.tool.replace(/^computer_/, "");
   if (/^browser_(evaluate|run_code)/.test(p.tool)) return say("Page JavaScript isn't available. Use the element tools (click, type, fill_form, snapshot).", false);
@@ -573,19 +573,24 @@ async function runtimeTool(br, threadId, p) {
   const title = `${tool.replace(/^browser_/, "").replace(/_/g, " ")} ${short(g.label || summariseArgs(args), 140)}${host ? ` on ${host}` : ""}`.trim();
   bus.emit("activity", { threadId, botId: b.id, text: title });
   const ok = await gate(br, threadId, { kind: "mcp", server: kind, tool, arguments: g.grounded, ...(g.effect ? { effect: g.effect } : {}) }, { kind: "mcp", title, detail: { server: kind, tool, args: g.grounded } });
-  if (!ok) { addEvent(threadId, turnId, "tool", { type: kind, title, status: "declined" }); return say("Not done: this action was declined at a pit stop. Don't retry it another way; tell the driver what didn't happen.", false); }
+  const timing = { gate: Date.now() - t0 }; // includes a lease wait and jev's remote check (p50 336 ms for browser, measured)
+  if (!ok) { addEvent(threadId, turnId, "tool", { type: kind, title, status: "declined", timing }); return say("Not done: this action was declined at a pit stop. Don't retry it another way; tell the driver what didn't happen.", false); }
   const comp = computer(b);
   try {
     if (!comp.desktopUp) bus.emit("activity", { threadId, botId: b.id, text: comp.up ? "Starting the desktop…" : "Starting the computer…" });
+    let t = Date.now();
     const mcp = await comp.mcp(kind);
     comp.touch();
+    timing.boot = Date.now() - t; t = Date.now();
     if (kind === "browser" && tool !== "browser_tabs") await frontTab(mcp);
     if (kind === "browser" && comp.viewers > 0 && /^browser_(click|select_option)$/.test(tool) && args.target) await glideTo(mcp, args);
-    const r = await mcp.request("tools/call", { name: tool, arguments: args }, 120000);
+    timing.prep = Date.now() - t; t = Date.now();
+    const r = await mcp.request("tools/call", { name: tool, arguments: kind === "computer" ? { ...args, _watched: comp.viewers > 0 } : args }, 120000);
+    timing.run = Date.now() - t;
     const content = Array.isArray(r.content) ? r.content : [];
     const text = content.filter((x) => x.type === "text").map((x) => x.text).join("\n");
     if (kind === "browser") { keepSnapshot(b.id, p.threadId, text); const t = readTabs(text); if (t) tabCounts.set(mcp, t.count); }
-    addEvent(threadId, turnId, "tool", { type: kind, title, status: r.isError ? "failed" : "completed", output: text.slice(0, 1500) });
+    addEvent(threadId, turnId, "tool", { type: kind, title, status: r.isError ? "failed" : "completed", output: text.slice(0, 1500), timing });
     return { success: !r.isError, contentItems: content.map((x) => x.type === "image" ? { type: "inputImage", imageUrl: `data:${x.mimeType || "image/png"};base64,${x.data}` } : { type: "inputText", text: x.type === "text" ? x.text : JSON.stringify(x).slice(0, 4000) }) };
   } catch (e) {
     addEvent(threadId, turnId, "tool", { type: kind, title, status: "failed", error: e.message });
