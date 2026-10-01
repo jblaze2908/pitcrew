@@ -10,7 +10,7 @@ input:focus,textarea:focus,select:focus{border-color:var(--ink-3)}
 textarea{resize:vertical;min-height:44px}
 input[type=checkbox],input[type=radio]{width:auto;accent-color:var(--ink)}
 input[type=range]{padding:0;border:0;background:none;accent-color:var(--ink)}
-::selection{background:var(--surface-3)}
+::selection{background:color-mix(in srgb,var(--data) 35%,transparent)} /* not a surface colour: on a surface-3 bubble it was invisible */
 .hidden{display:none!important}
 
 .app{display:grid;grid-template-rows:38px 1fr;height:100vh}
