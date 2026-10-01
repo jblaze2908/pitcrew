@@ -310,7 +310,7 @@ async function profileEditor(b) {
   };
   return h("div", { class: "grid2" },
     h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "Who"), lab("Name", f.name), lab("Job", f.job), lab("Weekly cap (USD)", f.cap, "The runtime refuses new runs once this week's estimate reaches the cap."), pm.el,
-      b.kind !== "chief" && h("button", { class: "pc-pill o s", onclick: async (e) => { if (!confirmInline(e.target, "Retire?")) return; await api("POST", `/api/bots/${b.id}/archive`); location.hash = "#/"; } }, "Retire crew member")),
+      b.kind !== "chief" && h("button", { class: "pc-pill o s", onclick: async (e) => { if (!confirmInline(e.target, "Retire?")) return; await api("POST", `/api/bots/${b.id}/archive`); toast(`${b.name} retired`); S = await api("GET", "/api/state"); renderChrome(); location.hash = "#/"; } }, "Retire crew member")),
     h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "Personality (voice only)"), lab("Role line", f.role),
       ...Object.entries(dials).map(([k, el]) => h("div", { class: "dial" }, h("span", { class: "muted" }, k[0].toUpperCase() + k.slice(1)), el, h("span", { class: "pc-m faint" }, el.value))),
       lab("Quirks", f.quirks), lab("Sign-off", f.signoff), lab("Calls you", f.callMe), h("label", { class: "row small" }, f.plain, "Plain voice"),
