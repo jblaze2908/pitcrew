@@ -847,6 +847,7 @@ async function dynamicTool(c, threadId, p) {
         + "\n\nGive the driver the matching thread as a markdown link exactly as written above.");
     }
     case "ask_crew_member": return askCrew(b, threadId, a);
+    case "plan": return planTool(b, threadId, a);
     case "propose_crew_member": {
       if (b.kind !== "chief") return say("Only the Crew Chief can propose crew members.", false);
       const spec = normaliseSpec(a);
@@ -900,6 +901,128 @@ async function askCrew(from, threadId, a) {
   const answer = lastAgentText(toThread, r.turnId);
   if (r.status !== "completed") return say(`${to.name}'s run ended ${r.status}${answer ? `. Last thing they said:\n${answer}` : ""}. Their thread: ${threadLink(toThread)}`, false);
   return say(`${to.name} answered (their thread: ${threadLink(toThread)}):\n\n${answer || "(no text reply)"}`);
+}
+
+// ---------- plans (prototype, behind the "plans" setting) ----------
+// The Crew Chief edits a todo; Pitcrew starts every item whose `after` items are done, hands it their results, records
+// what comes back and wakes the Chief after each item. Starting, waiting and passing results is code, not the model.
+const PLAN = { budget: 1, chiefRuns: 12, reopens: 2, items: 20, itemWaitMs: 10 * 60000 };
+const planRow = (id) => { const p = one("SELECT * FROM plans WHERE id=?", id); return p && { ...p, constraints: json(p.constraints, []), checks: json(p.checks, null) }; };
+const activePlan = (threadId) => { const p = one("SELECT id FROM plans WHERE thread_id=? AND status='running' ORDER BY created_at DESC LIMIT 1", threadId); return p && planRow(p.id); };
+const planItems = (planId) => all("SELECT * FROM plan_items WHERE plan_id=? ORDER BY seq", planId).map((i) => ({ ...i, after: json(i.after, []), result: json(i.result, null), history: json(i.history, []) }));
+const ownerOf = (q, chief) => (/^(crew )?chief$/i.test(String(q || "").trim()) || q === chief.id ? chief : findMember(q, chief.id));
+function planSpend(p) {
+  const items = one("SELECT COALESCE(SUM(cost_usd),0) s FROM plan_items WHERE plan_id=?", p.id).s;
+  const chief = one("SELECT COALESCE(SUM(cost_usd),0) s, COUNT(*) n FROM turns WHERE thread_id=? AND started_at>=? AND trigger='plan'", p.thread_id, p.created_at);
+  return { usd: items + chief.s, chiefRuns: chief.n };
+}
+function planText(p, items = planItems(p.id)) {
+  const mark = { todo: "[ ]", doing: "[~]", done: "[x]", failed: "[!]", cancelled: "[-]" };
+  return items.map((i) => `${mark[i.status] || "[?]"} ${i.key} · ${getBot(i.owner_bot)?.name}: ${short(i.task, 160)}${i.after.length ? ` (after ${i.after.join(", ")})` : ""}${i.reopened ? ` · reopened ×${i.reopened}` : ""}${i.result?.answer ? `\n    → ${short(i.result.answer, 300)}` : ""}`).join("\n");
+}
+function emitPlan(p) {
+  const items = planItems(p.id), spend = planSpend(p);
+  addEvent(p.thread_id, null, "plan", { id: p.id, goal: p.goal, constraints: p.constraints, status: p.status, answer: p.answer, checks: p.checks, budget: p.budget_usd, spend: spend.usd, chiefRuns: spend.chiefRuns,
+    items: items.map((i) => ({ key: i.key, owner: i.owner_bot, ownerName: getBot(i.owner_bot)?.name, task: short(i.task, 300), status: i.status, after: i.after, why: i.why, reopened: i.reopened, toThread: i.to_thread, cost: i.cost_usd, result: i.result && { answer: short(i.result.answer, 600), assumed: short(i.result.assumed || "", 300), unchecked: short(i.result.unchecked || "", 300) } })) });
+}
+// Splits a member's reply into the handoff shape the plan asks for; a reply without the sections is all answer.
+export function parseHandoff(text) {
+  const t = String(text || ""), heads = [["data", /from my data/i], ["assumed", /assumed/i], ["unchecked", /couldn[’']?t check/i]];
+  const marks = heads.map(([k, re]) => { const m = new RegExp(`^[\\s>*_#-]*(?:${re.source})[*_:\\s]*:?[*_]*\\s*`, "im").exec(t); return m && { k, at: m.index, end: m.index + m[0].length }; }).filter(Boolean).sort((a, b) => a.at - b.at);
+  const out = { answer: (marks.length ? t.slice(0, marks[0].at) : t).trim(), data: "", assumed: "", unchecked: "" };
+  marks.forEach((m, i) => { out[m.k] = t.slice(m.end, marks[i + 1]?.at ?? t.length).trim(); });
+  return out;
+}
+function wakeChief(p, text, display) {
+  const spend = planSpend(p);
+  if (spend.chiefRuns >= PLAN.chiefRuns) { addEvent(p.thread_id, null, "system", { text: `Plan paused: the Crew Chief has run ${PLAN.chiefRuns} times on it. Send a message to let it continue.`, tone: "bad" }); return; }
+  const q = queues.get(p.thread_id), last = q?.at(-1);
+  if (active.has(p.thread_id) && last?.trigger === "plan") { last.text += `\n\n${text}`; return; }
+  sendMessage(p.thread_id, { text, trigger: "plan", mode: "queue", display }).catch((e) => addEvent(p.thread_id, null, "error", { text: e.message }));
+}
+function dispatchPlan(planId) {
+  const p = planRow(planId);
+  if (!p || p.status !== "running") return;
+  const items = planItems(p.id), done = new Set(items.filter((i) => i.status === "done").map((i) => i.key));
+  for (const it of items.filter((i) => i.status === "todo" && i.after.every((k) => done.has(k)))) {
+    if (planSpend(p).usd >= p.budget_usd) { addEvent(p.thread_id, null, "system", { text: `Plan budget reached ($${p.budget_usd.toFixed(2)}); ${it.key} didn't start.`, tone: "bad" }); return; }
+    startItem(p, it, items);
+  }
+}
+async function startItem(p, it, items) {
+  const chief = getBot(one("SELECT bot_id FROM threads WHERE id=?", p.thread_id).bot_id), owner = getBot(it.owner_bot), driver = getSetting("driver_name", "the driver");
+  const end = (status, result, cost = 0) => {
+    run("UPDATE plan_items SET status=?, result=?, cost_usd=cost_usd+?, ended_at=? WHERE id=?", status, JSON.stringify(result), cost, now(), it.id);
+    const fresh = planRow(p.id); emitPlan(fresh);
+    if (fresh.status !== "running") return;
+    dispatchPlan(p.id);
+    const r = result || {}, running = planItems(p.id).filter((i) => i.status === "doing").map((i) => i.key);
+    wakeChief(fresh, [`Plan update from Pitcrew: "${it.key}" (${owner.name}) ${status === "done" ? "finished" : "did not finish"}.`, `Answer: ${r.answer || "(none)"}`,
+      r.data && `From their data: ${r.data}`, r.assumed && `Assumed: ${r.assumed}`, r.unchecked && `Couldn't check: ${r.unchecked}`,
+      `Todo now:\n${planText(fresh)}`, `Constraints:\n${fresh.constraints.map((c, i) => `${i + 1}. ${c}`).join("\n")}`,
+      running.length ? `Still running: ${running.join(", ")}. If nothing needs to change, reply "waiting".` : "Nothing is running. Reopen or add items, or finish."].filter(Boolean).join("\n\n"), `Plan update: ${it.key} ${status === "done" ? "done" : "didn't finish"}`);
+  };
+  const why = blockedReason(owner);
+  if (why) return end("failed", { answer: why });
+  const toThread = uid("th"), inputs = it.after.map((k) => items.find((x) => x.key === k)).filter(Boolean);
+  run("INSERT INTO threads(id,bot_id,title,origin,created_at,updated_at) VALUES(?,?,?,?,?,?)", toThread, owner.id, `Plan · ${short(it.task, 80)}`, JSON.stringify({ kind: "delegated", fromBot: chief.id, fromThread: p.thread_id, planId: p.id, itemKey: it.key }), now(), now());
+  run("UPDATE plan_items SET status='doing', to_thread=?, started_at=? WHERE id=?", toThread, now(), it.id);
+  emitPlan(planRow(p.id));
+  const text = [`${chief.name} is running a plan for ${driver} and needs this from you.`, `Goal: ${p.goal}`, `Your task: ${it.task}`,
+    inputs.length ? `Results from earlier steps you can build on:\n${inputs.map((x) => `- ${x.key} (${getBot(x.owner_bot)?.name}): ${x.result?.answer}${x.result?.assumed ? `\n  (they assumed: ${x.result.assumed})` : ""}`).join("\n")}` : "",
+    `Reply with your answer, then end with three short sections titled exactly:\nFrom my data: what came from your own memory, logins or tools.\nAssumed: anything you assumed or estimated, or "nothing".\nCouldn't check: what you couldn't verify, or "nothing".\nDon't add costs, allowances or facts you weren't given; anything estimated goes under Assumed.`].filter(Boolean).join("\n\n");
+  const doneP = nextTurn(toThread);
+  await sendMessage(toThread, { text, trigger: "delegation", display: it.task }).catch(() => {});
+  const r = await Promise.race([doneP, new Promise((res) => setTimeout(() => res(null), PLAN.itemWaitMs).unref())]);
+  if (!r) return end("failed", { answer: `${owner.name} didn't finish within ${PLAN.itemWaitMs / 60000} minutes.` });
+  const reply = lastAgentText(toThread, r.turnId);
+  end(r.status === "completed" ? "done" : "failed", r.status === "completed" ? parseHandoff(reply) : { answer: `Run ended ${r.status}. ${short(reply, 400)}` }, r.cost || 0);
+}
+function planTool(chief, threadId, a) {
+  if (json(getThread(threadId)?.origin)?.kind === "delegated") return say("Plans are run from the Crew Chief's own thread, not from a plan step.", false);
+  let p = activePlan(threadId);
+  const errs = [];
+  if (!p) {
+    if (!a.goal || !Array.isArray(a.add) || !a.add.length) return say("Start a plan with goal, constraints and add.", false);
+    const id = uid("pl");
+    run("INSERT INTO plans(id,thread_id,goal,constraints,status,budget_usd,created_at) VALUES(?,?,?,?,?,?,?)", id, threadId, String(a.goal).slice(0, 1000), JSON.stringify((a.constraints || []).map((c) => String(c).slice(0, 300)).slice(0, 10)), "running", PLAN.budget, now());
+    audit(chief.id, "plan.started", { id, threadId });
+    p = planRow(id);
+  }
+  const items = planItems(p.id), byKey = new Map(items.map((i) => [i.key, i]));
+  let seq = items.length;
+  for (const x of a.add || []) {
+    const key = String(x.key || "").trim().slice(0, 40), owner = ownerOf(x.member, chief);
+    if (!key || byKey.has(key)) { errs.push(`add ${key || "?"}: key missing or already used (reopen it instead)`); continue; }
+    if (!owner) { errs.push(`add ${key}: no crew member called "${short(x.member, 40)}"`); continue; }
+    if (owner.private) { errs.push(`add ${key}: ${owner.name} is private; only ${getSetting("driver_name", "the driver")} talks to it`); continue; }
+    if (seq >= PLAN.items) { errs.push(`add ${key}: a plan holds at most ${PLAN.items} items`); continue; }
+    const after = (x.after || []).map(String).filter((k) => byKey.has(k) || (a.add || []).some((y) => y.key === k));
+    const row = { id: uid("pi"), key }; byKey.set(key, row);
+    run("INSERT INTO plan_items(id,plan_id,seq,key,owner_bot,task,after,status) VALUES(?,?,?,?,?,?,?,?)", row.id, p.id, seq++, key, owner.id, String(x.task || "").slice(0, 2000), JSON.stringify(after), "todo");
+  }
+  for (const x of a.reopen || []) {
+    const it = byKey.get(String(x.key));
+    if (!it?.status) { errs.push(`reopen ${x.key}: no such item`); continue; }
+    if (it.status === "doing") { errs.push(`reopen ${x.key}: still running`); continue; }
+    if (it.reopened >= PLAN.reopens) { errs.push(`reopen ${x.key}: already reopened ${PLAN.reopens} times; ask ${getSetting("driver_name", "the driver")} before going again`); continue; }
+    run("UPDATE plan_items SET status='todo', task=?, why=?, reopened=reopened+1, history=?, result=NULL WHERE id=?", String(x.task).slice(0, 2000), String(x.why || "").slice(0, 300), JSON.stringify([...it.history, { task: it.task, result: it.result }]), it.id);
+  }
+  for (const k of a.cancel || []) run("UPDATE plan_items SET status='cancelled' WHERE plan_id=? AND key=? AND status IN ('todo','failed')", p.id, String(k));
+  if (a.finish) {
+    const checks = (a.finish.constraints || []).map((c) => ({ text: String(c.text || "").slice(0, 300), status: ["met", "unmet", "untested"].includes(c.status) ? c.status : "untested", note: String(c.note || "").slice(0, 300) }));
+    const missing = p.constraints.filter((c) => !checks.some((k) => k.text.trim().toLowerCase() === c.trim().toLowerCase()));
+    if (missing.length) return say(`Not finished: mark every constraint, word for word. Missing: ${missing.join(" | ")}`, false);
+    if (planItems(p.id).some((i) => i.status === "doing")) return say("Not finished: items are still running. Cancel them or wait.", false);
+    run("UPDATE plan_items SET status='cancelled' WHERE plan_id=? AND status='todo'", p.id);
+    run("UPDATE plans SET status='done', answer=?, checks=?, ended_at=? WHERE id=?", String(a.finish.answer).slice(0, 4000), JSON.stringify(checks), now(), p.id);
+    audit(chief.id, "plan.finished", { id: p.id, spend: planSpend(p).usd });
+    emitPlan(planRow(p.id));
+    return say("Plan finished. Now tell the driver the answer in plain words, saying which constraints were met, unmet or untested and anything that rests on an assumption.");
+  }
+  emitPlan(planRow(p.id));
+  dispatchPlan(p.id);
+  return say(`${errs.length ? `Not applied:\n- ${errs.join("\n- ")}\n\n` : ""}Todo now:\n${planText(planRow(p.id))}\n\nPitcrew runs ready items and wakes you after each one ends. End this turn now unless you have more to change.`, !errs.length || errs.length < (a.add || []).length + (a.reopen || []).length);
 }
 
 // Browser and pixel tools run on the crew member's computer, booting it (and its desktop) on first use.

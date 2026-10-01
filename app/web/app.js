@@ -531,7 +531,7 @@ async function threadView(id) {
 
   const renderEvent = (e) => {
     switch (e.kind) {
-      case "user": return h("div", { class: "msg me" }, e.data.via === "schedule" ? h("span", { class: "pc-lab" }, "scheduled · ") : e.data.via === "delegation" ? h("span", { class: "pc-lab" }, `${originFrom(d)} asks · `) : null, e.data.display || e.data.text, e.data.attachments?.length ? h("div", { class: "sent-atts" }, e.data.attachments.map((p) => /\.(png|jpe?g|webp|gif)$/i.test(p)
+      case "user": return h("div", { class: "msg me" }, e.data.via === "schedule" ? h("span", { class: "pc-lab" }, "scheduled · ") : e.data.via === "delegation" ? h("span", { class: "pc-lab" }, `${originFrom(d)} asks · `) : e.data.via === "plan" ? h("span", { class: "pc-lab" }, "Pitcrew · ") : null, e.data.display || e.data.text, e.data.attachments?.length ? h("div", { class: "sent-atts" }, e.data.attachments.map((p) => /\.(png|jpe?g|webp|gif)$/i.test(p)
         ? h("a", { href: `/files/${b.id}/${p}?inline=1`, target: "_blank", rel: "noopener" }, h("img", { src: `/files/${b.id}/${p}?inline=1`, alt: p.split("/").pop(), loading: "lazy" }))
         : h("a", { class: "pc-chip", href: `/files/${b.id}/${p}` }, p.split("/").pop().replace(/^[a-z0-9]+-/, "")))) : null);
       case "agent": return h("div", { class: "msg bot" }, face(b, "sm", "idle"), md(e.data.text));
@@ -553,6 +553,22 @@ async function threadView(id) {
         const el = h("div", { class: "deleg pc-card col" }, h("div", { class: "spread" }, h("div", { class: "row" }, face(to, "xs", e.data.status === "asking" ? "working" : "idle"), h("b", {}, `Asked ${to.name}`), h("span", { class: `pc-chip ${st[1]}` }, st[0])),
           h("a", { class: "small faint", href: `#/t/${e.data.toThread}` }, "Open their thread")), h("p", { class: "small muted" }, e.data.question),
           e.data.answer && h("details", {}, h("summary", { class: "small" }, `Their answer${e.data.cost ? ` · ${usd(e.data.cost)} on ${to.name}'s cap` : ""}`), md(e.data.answer)));
+        if (old) { old.replaceWith(el); delegs.set(e.data.id, el); return null; }
+        delegs.set(e.data.id, el); return el;
+      }
+      case "plan": {
+        const old = delegs.get(e.data.id), P = e.data;
+        const st = { todo: ["to do", ""], doing: ["on track", "blue"], done: ["done", "ok"], failed: ["didn't finish", "bad"], cancelled: ["cancelled", ""] };
+        const el = h("div", { class: "deleg plan pc-card col" },
+          h("div", { class: "spread" }, h("b", { class: "pc-h3" }, P.status === "done" ? "Plan · done" : "Plan"), h("span", { class: "pc-m small faint" }, `${usd(P.spend)} of ${usd(P.budget)} · ${P.chiefRuns} Chief run${P.chiefRuns === 1 ? "" : "s"}`)),
+          h("p", { class: "small muted" }, P.goal),
+          P.constraints?.length > 0 && h("div", { class: "col", style: "gap:2px" }, P.constraints.map((c) => { const k = P.checks?.find((x) => x.text.trim().toLowerCase() === c.trim().toLowerCase()); return h("p", { class: "small" }, h("span", { class: `pc-chip ${k?.status === "met" ? "ok" : k?.status === "unmet" ? "bad" : ""}` }, k?.status || "constraint"), " ", c, k?.note ? h("span", { class: "faint" }, ` · ${k.note}`) : null); })),
+          h("div", { class: "col", style: "gap:0" }, P.items.map((i) => { const who = bot(i.owner) || { name: i.ownerName }; const [lab, cls] = st[i.status] || [i.status, ""];
+            return h("div", { class: "pitem" }, h("div", { class: "spread" }, h("div", { class: "row", style: "gap:8px;min-width:0" }, face(who, "xs", i.status === "doing" ? "working" : "idle"), h("b", { class: "small" }, who.name), h("span", { class: "pc-m small faint" }, i.key), i.reopened ? h("span", { class: "pc-chip" }, `reopened ×${i.reopened}`) : null),
+              h("div", { class: "row", style: "gap:8px" }, i.cost ? h("span", { class: "pc-m small faint" }, usd(i.cost)) : null, h("span", { class: `pc-chip ${cls}` }, lab), i.toThread && h("a", { class: "small faint", href: `#/t/${i.toThread}` }, "Open"))),
+              h("p", { class: "small muted" }, i.task), i.why && h("p", { class: "small faint" }, `Why again: ${i.why}`),
+              i.result?.answer && h("p", { class: "small" }, i.result.answer), i.result?.assumed && !/^nothing\.?$/i.test(i.result.assumed) && h("p", { class: "small", style: "color:var(--warn)" }, `Assumed: ${i.result.assumed}`)); })),
+          P.answer && h("div", { class: "col", style: "gap:4px" }, h("p", { class: "pc-lab" }, "Answer"), md(P.answer)));
         if (old) { old.replaceWith(el); delegs.set(e.data.id, el); return null; }
         delegs.set(e.data.id, el); return el;
       }

@@ -481,3 +481,13 @@ test("front-door router falls back to the Crew Chief and describes each member b
   assert.equal((await routeMessage("how did I sleep", crew, { apiKey: null })).botId, "c");
   assert.equal((await routeMessage("anything", crew.slice(0, 1), { apiKey: "x" })).by, "only member");
 });
+
+test("plan handoffs split a member's reply into answer, data, assumptions and gaps", async () => {
+  const { parseHandoff } = await import("../app/src/runtime.mjs");
+  const r = parseHandoff("12–16 Dec fits.\n\n**From my data:** budget Rs 34,400\n**Assumed:** nothing\n**Couldn't check:** taxes");
+  assert.equal(r.answer, "12–16 Dec fits.");
+  assert.equal(r.data, "budget Rs 34,400");
+  assert.equal(r.assumed, "nothing");
+  assert.equal(r.unchecked, "taxes");
+  assert.equal(parseHandoff("just an answer").answer, "just an answer");
+});
