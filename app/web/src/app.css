@@ -79,6 +79,7 @@ main{overflow:auto;min-width:0}
 .convo header{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px}
 .convo header .pc-h2{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .stream{overflow:auto;padding:20px 24px 28px;display:flex;flex-direction:column;gap:14px}
+.stream>*{flex:none} /* an overflow:hidden card (the plan) would otherwise shrink to fit and clip its items */
 .msg{max-width:760px}
 .msg.me{align-self:flex-end;background:var(--surface-3);border-radius:16px 16px 4px 16px;padding:10px 14px;white-space:pre-wrap;word-break:break-word}
 .msg.me .att{font:11px var(--font-data);color:var(--ink-3);margin-top:6px}
