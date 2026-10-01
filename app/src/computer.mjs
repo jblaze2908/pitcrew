@@ -186,6 +186,22 @@ export class Brain {
   async stop() { if (this.rpc) this.rpc.proc.kill(); }
 }
 
+// One-shot Codex app-server under its own CODEX_HOME that asks OpenAI for the plan's usage, so it counts use from anywhere
+// on the account, not only Pitcrew's runs, and Codex refreshes the token itself. Per call: one docker exec + one backend read.
+const LIMITS = { id: "_limits" };
+export async function readPlanLimits() {
+  if (!existsSync(chatgptAuthPath())) return null;
+  const uid = ensureBrainDir(LIMITS); linkChatgpt(LIMITS.id);
+  const proc = spawn("docker", ["exec", "-i", "--user", `${uid}:${CREW_UID}`, "-w", `/brains/${LIMITS.id}`, "-e", `CODEX_HOME=/brains/${LIMITS.id}`, "-e", `HOME=/brains/${LIMITS.id}/home`, BRAIN, CODEX_BIN, "app-server"], { stdio: ["pipe", "pipe", "pipe"] });
+  const rpc = new Rpc(proc, { name: "limits", onExit: () => reclaimChatgpt(LIMITS.id) });
+  try {
+    await rpc.request("initialize", { clientInfo: { name: "pitcrew", title: "Pitcrew", version: "1.1" }, capabilities: { experimentalApi: true, requestAttestation: false } }, 15000);
+    rpc.notify("initialized", {});
+    const r = await rpc.request("account/rateLimits/read", { excludeResetCreditDetails: true }, 15000);
+    return r.rateLimitsByLimitId?.codex ?? r.rateLimits;
+  } finally { proc.stdin.end(); setTimeout(() => proc.kill(), 5000).unref(); }  // EOF lets Codex exit after saving a refreshed token
+}
+
 // ---------- computer (machine) ----------
 export class Computer {
   constructor(bot, hooks) { this.bot = bot; this.hooks = hooks; this.ready = null; this.desk = null; this.mcps = {}; this.starting = {}; this.up = false; this.desktopUp = false; this.startedAt = null; this.viewers = 0; this.lastActive = Date.now(); }
