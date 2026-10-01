@@ -337,3 +337,32 @@ test("the snapshot manifest survives a restart; the usage log is read from where
   assert.equal(R.billedUsage("b_use", "tu_old", from), null);
   assert.equal(R.billedUsage("b_use", "tu_old", 1e9).cost, 5); // a truncated log is read from the start
 });
+
+test("store runs WAL with synchronous=NORMAL", async () => {
+  const { db } = await import("../app/src/db.mjs");
+  assert.equal(db.prepare("PRAGMA journal_mode").get().journal_mode, "wal");
+  assert.equal(db.prepare("PRAGMA synchronous").get().synchronous, 1);
+});
+
+test("a running thread hears about memories saved or forgotten since it was told", () => {
+  const seen = new Map([["me_a", "likes tea"], ["me_b", "lives in Pune"]]);
+  assert.equal(R.memoryDelta(seen, [{ id: "me_a", text: "likes tea" }, { id: "me_b", text: "lives in Pune" }]), null);
+  assert.equal(R.memoryDelta(undefined, [{ id: "me_a", text: "x" }]), null);
+  const d = R.memoryDelta(seen, [{ id: "me_a", text: "likes coffee now" }, { id: "me_c", text: "prefers email" }]);
+  assert.match(d, /- \[me_a\] likes coffee now/); assert.match(d, /- \[me_c\] prefers email/); assert.match(d, /Forgotten: \[me_b\]/);
+  assert.doesNotMatch(d, /Pune/);
+});
+
+test("the computer is warmed only for threads that used it lately, the desktop only after browser use", () => {
+  run("INSERT INTO bots(id,name,created_at) VALUES('b_warm','Warm',0)");
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('t_warm','b_warm','w',0,0)");
+  const turn = (id, at, ...tools) => {
+    run("INSERT INTO turns(id,thread_id,bot_id,status,started_at) VALUES(?,?,?,?,?)", id, "t_warm", "b_warm", "completed", at);
+    for (const type of tools) run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES(?,?,?,?,0)", "t_warm", id, "tool", JSON.stringify({ type }));
+  };
+  assert.equal(R.warmPlan("t_warm"), null);
+  turn("tu_w1", 1, "browser"); assert.deepEqual(R.warmPlan("t_warm"), { desktop: true });
+  turn("tu_w2", 2, "webSearch"); assert.deepEqual(R.warmPlan("t_warm"), { desktop: false });
+  turn("tu_w3", 3, "commandExecution"); assert.deepEqual(R.warmPlan("t_warm"), { desktop: false });
+  turn("tu_w4", 4); turn("tu_w5", 5, "mcpToolCall"); turn("tu_w6", 6); assert.equal(R.warmPlan("t_warm"), null);
+});

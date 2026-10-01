@@ -9,14 +9,33 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 const BOOT_SOCK = "/run/pitcrew/boot.sock";
 const LOCAL = new Set(["environmentConfig/read", "fs/getMetadata", "fs/readFile", "fs/canonicalize", "fs/walk", "fs/writeFile"]);
 
+// One persistent connection to the control plane, shared by all sessions; replies match by id. Every turn sends
+// several fs probes (AGENTS.md, .git, skills), each of which used to pay a connect and accept. Reconnects on next use.
+let ctl = null, nextId = 1;
+const waiting = new Map();
+function ctlSocket() {
+  if (ctl && !ctl.destroyed) return ctl;
+  const s = connect(BOOT_SOCK);
+  let buf = "";
+  s.setEncoding("utf8");
+  s.on("data", (d) => {
+    buf += d; let i;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      let r; try { r = JSON.parse(buf.slice(0, i)); } catch { r = null; } buf = buf.slice(i + 1);
+      const w = r && waiting.get(r.id);
+      if (w) { waiting.delete(r.id); delete r.id; w(r); }
+    }
+  });
+  s.on("error", () => {});
+  s.on("close", () => { if (ctl === s) ctl = null; for (const w of waiting.values()) w({ ok: false, error: "control plane connection closed" }); waiting.clear(); });
+  return (ctl = s);
+}
 function control(msg, timeoutMs = 120000) {
   return new Promise((resolve) => {
-    const s = connect(BOOT_SOCK);
-    let buf = "";
-    s.on("connect", () => s.write(JSON.stringify(msg) + "\n"));
-    s.on("data", (d) => { buf += d; const i = buf.indexOf("\n"); if (i >= 0) { s.end(); try { resolve(JSON.parse(buf.slice(0, i))); } catch { resolve({ ok: false, error: "bad reply" }); } } });
-    s.on("error", (e) => resolve({ ok: false, error: e.message }));
-    setTimeout(() => { s.destroy(); resolve({ ok: false, error: "control plane timeout" }); }, timeoutMs);
+    const id = nextId++;
+    const t = setTimeout(() => { waiting.delete(id); resolve({ ok: false, error: "control plane timeout" }); }, timeoutMs);
+    waiting.set(id, (r) => { clearTimeout(t); resolve(r); });
+    ctlSocket().write(JSON.stringify({ ...msg, id }) + "\n");
   });
 }
 
