@@ -6,6 +6,8 @@ import { DEFAULT_MODEL } from "./providers.mjs";
 import { catalogueDoc } from "./surfaces.mjs";
 
 export const HUES = ["c1", "c2", "c3", "c5", "c6"];
+// The computer's loopback-only, read-only view of /bot/work (computer/files.mjs, started by desktop.sh).
+export const FILES_URL = "http://127.0.0.1:7780/";
 export const SHAPES = ["square", "round", "blob"];
 // New crew members start with read/draft allowed; sign-in, pay and send ask first; delete and share always ask.
 export const STARTING_POLICY = { ...DEFAULT_POLICY };
@@ -96,6 +98,16 @@ export function instructions(b, memories) {
     voiceBlock(b),
     `You have your own computer, started on demand: shell commands and file edits run there, and the browser_* tools drive its Chromium (a 1280x800 desktop ${driver} can watch live). Answer from what you know when no tool is needed; the computer only starts when you run a command or use the browser. Prefer browser_* tools (they act on page elements by ref from browser_snapshot); use computer_* pixel tools only when a page can't be driven otherwise. The browser keeps its logins between runs.`,
     `Workspace on the computer: /bot/work. Downloads land in /bot/work/downloads. Put files meant for ${driver} in /bot/work/out; they appear in the Library.`,
+    [`Browser rules:`,
+      `- Every browser action returns the page afterwards: what changed since your last snapshot, or the full snapshot on a new page. Don't call browser_snapshot after an action.`,
+      `- Refs die when the page navigates or reloads; act only on refs from the latest result.`,
+      `- To open a link, browser_navigate to its /url instead of clicking it.`,
+      `- Read pages with browser_snapshot or browser_read (page text as markdown). Take screenshots only when layout or visuals matter.`,
+      `- Use browser_fill_form for radios, checkboxes and selects too, several fields per call.`,
+      `- computer_* pixel actions already return a screenshot of the result; don't take another.`,
+      `- file:// is blocked in the browser. Open workspace files at ${FILES_URL}<path under /bot/work>, e.g. ${FILES_URL}out/report.html (read-only).`,
+      `- In exec scripts, call tools as tools.browser_click({...}); don't print ALL_TOOLS. Tools that return a screenshot give a data: URL string there: show it with image(result), never text(result).`,
+    ].join("\n"),
     `Pit stops: the runtime decides which actions need ${driver}'s approval (sending, paying, signing in, installing, deleting, sharing). You don't ask for approval yourself; just act and the runtime pauses when needed. If an action is declined, do not retry it another way; say what didn't happen.`,
     `When a comparison, table, chart, dashboard or form would help, call render_surface instead of writing a long text table. Forms come back to you as a message with the submitted values.`,
     `To show the driver what's on screen (a result, a confirmation, a page that looks wrong), call share_screenshot; your own screenshots stay private.`,
@@ -106,11 +118,38 @@ export function instructions(b, memories) {
 }
 
 // Browser (Playwright over CDP) and pixel tools come from the computer image's own manifest, under their usual names.
+// Page JS is never offered; the rest of HIDDEN went unused in prod rollouts and only cost prompt tokens (the runtime
+// still uses browser_hover and browser_tabs itself).
 const NO_PAGE_JS = new Set(["browser_evaluate", "browser_run_code_unsafe"]);
+const HIDDEN = new Set(["browser_emulate_media", "browser_resize", "browser_network_request", "browser_network_requests", "browser_close", "browser_drag", "computer_double_click", "computer_type"]);
+// Actions whose result carries the page afterwards (see shapeSnapshot in runtime.mjs).
+export const SNAPSHOT_ACTIONS = /^browser_(click|type|navigate|navigate_back|press_key|select_option|fill_form|hover|handle_dialog|file_upload|drop|tabs|wait_for)$/;
+const SHOT_HINT = "In an exec script it returns the image as a data: URL string: show it with image(result), never text(result).";
+const DESCRIBE = {
+  browser_click: "Click an element by ref from the latest snapshot. To follow a link, navigate to its URL (browser_navigate) instead of clicking it.",
+  browser_type: "Type text into an editable element (textbox, textarea, contenteditable) by ref. Not for canvas or pixel-drawn editors; use computer_* there. submit presses Enter after.",
+  browser_fill_form: "Fill several form fields in one call: text inputs, checkboxes, radios, selects and sliders. Use it for radios and checkboxes too, instead of clicking each.",
+  browser_file_upload: "Pick files in a file chooser that is already open. First click the page's upload control; the result's Modal state then shows a file chooser. Then pass absolute paths (under /bot/work). Omit paths to cancel the chooser.",
+  browser_take_screenshot: `Screenshot of the current page (JPEG unless you pass type). Use it only when layout or visuals matter; read with browser_snapshot or browser_read. ${SHOT_HINT}`,
+  browser_snapshot: "Accessibility snapshot of the current page, with refs to act on. Over 12 KB it is truncated: scope it with target (a ref) or depth, or search it with browser_find.",
+};
+const FIELD_TYPE = "Kind of control, not its HTML type: textbox for any text, email, password or number input and textareas; checkbox; radio; combobox for a select/dropdown (value = the option's text); slider. checkbox and radio values are \"true\" or \"false\".";
+const SNAPSHOT_ARG = { type: "string", enum: ["diff", "full", "none"], description: "What the result shows of the page afterwards: diff (default: what changed since your last snapshot; full on a new page), full, or none." };
+const PIXEL = "pixel control of the computer's screen; the result includes a screenshot of the screen after the action, so don't take another";
+function browserTool(x) {
+  const inputSchema = structuredClone(x.inputSchema || { type: "object", properties: {} });
+  const field = inputSchema.properties?.fields?.items?.properties?.type;
+  if (x.name === "browser_fill_form" && field) field.description = FIELD_TYPE;
+  if (SNAPSHOT_ACTIONS.test(x.name)) inputSchema.properties = { ...inputSchema.properties, snapshot: SNAPSHOT_ARG };
+  return { type: "function", name: x.name, description: DESCRIBE[x.name] || x.description || x.name, inputSchema };
+}
+const BROWSER_READ = { type: "function", name: "browser_read", description: "Read the current page's content as compact markdown (headings, text, lists, links with their URLs, form fields, tables), up to 12 KB; the main landmark when the page has one. Pass target (a ref) to read just that part. For reading; use browser_snapshot when you need refs to act on.",
+  inputSchema: { type: "object", properties: { target: { type: "string", description: "Ref of the element to read, from the latest snapshot. Omit for the whole page." }, element: { type: "string", description: "What that element is, in words." } } } };
 export function dynamicTools(b, manifest = { browser: [], computer: [] }) {
   const runtime = [
-    ...manifest.browser.filter((x) => !NO_PAGE_JS.has(x.name)).map((x) => ({ type: "function", name: x.name, description: x.description || x.name, inputSchema: x.inputSchema || { type: "object", properties: {} } })),
-    ...manifest.computer.map((x) => ({ type: "function", name: `computer_${x.name}`, description: `${x.description || x.name} (pixel control of the computer's screen)`, inputSchema: x.inputSchema || { type: "object", properties: {} } })),
+    ...manifest.browser.filter((x) => !NO_PAGE_JS.has(x.name) && !HIDDEN.has(x.name)).map(browserTool),
+    ...(manifest.browser.some((x) => x.name === "browser_snapshot") ? [BROWSER_READ] : []),
+    ...manifest.computer.filter((x) => !HIDDEN.has(`computer_${x.name}`)).map((x) => ({ type: "function", name: `computer_${x.name}`, description: `${x.description || x.name} (${x.name === "screenshot" ? `pixel control of the computer's screen. ${SHOT_HINT}` : PIXEL})`, inputSchema: x.inputSchema || { type: "object", properties: {} } })),
   ];
   const tools = [...runtime,
     { type: "function", name: "render_surface", description: `Show the driver a visual surface in the Pitcrew design system: tables, charts, comparisons, dashboards or forms. Pass {title, root} where root is a component tree ({type, ...props, children?}). Colours are hue tokens only. Components:\n${catalogueDoc()}`,

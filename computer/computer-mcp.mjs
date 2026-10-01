@@ -10,9 +10,9 @@ const x = (...args) => execFileSync("xdotool", args, { env });
 const shot = () => execFileSync("import", ["-window", "root", "-quality", "80", "jpeg:-"], { env, maxBuffer: 32 << 20 }).toString("base64");
 const frame = () => createHash("sha1").update(execFileSync("import", ["-window", "root", "-depth", "8", "rgb:-"], { env, maxBuffer: 16 << 20 })).digest("hex");
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
-// The live-view pointer glides for ~0.5 s; clicking after it arrives keeps the press where the pointer is shown.
+// The live-view pointer glides for 0.25 s (pointer.js); clicking after it arrives keeps the press where the pointer is shown.
 // Only worth waiting for while someone watches: the control plane passes _watched.
-const GLIDE = 520;
+const GLIDE = 270;
 const glide = (a) => (a._watched ? pause(GLIDE) : null);
 // Instead of a fixed 700 ms after every action: wait 200 ms for the reaction to start, then until two frames 100 ms
 // apart match (capped at 700 ms, so an animated page costs what it always did).

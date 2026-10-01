@@ -7,7 +7,7 @@ import { one, all, run, now, uid, json, getSetting, setSetting, audit, pruneLabe
 import { getSecret } from "./auth.mjs";
 import { jev, redact } from "./jev.mjs";
 import { getBot, listBots, instructions, dynamicTools, normaliseSpec, createBot } from "./crew.mjs";
-import { brainFor, computerFor, allComputers, allBrains, botDir, ensureDirs, usageLog, toolManifest, PW_OUT } from "./computer.mjs";
+import { brainFor, computerFor, allComputers, allBrains, botDir, ensureDirs, usageLog, toolManifest, PW_OUT, PW_SETTLE_MS } from "./computer.mjs";
 import { providerReady, estimateCost } from "./providers.mjs";
 import { validateSurface } from "./surfaces.mjs";
 import { snapshot, changes } from "./snapshot.mjs";
@@ -37,7 +37,7 @@ const waits = new Map();    // pitstop id → resolve(decision)
 const leases = new Map();   // bot id → { since, waiters: [] }
 const items = new Map();    // codex item id → item (for file-change paths)
 const usage = new Map();    // codex thread id → last total usage
-const snapshots = new Map(); // codex thread id → { url, lines } from the last browser snapshot the agent saw
+const snapshots = new Map(); // codex thread id → { url, text, lines } from the last browser snapshot the agent saw (noteSnapshot)
 
 export const getThread = (id) => one("SELECT * FROM threads WHERE id=?", id);
 export const isRunning = (threadId) => active.has(threadId);
@@ -353,18 +353,133 @@ const subtract = (x, y) => Object.fromEntries(Object.keys(x).map((k) => [k, (x[k
 // 'button "Submit order"' on httpbin.org, not "e44". Runs once per browser action; the lookup is a line scan.
 // Playwright MCP writes the snapshot it takes after each action to a file (PW_OUT, see computer.mjs) and returns only a
 // link, so read that file too: otherwise refs from any page but the last explicit snapshot ground to nothing.
-function keepSnapshot(botId, codexId, text) {
-  let refs = text;
-  if (!text.includes("[ref=")) {
-    const link = /\[Snapshot\]\(([^)\s]+\.yml)\)/.exec(text)?.[1];
-    const abs = link && posix.resolve("/bot/work", link);
-    if (!abs?.startsWith(`${PW_OUT}/`)) return;
-    const r = execFs(botId, "fs/readFile", { path: `file://${abs}` });
-    if (!r.result) return;
-    refs = Buffer.from(r.result.dataBase64, "base64").toString("utf8");
+const SNAP_LINK = /^### Snapshot\n- \[Snapshot\]\(([^)\s]+\.yml)\)$/m, SNAP_INLINE = /^### Snapshot\n```yaml\n([\s\S]*?)\n```$/m;
+const linkPath = (link) => { const abs = link && posix.resolve("/bot/work", link); return abs?.startsWith(`${PW_OUT}/`) ? abs : null; };
+// The snapshot a response carries: inline (explicit browser_snapshot) or in the linked file (one local read per action).
+function snapshotOf(botId, text) {
+  const inline = SNAP_INLINE.exec(text)?.[1];
+  if (inline != null) return inline;
+  const abs = linkPath(SNAP_LINK.exec(text)?.[1]);
+  const r = abs && execFs(botId, "fs/readFile", { path: `file://${abs}` });
+  return r?.result ? Buffer.from(r.result.dataBase64, "base64").toString("utf8") : null;
+}
+// text is the diff base (what the agent last saw); lines are ref lines for grounding. A scoped or unseen snapshot
+// (target/depth, browser_read) adds refs but keeps the diff base, which stays valid only on the same page.
+function noteSnapshot(codexId, snap, url, { scoped = false, seen = true } = {}) {
+  if (!snap?.includes("[ref=")) return;
+  const prev = snapshots.get(codexId), same = prev && prev.url === url, lines = snap.split("\n").filter((l) => l.includes("[ref="));
+  if (scoped || !seen) snapshots.set(codexId, { url, text: same ? prev.text : null, lines: same ? [...new Set([...lines, ...prev.lines])] : lines });
+  else snapshots.set(codexId, { url, text: snap, lines });
+}
+
+// What a browser action's result carries instead of Playwright's file link. One function, one mode: the call's own
+// `snapshot` argument, else PITCREW_SNAPSHOT_MODE.
+//   link: Playwright's own result (the agent spends a step on browser_snapshot). none: no snapshot.
+//   full: the new snapshot, capped at SNAP_MAX.
+//   diff (default): what changed since the snapshot this thread last saw. Full on a new page, a first view, a small
+//         page (< SNAP_SMALL), or a diff over half the page (refs renumbered, page re-rendered).
+// An explicit browser_snapshot is always full, capped at SNAP_MAX_EXPLICIT. Runs once per browser action: O(lines).
+export const SNAP_MAX = 8000, SNAP_MAX_EXPLICIT = 12000, SNAP_SMALL = 2000, SNAP_MODES = ["diff", "full", "none"];
+const SNAP_MODE = process.env.PITCREW_SNAPSHOT_MODE || "diff";
+export function shapeSnapshot(text, snap, { prev = null, url = null, mode = SNAP_MODE } = {}) {
+  const m = SNAP_LINK.exec(text) || SNAP_INLINE.exec(text);
+  const link = m?.[0].includes("](") ? m[1] : null, file = linkPath(link);
+  if (!m || snap == null || (link && mode === "link")) return text;
+  let section = null;
+  if (link && mode === "none") section = `### Snapshot\nNot included (snapshot: "none")${file ? `; it's in ${file}` : ""}.`;
+  else if (link && mode === "diff" && prev?.text != null && prev.url === url && snap.length >= SNAP_SMALL) {
+    const d = snapshotDiff(prev.text.split("\n"), snap.split("\n"));
+    if (d == null) section = "### Snapshot\nNo change since your last snapshot of this page; its refs still hold.";
+    else if (d.length <= snap.length / 2) section = `### Snapshot changes\nSince your last snapshot of this page (+ new, - gone; collapsed lines and their refs are as before):\n${fence(d, "", file, SNAP_MAX)}`;
   }
-  if (!refs.includes("[ref=")) return;
-  snapshots.set(codexId, { url: /Page URL: (\S+)/.exec(text)?.[1] || snapshots.get(codexId)?.url || null, lines: refs.split("\n").filter((l) => l.includes("[ref=")) });
+  return text.replace(m[0], () => section ?? `### Snapshot\n${fence(snap, "yaml", file, link ? SNAP_MAX : SNAP_MAX_EXPLICIT)}`);
+}
+function fence(s, lang, file, max) {
+  if (s.length <= max) return `\`\`\`${lang}\n${s}\n\`\`\``;
+  const cut = s.slice(0, s.lastIndexOf("\n", max) + 1 || max).trimEnd(), kb = (x) => (x.length / 1024).toFixed(0);
+  return `\`\`\`${lang}\n${cut}\n\`\`\`\nTruncated: showing ${kb(cut)} of ${kb(s)} KB${file ? ` (full snapshot: ${file})` : ""}. Find the rest with browser_find, or browser_snapshot with target (a ref) or depth.`;
+}
+// Ordered line diff for snapshots, O(lines): a line also in the old snapshot (counted) is unchanged; gone lines print
+// where they stood. Unchanged runs collapse to a count, keeping each change's parent line for context. null: no change.
+export function snapshotDiff(before, after) {
+  const pos = new Map(), used = new Set(), ind = (l) => /^\s*/.exec(l)[0].length;
+  before.forEach((l, j) => (pos.get(l) || pos.set(l, []).get(l)).push(j));
+  const match = after.map((l) => { const j = pos.get(l)?.shift(); if (j != null) used.add(j); return j ?? -1; });
+  const gone = before.map((_, j) => j).filter((j) => !used.has(j) && before[j].trim());
+  const next = new Array(after.length + 1).fill(before.length); // old position of the next unchanged line, so "-" precedes its "+"
+  for (let i = after.length - 1; i >= 0; i--) next[i] = match[i] >= 0 ? match[i] : next[i + 1];
+  const ops = []; let g = 0;
+  after.forEach((l, i) => {
+    while (g < gone.length && gone[g] < next[i]) ops.push({ t: "-", s: before[gone[g++]] });
+    ops.push({ t: match[i] >= 0 || !l.trim() ? " " : "+", s: l });
+  });
+  while (g < gone.length) ops.push({ t: "-", s: before[gone[g++]] });
+  if (!ops.some((o) => o.t !== " ")) return null;
+  const keep = new Set(), stack = []; // unchanged lines on the path from the root, for each change's parent
+  ops.forEach((o, k) => {
+    const d = ind(o.s);
+    if (o.t === " ") { while (stack.length && ind(ops[stack[stack.length - 1]].s) >= d) stack.pop(); stack.push(k); return; }
+    for (let p = stack.length - 1; p >= 0; p--) if (ind(ops[stack[p]].s) < d) { keep.add(stack[p]); break; }
+  });
+  const out = []; let run = 0;
+  const flush = () => { if (run) out.push(`  … ${run} unchanged line${run === 1 ? "" : "s"}`); run = 0; };
+  ops.forEach((o, k) => { if (o.t === " " && !keep.has(k)) { run++; return; } flush(); out.push(`${o.t} ${o.s}`); });
+  flush();
+  return out.join("\n");
+}
+// One line saying what an action did, so the agent can check it without reading the page: from the result's own Page,
+// Open tabs, Modal state and Events sections, plus the URL the agent last saw and the tab count before the call.
+export function verifyLine(tool, text, { before = null, tabsBefore = null } = {}) {
+  const url = /^- Page URL: (.*)$/m.exec(text)?.[1], title = /^- Page Title: (.*)$/m.exec(text)?.[1];
+  const parts = [`${tool.replace(/^browser_/, "")} ${/^### Error$/m.test(text) ? "failed" : "done"}`];
+  if (url) parts.push(before && before !== url ? `navigated ${before} → ${url}` : `${before ? "same page" : "on"} ${url}`);
+  if (title) parts.push(`title "${title}"`);
+  const tabs = readTabs(text)?.count;
+  if (tabs && tabsBefore && tabs !== tabsBefore) parts.push(`${tabs > tabsBefore ? "new tab opened" : "tab closed"} (${tabs} open)`);
+  const modal = /^### Modal state\n- (.*)$/m.exec(text)?.[1];
+  if (modal) parts.push(`modal: ${modal}`);
+  for (const d of text.matchAll(/^- (Download(?:ing|ed) file .*)$/gm)) parts.push(d[1]);
+  const http = /^- HTTP status: (.*)$/m.exec(text)?.[1], errors = +(/^- Console: (\d+) errors/m.exec(text)?.[1] || 0);
+  if (http) parts.push(`HTTP ${http}`);
+  if (errors) parts.push(`console: ${errors} error${errors === 1 ? "" : "s"}`);
+  return parts.join(" · ");
+}
+
+// browser_read: the page's accessibility snapshot as compact markdown. Fixed code over Playwright's own snapshot, so
+// no page JS runs; the main landmark is preferred when it has real content. One pass over the snapshot's lines.
+export const READ_MAX = 12000;
+const unq = (s) => { if (!/^".*"$/.test(s)) return s; try { return JSON.parse(s); } catch { return s.slice(1, -1); } };
+export function snapshotToText(yaml) {
+  let lines = String(yaml || "").split("\n");
+  const ind = (l) => /^\s*/.exec(l)[0].length, end = (i) => { let j = i + 1; while (j < lines.length && ind(lines[j]) > ind(lines[i])) j++; return j; };
+  const mi = lines.findIndex((l) => /^\s*- main\b/.test(l));
+  if (mi >= 0 && lines.slice(mi, end(mi)).join("\n").length > 400) lines = lines.slice(mi + 1, end(mi));
+  const out = []; let bullet = false, named = "";
+  const push = (s) => { s = String(s).trim(); if (!s || s === named) return; named = ""; if (bullet) { s = `- ${s}`; bullet = false; } if (out[out.length - 1] !== s) out.push(s); };
+  // A form control swallows its visible label text, whether that text comes just before or just after it.
+  const control = (s, nm) => { if (nm && out[out.length - 1] === nm) out.pop(); push(s); named = nm; };
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^\s*- (.*)$/.exec(lines[i]); if (!m) continue;
+    const p = /^([a-z]+)(?: "((?:[^"\\]|\\.)*)")?((?: \[[^\]]*\])*):?\s?(.*)$/.exec(m[1]);
+    if (!p) { if (!m[1].startsWith("/")) push(unq(m[1])); continue; }
+    const [, role, raw, attrs, rest] = p, name = raw ? unq(`"${raw}"`) : "", txt = unq(rest.trim()), label = name || txt;
+    const skip = () => { i = end(i) - 1; };
+    if (role === "heading") { out.push(""); push(`${"#".repeat(Math.min(6, +(/\[level=(\d)\]/.exec(attrs)?.[1] || 2)))} ${label}`); }
+    else if (role === "link") { const u = lines.slice(i + 1, end(i)).map((l) => /^\s*- \/url: (.*)$/.exec(l)?.[1]).find(Boolean); if (label) push(u ? `[${label}](${unq(u)})` : label); skip(); }
+    else if (role === "listitem") { if (label) push(`- ${label}`); else bullet = true; }
+    else if (role === "row") { const cells = lines.slice(i + 1, end(i)).filter((l) => ind(l) === ind(lines[i]) + 2).map((l) => /^\s*- (?:cell|gridcell|columnheader|rowheader)(?: "((?:[^"\\]|\\.)*)")?[^:]*:?\s?(.*)$/.exec(l)).filter(Boolean).map((c) => (c[1] ? unq(`"${c[1]}"`) : unq(c[2].trim())).replace(/\|/g, "\\|")); push(cells.length ? `| ${cells.join(" | ")} |` : label); skip(); }
+    else if (role === "button") { if (label) push(`[button: ${label}]`); skip(); }
+    else if (/^(textbox|searchbox|spinbutton)$/.test(role)) control(`[${role}${name ? ` ${name}` : ""}${txt ? `: ${txt}` : ""}]`, name);
+    else if (/^(checkbox|radio|switch)$/.test(role)) control(`[${/\[checked\]/.test(attrs) ? "x" : " "}] ${label}`, name);
+    else if (/^(combobox|listbox)$/.test(role)) { const v = txt || lines.slice(i + 1, end(i)).map((l) => /^\s*- option "((?:[^"\\]|\\.)*)".*\[selected\]/.exec(l)?.[1]).find(Boolean); control(`[select${name ? ` ${name}` : ""}${v ? `: ${unq(`"${v}"`)}` : ""}]`, name); skip(); }
+    else if (role === "img") { if (name) push(`![${name}]`); skip(); }
+    else if (role === "separator") push("---");
+    else if (/^(dialog|alertdialog|alert)$/.test(role)) push(`[${role}${label ? `: ${label}` : ""}]`);
+    else if (!/^(banner|navigation|contentinfo|complementary|region|main|form|group|list|table|rowgroup|document|article|menu|menubar|tablist|toolbar|tree|grid)$/.test(role) || txt) push(label);
+  }
+  const s = out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  if (s.length <= READ_MAX) return s;
+  return `${s.slice(0, s.lastIndexOf("\n", READ_MAX))}\n\nTruncated at ${(READ_MAX / 1024).toFixed(0)} of ${(s.length / 1024).toFixed(0)} KB. Pass target (a ref from browser_snapshot) to read one part.`;
 }
 const CONSEQUENTIAL_PAY = /\b(pay|buy|purchase|place order|checkout|check out|transfer|subscribe|donate|confirm payment)\b/i;
 const CONSEQUENTIAL_SEND = /\b(submit|send|post|publish|reply|confirm|sign up|register|book|reserve|apply|delete|remove|unsubscribe|cancel (my )?(order|subscription|account))\b/i;
@@ -577,7 +692,7 @@ async function dynamicTool(c, threadId, p) {
       const caption = String(a.caption || "").trim().slice(0, 300);
       if (!caption) return say("Give the screenshot a caption", false);
       const screen = a.source === "screen";
-      const sa = screen ? {} : { type: "jpeg", ...(a.full_page ? { fullPage: true } : {}), ...(a.element && a.ref ? { element: String(a.element), ref: String(a.ref) } : {}) };
+      const sa = screen ? {} : { type: "jpeg", ...(a.full_page ? { fullPage: true } : {}), ...(a.element && (a.ref || a.target) ? { element: String(a.element), target: String(a.ref || a.target) } : {}) }; // 0.0.82 names it target
       // Through runtimeTool, so the lease, the gate and the tool log apply as for any screenshot.
       const r = await runtimeTool(c, threadId, { ...p, tool: screen ? "computer_screenshot" : "browser_take_screenshot", arguments: sa });
       if (!r.success) return r;
@@ -631,14 +746,18 @@ async function dynamicTool(c, threadId, p) {
 
 // Browser and pixel tools run on the crew member's computer, booting it (and its desktop) on first use.
 // The gate sees the grounded element; the computer's MCP server sees only the model's own arguments.
+// browser_read is ours: a gated browser_snapshot turned into text, so it runs no page JS.
 async function runtimeTool(br, threadId, p) {
-  const b = getBot(br.bot.id), args = p.arguments || {}, turnId = active.get(threadId)?.turnId, t0 = Date.now();
-  const kind = p.tool.startsWith("browser_") ? "browser" : "computer";
-  const tool = kind === "browser" ? p.tool : p.tool.replace(/^computer_/, "");
+  const b = getBot(br.bot.id), turnId = active.get(threadId)?.turnId, t0 = Date.now();
+  const kind = p.tool.startsWith("browser_") ? "browser" : "computer", reading = p.tool === "browser_read";
   if (/^browser_(evaluate|run_code)/.test(p.tool)) return say("Page JavaScript isn't available. Use the element tools (click, type, fill_form, snapshot).", false);
-  const g = kind === "browser" ? ground(snapshots.get(p.threadId), p.tool, args) : { grounded: args, effect: null, label: "" };
+  // `snapshot` (what the result shows of the page afterwards) is ours; Playwright never sees it.
+  const { snapshot: snapArg, ...given } = p.arguments || {};
+  const tool = reading ? "browser_snapshot" : kind === "browser" ? p.tool : p.tool.replace(/^computer_/, "");
+  const args = reading ? (given.target ? { target: String(given.target) } : {}) : tool === "browser_take_screenshot" && !given.type && !given.filename ? { ...given, type: "jpeg" } : given;
+  const g = kind === "browser" ? ground(snapshots.get(p.threadId), tool, args) : { grounded: args, effect: null, label: "" };
   const host = hostOf(g.grounded.page_url);
-  const title = `${tool.replace(/^browser_/, "").replace(/_/g, " ")} ${short(g.label || summariseArgs(args), 140)}${host ? ` on ${host}` : ""}`.trim();
+  const title = `${reading ? "read" : tool.replace(/^browser_/, "").replace(/_/g, " ")} ${short(g.label || summariseArgs(args), 140)}${host ? ` on ${host}` : ""}`.trim();
   bus.emit("activity", { threadId, botId: b.id, text: title });
   const ok = await gate(br, threadId, { kind: "mcp", server: kind, tool, arguments: g.grounded, ...(g.effect ? { effect: g.effect } : {}) }, { kind: "mcp", title, detail: { server: kind, tool, args: g.grounded } });
   const timing = { gate: Date.now() - t0 }; // includes a lease wait and jev's remote check (p50 336 ms for browser, measured)
@@ -652,18 +771,39 @@ async function runtimeTool(br, threadId, p) {
     timing.boot = Date.now() - t; t = Date.now();
     if (kind === "browser" && tool !== "browser_tabs") await frontTab(mcp);
     if (kind === "browser" && comp.viewers > 0 && /^browser_(click|select_option)$/.test(tool) && args.target) await glideTo(mcp, args);
+    const tabsBefore = tabCounts.get(mcp);
     timing.prep = Date.now() - t; t = Date.now();
     const r = await mcp.request("tools/call", { name: tool, arguments: kind === "computer" ? { ...args, _watched: comp.viewers > 0 } : args }, 120000);
     timing.run = Date.now() - t;
     const content = Array.isArray(r.content) ? r.content : [];
     const text = content.filter((x) => x.type === "text").map((x) => x.text).join("\n");
-    if (kind === "browser") { keepSnapshot(b.id, p.threadId, text); const t = readTabs(text); if (t) tabCounts.set(mcp, t.count); }
+    let out = text;
+    if (kind === "browser") {
+      const prev = snapshots.get(p.threadId), url = /^- Page URL: (\S+)/m.exec(text)?.[1] || prev?.url || null, snap = snapshotOf(b.id, text);
+      const mode = SNAP_MODES.includes(snapArg) ? snapArg : undefined;
+      if (reading) out = snap == null ? text : `${pageHead(text)}\n\n${snapshotToText(snap)}`;
+      else out = `${SNAP_LINK.test(text) ? `${verifyLine(tool, text, { before: prev?.url, tabsBefore })}\n` : ""}${shapeSnapshot(text, snap, { prev, url, mode })}`;
+      noteSnapshot(p.threadId, snap, url, { scoped: !!(args.target || args.depth), seen: !reading && mode !== "none" });
+      const tb = readTabs(text); if (tb) tabCounts.set(mcp, tb.count);
+    }
     addEvent(threadId, turnId, "tool", { type: kind, title, status: r.isError ? "failed" : "completed", output: text.slice(0, 1500), timing });
-    return { success: !r.isError, contentItems: content.map((x) => x.type === "image" ? { type: "inputImage", imageUrl: `data:${x.mimeType || "image/png"};base64,${x.data}` } : { type: "inputText", text: x.type === "text" ? x.text : JSON.stringify(x).slice(0, 4000) }) };
+    return { success: !r.isError, contentItems: toContentItems([{ type: "text", text: out }, ...content.filter((x) => x.type !== "text")], { codeMode: String(p.callId || "").startsWith("exec-") }) };
   } catch (e) {
     addEvent(threadId, turnId, "tool", { type: kind, title, status: "failed", error: e.message });
     return say(`The computer couldn't run ${tool}: ${e.message}`, false);
   }
+}
+const pageHead = (text) => { const t = /^- Page Title: (.*)$/m.exec(text)?.[1], u = /^- Page URL: (.*)$/m.exec(text)?.[1]; return `Page: ${[t, u && `(${u})`].filter(Boolean).join(" ") || "unknown"}`; };
+
+// Codex hands a dynamic tool's result to an exec script (nested call ids "exec-…") as ONE string, its text and image
+// data URLs joined by newlines (codex-rs tools/src/tool_output.rs, 0.156). So there an image result is the bare data URL,
+// which image(result) shows. Text items never carry base64: unknown blocks become a placeholder, not JSON.
+const noBase64 = (s) => String(s).replace(/data:[\w.+-]+\/[\w.+-]+;base64,[A-Za-z0-9+/=]{64,}/g, "[base64 data omitted]").replace(/[A-Za-z0-9+/]{2000,}={0,2}/g, "[base64 data omitted]");
+export function toContentItems(content, { codeMode = false } = {}) {
+  const items = content.map((x) => x.type === "image" ? { type: "inputImage", imageUrl: `data:${x.mimeType || "image/png"};base64,${x.data}` }
+    : { type: "inputText", text: noBase64(x.type === "text" ? x.text : x.type === "resource" && typeof x.resource?.text === "string" ? x.resource.text : `[${x.type} content omitted]`) });
+  const images = items.filter((x) => x.type === "inputImage");
+  return codeMode && images.length ? images.slice(0, 1) : items;
 }
 
 // ---------- tab focus ----------
@@ -690,11 +830,12 @@ export async function frontTab(mcp) {
 }
 
 // While the driver watches, move the pointer onto the element first and let the live-view pointer finish its glide,
-// so the press lands where the pointer already is instead of mid-flight. Unwatched runs skip it (~0.6 s per click).
-const GLIDE_MS = 520;
+// so the press lands where the pointer already is instead of mid-flight. Unwatched runs skip it.
+// The glide (pointer.js, 250 ms) starts when the hover moves the mouse; the hover's own settle wait has used part of it.
+const GLIDE_MS = 250;
 async function glideTo(mcp, args) {
   try { await mcp.request("tools/call", { name: "browser_hover", arguments: { element: args.element || "target", target: args.target } }, 15000); } catch {}
-  await new Promise((r) => setTimeout(r, GLIDE_MS));
+  await new Promise((r) => setTimeout(r, Math.max(0, GLIDE_MS - PW_SETTLE_MS)));
 }
 
 // ---------- finding past threads ----------

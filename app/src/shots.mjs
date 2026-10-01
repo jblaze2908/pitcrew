@@ -1,5 +1,6 @@
 // Screenshots a crew member shares in chat. Kept outside the bot's mount, so nothing on its computer can rewrite them.
 import { spawn } from "node:child_process";
+import { posix } from "node:path";
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, unlinkSync, realpathSync, createReadStream } from "node:fs";
 import { ROOT, botDir, PW_OUT } from "./computer.mjs";
 
@@ -22,15 +23,16 @@ function compress(container, buf) {
   });
 }
 
-// Playwright returns the image inline, or only the path of the file it wrote under PW_OUT.
+// Playwright returns the image inline, or only the path of the file it wrote under PW_OUT: absolute, or a markdown link
+// relative to its cwd, /bot/work.
 export function imageFrom(result, botId) {
   const item = (result.contentItems || []).find((x) => x.type === "inputImage");
   if (item) return Buffer.from(item.imageUrl.split(",")[1] || "", "base64");
   const text = (result.contentItems || []).map((x) => x.text || "").join("\n");
-  const m = new RegExp(`${PW_OUT}/[\\w./-]+\\.(?:png|jpe?g)`).exec(text);
-  if (!m) return null;
+  const rel = /\]\(([\w./-]+\.(?:png|jpe?g))\)/.exec(text)?.[1], path = rel ? posix.resolve("/bot/work", rel) : new RegExp(`${PW_OUT}/[\\w./-]+\\.(?:png|jpe?g)`).exec(text)?.[0];
+  if (!path?.startsWith(`${PW_OUT}/`)) return null;
   try {
-    const base = realpathSync(`${botDir(botId)}${PW_OUT.slice(4)}`), full = realpathSync(`${botDir(botId)}${m[0].slice(4)}`);
+    const base = realpathSync(`${botDir(botId)}${PW_OUT.slice(4)}`), full = realpathSync(`${botDir(botId)}${path.slice(4)}`);
     return full.startsWith(base + "/") ? readFileSync(full) : null;
   } catch { return null; }
 }

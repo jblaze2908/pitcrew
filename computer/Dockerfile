@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd -m -u 1500 crew && mkdir -p /bot /auth /opt/pitcrew && chown crew /bot
 COPY entrypoint.sh /usr/local/bin/pitcrew-computer
 COPY desktop.sh /usr/local/bin/pitcrew-desktop
-COPY computer-mcp.mjs /opt/pitcrew/
+COPY computer-mcp.mjs files.mjs /opt/pitcrew/
 COPY pointer /opt/pitcrew/pointer
 # Codex dispatches on argv[0]: an apply_patch link lets remote turns patch files here. It must be on the login-shell PATH.
 RUN chmod 755 /usr/local/bin/pitcrew-computer /usr/local/bin/pitcrew-desktop && chmod -R a+rX /opt/pitcrew \

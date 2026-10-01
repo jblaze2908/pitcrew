@@ -366,3 +366,99 @@ test("the computer is warmed only for threads that used it lately, the desktop o
   turn("tu_w3", 3, "commandExecution"); assert.deepEqual(R.warmPlan("t_warm"), { desktop: false });
   turn("tu_w4", 4); turn("tu_w5", 5, "mcpToolCall"); turn("tu_w6", 6); assert.equal(R.warmPlan("t_warm"), null);
 });
+
+// A results page in Playwright MCP 0.0.82's snapshot format; refBase shifts every ref, as a re-render that renumbers would.
+const shop = (refBase = 0, extra = []) => [
+  `- generic [ref=e${1 + refBase}]:`, `  - banner [ref=e${2 + refBase}]:`, `    - link "Shop home" [ref=e${3 + refBase}] [cursor=pointer]:`, `      - /url: /`,
+  `    - searchbox "Search products" [ref=e${4 + refBase}]`, `  - main [ref=e${5 + refBase}]:`, `    - heading "Results for kettle" [level=1] [ref=e${6 + refBase}]`, `    - list [ref=e${7 + refBase}]:`,
+  ...Array.from({ length: 30 }, (_, i) => [`      - listitem [ref=e${10 + i * 3 + refBase}]:`, `        - link "Electric kettle model ${i + 1}, 1.7 L, stainless steel" [ref=e${11 + i * 3 + refBase}] [cursor=pointer]:`, `          - /url: /p/${1000 + i}`, `        - button "Add to cart" [ref=e${12 + i * 3 + refBase}]`]).flat(),
+  ...extra, `  - contentinfo [ref=e${200 + refBase}]: Shop footer`,
+].join("\n");
+const acted = (url = "https://shop.example/s?q=kettle") => `### Page\n- Page URL: ${url}\n- Page Title: Kettles\n### Snapshot\n- [Snapshot](../run/playwright/page-1.yml)`;
+const URL1 = "https://shop.example/s?q=kettle";
+
+test("action results carry the page: diff on the same page, full on a new one, and modes switch it", () => {
+  const before = shop(), after = shop(0, [`    - status [ref=e300]: Added to cart`]).replace('button "Add to cart" [ref=e18]', 'button "Add to cart" [active] [ref=e18]');
+  const prev = { url: URL1, text: before };
+  const diff = R.shapeSnapshot(acted(), after, { prev, url: URL1, mode: "diff" });
+  assert.match(diff, /### Snapshot changes/);
+  assert.match(diff, /\n\+ {5}- status \[ref=e300\]: Added to cart\n/);
+  assert.match(diff, /\n {4}- main \[ref=e5\]:\n[\s\S]*\n- {9}- button "Add to cart" \[ref=e18\]\n\+ {9}- button "Add to cart" \[active\] \[ref=e18\]\n/);
+  assert.match(diff, /… \d+ unchanged lines/);
+  assert.ok(!diff.includes("Electric kettle model 20"), "unchanged lines collapse");
+  assert.ok(diff.length < after.length / 2, `${diff.length} vs ${after.length}`);
+  // Refs renumbered (re-render): the diff would be most of the page, so the full snapshot goes instead.
+  assert.match(R.shapeSnapshot(acted(), shop(100), { prev, url: URL1, mode: "diff" }), /### Snapshot\n```yaml\n- generic \[ref=e101\]/);
+  // A new page, a first view, or a small page: full.
+  for (const o of [{ prev, url: "https://shop.example/p/1000" }, { prev: null, url: URL1 }, { prev: { url: URL1, text: "- x" }, url: URL1, small: true }])
+    assert.match(R.shapeSnapshot(acted(), o.small ? "- generic [ref=e1]: hi" : after, { ...o, mode: "diff" }), /### Snapshot\n```yaml\n/);
+  assert.match(R.shapeSnapshot(acted(), before, { prev, url: URL1, mode: "diff" }), /No change since your last snapshot/);
+  assert.equal(R.shapeSnapshot(acted(), after, { prev, url: URL1, mode: "link" }), acted());
+  assert.match(R.shapeSnapshot(acted(), after, { prev, url: URL1, mode: "full" }), /```yaml\n- generic \[ref=e1\]/);
+  assert.match(R.shapeSnapshot(acted(), after, { prev, url: URL1, mode: "none" }), /Not included \(snapshot: "none"\); it's in \/bot\/run\/playwright\/page-1\.yml/);
+});
+
+test("snapshots over the cap are cut on a line, with the file and a way to the rest", () => {
+  const big = shop(0, Array.from({ length: 200 }, (_, i) => `    - paragraph [ref=e${400 + i}]: Review ${i} says this kettle boils fast and pours cleanly`));
+  const out = R.shapeSnapshot(acted(), big, { mode: "full" });
+  const body = /```yaml\n([\s\S]*?)\n```/.exec(out)[1];
+  assert.ok(body.length <= R.SNAP_MAX && big.startsWith(body) && big[body.length] === "\n");
+  assert.match(out, /Truncated: showing \d+ of \d+ KB \(full snapshot: \/bot\/run\/playwright\/page-1\.yml\)\. Find the rest with browser_find/);
+  // An explicit browser_snapshot comes inline; it gets the larger cap and no file.
+  const explicit = R.shapeSnapshot(`### Page\n- Page URL: ${URL1}\n### Snapshot\n\`\`\`yaml\n${big}\n\`\`\``, big);
+  assert.ok(/```yaml\n([\s\S]*?)\n```/.exec(explicit)[1].length > R.SNAP_MAX && !explicit.includes("full snapshot:"));
+});
+
+test("the verification line says where the action left the agent", () => {
+  assert.equal(R.verifyLine("browser_click", acted("https://shop.example/p/1000"), { before: URL1, tabsBefore: 1 }), `click done · navigated ${URL1} → https://shop.example/p/1000 · title "Kettles"`);
+  const busy = `### Open tabs\n- 0: [Kettles](${URL1})\n- 1: (current) [Pay](https://pay.example/)\n### Page\n- Page URL: https://pay.example/\n- Console: 2 errors, 0 warnings\n### Modal state\n- ["alert" dialog with message "Hi"]: can be handled by browser_handle_dialog\n### Events\n- Downloaded file bill.pdf to "downloads/bill.pdf"`;
+  assert.equal(R.verifyLine("browser_click", busy, { before: URL1, tabsBefore: 1 }), `click done · navigated ${URL1} → https://pay.example/ · new tab opened (2 open) · modal: ["alert" dialog with message "Hi"]: can be handled by browser_handle_dialog · Downloaded file bill.pdf to "downloads/bill.pdf" · console: 2 errors`);
+  assert.equal(R.verifyLine("browser_type", `### Error\nRef e17 not found\n### Page\n- Page URL: ${URL1}`, { before: URL1 }), `type failed · same page ${URL1}`);
+});
+
+test("browser_read turns the snapshot into compact markdown, main landmark first", () => {
+  const md = R.snapshotToText(shop(0, [`    - textbox "Email" [ref=e301]`, `    - text: Subscribe`, `    - checkbox "Subscribe" [checked] [ref=e302]`, `    - combobox "Size" [ref=e303]:`, `      - option "Small"`, `      - option "Large" [selected]`, `    - table [ref=e304]:`, `      - row [ref=e305]:`, `        - cell "Price" [ref=e306]`, `        - cell "₹2,318" [ref=e307]`]));
+  assert.ok(md.startsWith("# Results for kettle\n- [Electric kettle model 1, 1.7 L, stainless steel](/p/1000)\n[button: Add to cart]"), md.slice(0, 200));
+  assert.ok(!md.includes("Shop home") && !md.includes("[ref="), "banner and refs left out");
+  assert.ok(md.endsWith("[textbox Email]\n[x] Subscribe\n[select Size: Large]\n| Price | ₹2,318 |"), md.slice(-120));
+});
+
+test("tool results deliver images as images, never base64 in text; exec scripts get the bare data URL", () => {
+  const img = { type: "image", data: "QUJD".repeat(40), mimeType: "image/jpeg" }, b64 = "data:image/png;base64," + "A".repeat(100);
+  const direct = R.toContentItems([{ type: "text", text: `ok ${b64}` }, img, { type: "resource", resource: { blob: "Z".repeat(3000) } }]);
+  assert.deepEqual(direct.map((x) => x.type), ["inputText", "inputImage", "inputText"]);
+  assert.equal(direct[0].text, "ok [base64 data omitted]");
+  assert.equal(direct[1].imageUrl, `data:image/jpeg;base64,${img.data}`);
+  assert.equal(direct[2].text, "[resource content omitted]");
+  assert.deepEqual(R.toContentItems([{ type: "text", text: "click ok" }, img], { codeMode: true }), [direct[1]]);
+  assert.deepEqual(R.toContentItems([{ type: "text", text: "failed" }], { codeMode: true }), [{ type: "inputText", text: "failed" }]);
+});
+
+test("the model sees the browser tools it uses, with honest descriptions", async () => {
+  const { dynamicTools, instructions, FILES_URL } = await import("../app/src/crew.mjs");
+  const t = (name, schema = {}) => ({ name, description: `pw ${name}`, inputSchema: { type: "object", properties: schema } });
+  const manifest = { browser: ["browser_click", "browser_snapshot", "browser_evaluate", "browser_run_code_unsafe", "browser_emulate_media", "browser_resize", "browser_network_request", "browser_network_requests", "browser_close", "browser_drag", "browser_hover", "browser_take_screenshot"].map((n) => t(n)),
+    computer: ["screenshot", "click", "double_click", "type", "key"].map((n) => t(n)) };
+  manifest.browser.push(t("browser_fill_form", { fields: { type: "array", items: { type: "object", properties: { type: { type: "string", enum: ["textbox", "checkbox", "radio", "combobox", "slider"], description: "Type of the field" } } } } }));
+  const tools = dynamicTools({ kind: "specialist" }, manifest), names = tools.map((x) => x.name), by = (n) => tools.find((x) => x.name === n);
+  for (const gone of ["browser_evaluate", "browser_run_code_unsafe", "browser_emulate_media", "browser_resize", "browser_network_request", "browser_network_requests", "browser_close", "browser_drag", "computer_double_click", "computer_type"]) assert.ok(!names.includes(gone), gone);
+  for (const kept of ["browser_click", "browser_snapshot", "browser_hover", "browser_read", "browser_fill_form", "computer_click", "computer_screenshot", "share_screenshot"]) assert.ok(names.includes(kept), kept);
+  assert.match(by("browser_click").description, /navigate to its URL/);
+  assert.deepEqual(by("browser_click").inputSchema.properties.snapshot.enum, ["diff", "full", "none"]);
+  assert.equal(by("browser_snapshot").inputSchema.properties.snapshot, undefined);
+  assert.match(by("browser_fill_form").inputSchema.properties.fields.items.properties.type.description, /not its HTML type/);
+  assert.equal(manifest.browser.at(-1).inputSchema.properties.fields.items.properties.type.description, "Type of the field", "the cached manifest is never edited");
+  assert.match(by("computer_click").description, /includes a screenshot/);
+  assert.match(by("browser_take_screenshot").description, /image\(result\)/);
+  const ins = instructions({ name: "T", personality: {} }, []);
+  assert.ok(ins.includes(FILES_URL) && ins.includes("file:// is blocked") && ins.includes("don't print ALL_TOOLS"));
+});
+
+test("a shared screenshot can also come from Playwright's relative link", async () => {
+  const { imageFrom } = await import("../app/src/shots.mjs");
+  const jpg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 9]);
+  mkdirSync(`${root}/bots/b_rel/run/playwright`, { recursive: true }); writeFileSync(`${root}/bots/b_rel/run/playwright/page-1.jpeg`, jpg); writeFileSync(`${root}/bots/b_rel/x.jpg`, jpg);
+  const said = (t) => ({ contentItems: [{ type: "inputText", text: t }] });
+  assert.deepEqual(imageFrom(said("- [Screenshot of viewport](../run/playwright/page-1.jpeg)"), "b_rel"), jpg);
+  assert.equal(imageFrom(said("- [Screenshot](../x.jpg)"), "b_rel"), null);
+});
