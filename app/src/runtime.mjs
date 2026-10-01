@@ -87,7 +87,11 @@ const brainHooks = {
 export const computerHooks = {
   isBusy,
   getBot,
-  onState: (c) => bus.emit("computer", { botId: c.bot.id, up: c.up, desktop: c.desktopUp, startedAt: c.startedAt }),
+  onState: (c) => {
+    bus.emit("computer", { botId: c.bot.id, up: c.up, desktop: c.desktopUp, startedAt: c.startedAt });
+    // The desktop the driver held is gone; a lease on it would block the crew with no screen to hand back from.
+    if (!c.up && leases.has(c.bot.id)) releaseLease(c.bot.id, "computer.lease_released", "The computer stopped while you had control, so control went back to the crew.");
+  },
   onComputerBoot: (botId) => { for (const [tid, a] of active) if (getThread(tid)?.bot_id === botId) bus.emit("activity", { threadId: tid, botId, text: "Computer up" }); },
 };
 function addSystemForBot(botId, text) {
@@ -384,17 +388,20 @@ export function learnProgress(ps) {
   return { label: describePattern(d.pattern), streak: r?.streak || 0, need: LEARN_AFTER };
 }
 
-async function waitLease(botId, threadId) {
+// While the driver holds the screen, the crew asks for it back through a pit stop instead of waiting blind.
+async function waitLease(botId, threadId, call) {
   const l = leases.get(botId);
   if (!l) return true;
-  addEvent(threadId, active.get(threadId)?.turnId, "system", { text: "Waiting: you have the wheel. Hand back control to let the crew continue." });
-  return new Promise((res) => { l.waiters.push(res); setTimeout(() => res(false), 30 * 60000); });
+  // One ask per lease: every call that lands while it's open waits on the same pit stop.
+  l.ask ??= pitStop({ botId, threadId, kind: "lease", effect: "ask", title: `${getBot(botId)?.name || "The crew"} needs the computer back`, detail: { server: call.server, tool: call.tool } })
+    .then((d) => { if (d === "approved") releaseLease(botId, "computer.lease_granted"); else if (leases.get(botId) === l) l.ask = null; return d === "approved"; });
+  return Promise.race([new Promise((res) => l.waiters.push(res)), l.ask]);
 }
 
 // Decides one tool call. Returns true to run it. Rules and standing approvals first, then jev, then the driver.
 async function gate(c, threadId, call, pit) {
   const b = getBot(c.bot.id);
-  if (call.kind === "mcp" && ["browser", "computer"].includes(call.server) && !(await waitLease(b.id, threadId))) return false;
+  if (call.kind === "mcp" && ["browser", "computer"].includes(call.server) && !(await waitLease(b.id, threadId, call))) return false;
   const sig = signature(call), pat = pattern(call);
   const v = await jev(call, { policy: b.policy, apiKey: getSecret("openrouter") || "missing" });
   if (v.decision === "block") { audit("jev", "gate.block", { threadId, effect: v.effect, reason: v.reason, call: gateSummary(call) }); addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Blocked by jev: ${v.reason}. Nothing ran.`, tone: "bad" }); return false; }
@@ -669,11 +676,18 @@ function tickSchedules() {
 
 // ---------- screen lease ----------
 export function takeControl(botId) { if (!leases.has(botId)) leases.set(botId, { since: now(), waiters: [] }); audit("driver", "computer.take_control", { botId }); bus.emit("lease", { botId, held: true }); }
-export function handBack(botId, note = "") {
-  const l = leases.get(botId); leases.delete(botId);
-  l?.waiters.forEach((w) => w(true));
-  audit("driver", "computer.hand_back", { botId });
+function releaseLease(botId, action, why) {
+  const l = leases.get(botId);
+  if (!l) return;
+  leases.delete(botId);
+  l.waiters.forEach((w) => w(true));
+  audit("driver", action, { botId });
   bus.emit("lease", { botId, held: false });
+  for (const ps of all("SELECT id FROM pitstops WHERE bot_id=? AND kind='lease' AND status='pending'", botId)) decide(ps.id, "approve", { note: "Control handed back" });
+  if (why) for (const [tid, a] of active) if (getThread(tid)?.bot_id === botId) addEvent(tid, a.turnId, "system", { text: why });
+}
+export function handBack(botId, note = "") {
+  releaseLease(botId, "computer.hand_back");
   if (note.trim()) for (const [tid] of active) if (getThread(tid)?.bot_id === botId) sendMessage(tid, { text: `I handed the computer back. ${note}`, mode: "auto" }).catch(() => {});
 }
 export const leaseHeld = (botId) => leases.has(botId);

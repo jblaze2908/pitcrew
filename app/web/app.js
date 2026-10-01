@@ -162,7 +162,9 @@ function pitCard(p, { onDone } = {}) {
     j.reason && h("p", { class: "why" }, `jev · ${j.by || ""} · ${j.reason}${j.ms ? ` · ${j.ms} ms` : ""}`),
     !done && p.learn && h("p", { class: "small faint" }, p.learn.need - p.learn.streak <= 1 ? `Approve this and ${b?.name || "the crew"} stops asking for “${p.learn.label}”.` : `Approve “${p.learn.label}” ${p.learn.need - p.learn.streak} times in a row and ${b?.name || "the crew"} stops asking.`),
     !done && p.kind === "hire" && h("div", { class: "acts" }, h("a", { class: "pc-pill sig s", href: `#/hire/${p.id}` }, "Review & hire"), h("button", { class: "pc-pill o s", onclick: () => decide("deny") }, "Decline")),
-    !done && p.kind !== "hire" && [note, h("div", { class: "acts" },
+    !done && p.kind === "lease" && h("div", { class: "acts" }, h("button", { class: "pc-pill sig s", onclick: () => decide("approve", "once") }, "Hand it back"), h("button", { class: "pc-pill o s", onclick: () => decide("deny") }, "Keep control"),
+      h("a", { class: "small faint", href: `#/live/${p.bot_id}`, style: "margin-left:auto" }, "Open live view")),
+    !done && !["hire", "lease"].includes(p.kind) && [note, h("div", { class: "acts" },
       h("button", { class: "pc-pill sig s", onclick: () => decide("approve", "once") }, "Approve once"),
       p.thread_id && h("button", { class: "pc-pill o s", onclick: () => decide("approve", "thread") }, "For this thread"),
       !noAlways && h("button", { class: "pc-pill o s", onclick: () => decide("approve", "always") }, "Always for this member"),
@@ -468,10 +470,12 @@ async function threadView(id) {
   const title = h("h1", { class: "pc-h2", title: "Click to rename" }, d.thread.title);
   title.addEventListener("click", () => { const i = h("input", { value: d.thread.title }); title.replaceWith(i); i.focus(); const done = async () => { await api("PATCH", `/api/threads/${id}`, { title: i.value || d.thread.title }); d.thread.title = i.value || d.thread.title; title.textContent = d.thread.title; i.replaceWith(title); }; i.addEventListener("blur", done); i.addEventListener("keydown", (e) => e.key === "Enter" && i.blur()); });
 
+  // Hand back works from chat too, so a held lease never strands the crew behind a screen you can't reach.
+  const leaseBack = h("button", { class: `pc-pill sig s${b.computer?.lease ? "" : " hidden"}`, onclick: async () => { await api("POST", `/api/bots/${b.id}/computer/handback`); leaseBack.classList.add("hidden"); } }, "Hand back control");
   const panel = h("aside", { class: "panel" },
     h("div", { class: "col" }, h("p", { class: "pc-lab" }, "Crew member"), h("a", { class: "row", href: `#/crew/${b.id}` }, face(b, "md"), h("div", {}, h("b", { class: "pc-h3" }, b.name), h("p", { class: "pc-m small faint" }, `${b.provider} · ${b.model}`)))),
     h("div", { class: "col" }, h("p", { class: "pc-lab" }, "Context"), ctxMeter, ctxLabel, h("div", { class: "row" }, h("button", { class: "pc-pill o s", onclick: async () => { await api("POST", `/api/threads/${id}/compact`); } }, "Compact"), h("button", { class: "pc-pill o s", onclick: async () => { const r = await api("POST", `/api/threads/${id}/fresh`); location.hash = `#/t/${r.id}`; } }, "Fresh thread from here"))),
-    h("div", { class: "col" }, h("p", { class: "pc-lab" }, "Computer"), b.computer?.desktop ? h("div", { class: "col", style: "gap:8px" }, h("a", { class: "mini", href: `#/live/${b.id}` }, h("span", { class: "pc-pill s" }, "Watch live")), h("button", { class: "small", style: "text-align:left;padding:0", onclick: () => openDock(b) }, "Watch in a corner while you chat")) : h("div", { class: "mini" }, h("span", { class: "small faint" }, b.computer?.up ? "Runtime up · no desktop yet" : "In the garage")), h("p", { class: "small faint" }, "Chat needs no computer. It starts on the first command or browser action and stops after 10 idle minutes."), h("a", { class: "small", href: `#/crew/${b.id}/files` }, "Browse files and changes")),
+    h("div", { class: "col" }, h("p", { class: "pc-lab" }, "Computer"), leaseBack, b.computer?.desktop ? h("div", { class: "col", style: "gap:8px" }, h("a", { class: "mini", href: `#/live/${b.id}` }, h("span", { class: "pc-pill s" }, "Watch live")), h("button", { class: "small", style: "text-align:left;padding:0", onclick: () => openDock(b) }, "Watch in a corner while you chat")) : h("div", { class: "mini" }, h("span", { class: "small faint" }, b.computer?.up ? "Runtime up · no desktop yet" : "In the garage")), h("p", { class: "small faint" }, "Chat needs no computer. It starts on the first command or browser action and stops after 10 idle minutes."), h("a", { class: "small", href: `#/crew/${b.id}/files` }, "Browse files and changes")),
     h("div", { class: "col" }, h("p", { class: "pc-lab" }, "Other threads"), ...(bot(b.id)?.threads || []).filter((t) => t.id !== id).slice(0, 8).map((t) => h("a", { class: "small muted", href: `#/t/${t.id}` }, t.title))),
     h("button", { class: "small faint", style: "text-align:left;padding:0", onclick: async (e) => { if (!confirmInline(e.target, "Archive?")) return; await api("PATCH", `/api/threads/${id}`, { archived: true }); location.hash = `#/crew/${b.id}`; } }, "Archive thread"));
 
@@ -483,6 +487,7 @@ async function threadView(id) {
 
   threadHook = async (type, x) => {
     if (x.threadId !== id && !(type === "pitstop" && x.botId === b.id) && type !== "lease") return;
+    if (type === "lease" && x.botId === b.id) leaseBack.classList.toggle("hidden", !x.held);
     if (type === "delta") {
       if (!streaming || streaming.itemId !== x.itemId) { streaming = { itemId: x.itemId, text: "", el: h("div", { class: "msg bot" }, face(b, "sm", "working"), h("div", { class: "md" })) }; liveLine.before(streaming.el); }
       streaming.text += x.text; streaming.el.lastChild.textContent = streaming.text; scroll();
