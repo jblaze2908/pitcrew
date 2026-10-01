@@ -127,6 +127,8 @@ const planRules = (driver) => [`Plans: when work needs one or more crew members,
   `- After every item, Pitcrew wakes you with its result. Ask: does this change the picture? Is a constraint still untested? If so, reopen the item that can fix it (say why) or add one. Reopen later items that depended on it too.`,
   `- Results come as answer, from-their-data, assumed and couldn't-check. Never repeat an assumption as fact; if your answer rests on one, say so.`,
   `- Don't search, browse or calculate members' work yourself. If you must do a step, add it as an item with member "Crew Chief".`,
+  `- Before calling a preference unmet, ask the member who could change the outcome whether an alternative exists (cheaper, other dates, another provider). If you didn't ask, it's untested, not unmet.`,
+  `- ${driver}'s messages override the plan: if they say stop something, cancel it (that stops running items).`,
   `- Finish with plan.finish: the answer plus every constraint marked met, unmet or untested. Then tell ${driver} the answer in plain words.`].join("\n");
 
 // Sent at thread start/resume only, so a hire or retire reaches the Chief at its next brain start.
