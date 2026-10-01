@@ -10,6 +10,7 @@ import * as P from "./providers.mjs";
 import * as R from "./runtime.mjs";
 import { getBot, listBots, ensureChief, updateBot, normaliseSpec, createBot } from "./crew.mjs";
 import { objectText } from "./snapshot.mjs";
+import { serveShot, SHOT_NAME } from "./shots.mjs";
 import { listProjects, openProject, proxyCode, startCodeSweeper, reapCode } from "./code.mjs";
 import { botDir, listFiles, reapOrphans, startIdleSweeper, allComputers, allBrains, startBootSocket, toolManifest } from "./computer.mjs";
 
@@ -313,6 +314,8 @@ const server = createServer(async (req, res) => {
     if (url.pathname.startsWith("/code/")) return proxyCode(req, res); // token-authed, sandboxed: see code.mjs
     const fm = /^\/files\/([\w-]+)\/(.+)$/.exec(url.pathname);
     if (fm) return authed(req) ? serveFile(req, res, fm[1], fm[2]) : send(res, 401, "Sign in");
+    const sm = /^\/shots\/([\w-]+)\/([^/]+)$/.exec(url.pathname);
+    if (sm) return !authed(req) ? send(res, 401, "Sign in") : getBot(sm[1]) && SHOT_NAME.test(sm[2]) ? serveShot(res, sm[1], sm[2]) : send(res, 404, "Not found");
     if (!url.pathname.startsWith("/api/")) return serveStatic(req, res, url.pathname);
     for (const r of routes) {
       if (r.method !== req.method) continue;

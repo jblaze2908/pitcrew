@@ -388,6 +388,13 @@ async function threadView(id) {
         ? h("a", { href: `/files/${b.id}/${p}?inline=1`, target: "_blank", rel: "noopener" }, h("img", { src: `/files/${b.id}/${p}?inline=1`, alt: p.split("/").pop(), loading: "lazy" }))
         : h("a", { class: "pc-chip", href: `/files/${b.id}/${p}` }, p.split("/").pop().replace(/^[a-z0-9]+-/, "")))) : null);
       case "agent": return h("div", { class: "msg bot" }, face(b, "sm", "idle"), md(e.data.text));
+      case "shot": {
+        const src = `/shots/${e.data.botId}/${e.data.file}`;
+        const img = h("img", { src, alt: e.data.caption, loading: "lazy" });
+        const fig = h("figure", { class: "shot" }, h("a", { href: src, target: "_blank", rel: "noopener" }, img), h("figcaption", { class: "small muted" }, e.data.caption));
+        img.addEventListener("error", () => fig.replaceChildren(h("p", { class: "small faint" }, `Screenshot no longer kept · ${e.data.caption}`)));
+        return h("div", { class: "msg bot" }, face(b, "sm", "idle"), fig);
+      }
       case "tool": return h("details", { class: "tool" }, h("summary", {}, h("span", { class: `st ${stepOk(e) ? "ok" : e.data.status === "inProgress" ? "" : "bad"}` }), tidyTitle(e.data.title)), (e.data.output || e.data.error) && h("pre", {}, e.data.error || e.data.output));
       case "system": return h("p", { class: `sys ${e.data.tone === "bad" ? "bad" : ""}` }, e.data.text);
       case "error": return h("p", { class: "err" }, e.data.text);

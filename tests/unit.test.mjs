@@ -138,3 +138,20 @@ test("code view allows px0's reads and refuses every write", async () => {
   mkdirSync(`${w}/tools/scraper`, { recursive: true }); writeFileSync(`${w}/tools/scraper/pyproject.toml`, "");
   assert.deepEqual(listProjects("b_code").map((p) => p.path).sort(), ["rent-split", "tools/scraper"]);
 });
+
+test("shared screenshots come from the tool result or Playwright's own output dir, nowhere else", async () => {
+  const { imageFrom, saveShot, SHOT_NAME } = await import("../app/src/shots.mjs");
+  const jpg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+  assert.deepEqual(imageFrom({ contentItems: [{ type: "inputText", text: "ok" }, { type: "inputImage", imageUrl: `data:image/jpeg;base64,${jpg.toString("base64")}` }] }, "b_shot"), jpg);
+  mkdirSync(`${root}/bots/b_shot/run/playwright`, { recursive: true }); writeFileSync(`${root}/bots/b_shot/run/playwright/page.jpeg`, jpg);
+  writeFileSync(`${root}/bots/b_shot/secret.png`, "nope"); symlinkSync(`${root}/bots/b_shot/secret.png`, `${root}/bots/b_shot/run/playwright/link.png`);
+  const said = (t) => ({ contentItems: [{ type: "inputText", text: t }] });
+  assert.deepEqual(imageFrom(said("Saved to /bot/run/playwright/page.jpeg"), "b_shot"), jpg);
+  assert.equal(imageFrom(said("Saved to /bot/run/playwright/../secret.png"), "b_shot"), null);
+  assert.equal(imageFrom(said("Saved to /bot/run/playwright/link.png"), "b_shot"), null);
+  // No docker here: compression fails, a JPEG is kept as is and anything else is refused.
+  const s = await saveShot("b_shot", "no-such-container", jpg);
+  assert.ok(SHOT_NAME.test(s.file)); assert.equal(s.bytes, jpg.length);
+  assert.equal(await saveShot("b_shot", "no-such-container", Buffer.from("not an image")), null);
+  for (const bad of ["../x.jpg", "a.png", "a.jpg/..", ".jpg"]) assert.equal(SHOT_NAME.test(bad), false, bad);
+});

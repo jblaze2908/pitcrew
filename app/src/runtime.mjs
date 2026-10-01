@@ -11,6 +11,7 @@ import { brainFor, computerFor, allComputers, allBrains, botDir, ensureDirs, usa
 import { providerReady, estimateCost } from "./providers.mjs";
 import { validateSurface } from "./surfaces.mjs";
 import { snapshot, changes } from "./snapshot.mjs";
+import { imageFrom, saveShot, startShotSweeper } from "./shots.mjs";
 
 // ---------- live bus (SSE) ----------
 const clients = new Set();
@@ -507,6 +508,21 @@ async function dynamicTool(c, threadId, p) {
       addEvent(threadId, active.get(threadId)?.turnId, "surface", { id, title: a.title });
       return say(`Rendered surface ${id} for the driver.${v.actions.length ? ` Its actions (${v.actions.join(", ")}) will come back to you as a message.` : ""}`);
     }
+    case "share_screenshot": {
+      const caption = String(a.caption || "").trim().slice(0, 300);
+      if (!caption) return say("Give the screenshot a caption", false);
+      const screen = a.source === "screen";
+      const sa = screen ? {} : { type: "jpeg", ...(a.full_page ? { fullPage: true } : {}), ...(a.element && a.ref ? { element: String(a.element), ref: String(a.ref) } : {}) };
+      // Through runtimeTool, so the lease, the gate and the tool log apply as for any screenshot.
+      const r = await runtimeTool(c, threadId, { ...p, tool: screen ? "computer_screenshot" : "browser_take_screenshot", arguments: sa });
+      if (!r.success) return r;
+      const img = imageFrom(r, b.id);
+      const shot = img && (await saveShot(b.id, computer(b).name, img));
+      if (!shot) return say("The screenshot was taken but couldn't be saved for the driver.", false);
+      addEvent(threadId, active.get(threadId)?.turnId, "shot", { botId: b.id, file: shot.file, caption, bytes: shot.bytes });
+      audit("crew", "screenshot.shared", { botId: b.id, threadId, file: shot.file, bytes: shot.bytes, original: shot.original });
+      return say("Shared with the driver in this chat.");
+    }
     case "remember": {
       const text = String(a.text || "").trim().slice(0, 500);
       if (!text) return say("Nothing to remember", false);
@@ -717,6 +733,7 @@ export function bootRuntime() {
     if (first) { const title = titleFrom(first.text, first.attachments || []); if (title !== UNTITLED) run("UPDATE threads SET title=? WHERE id=?", title, t.id); }
   }
   setInterval(tickSchedules, 30000).unref();
+  startShotSweeper();
 }
 export { isBusy, isThinking };
 
