@@ -58,6 +58,7 @@ createServer((client) => {
 
   async function goRemote(firstRaw) {
     mode = "switching";
+    const t0 = Date.now();
     const r = await control({ op: "ensure", bot });
     if (!r.ok) { mode = "local"; return { error: r.error }; }
     up = connect(7700, r.host);
@@ -68,15 +69,20 @@ createServer((client) => {
     // Wait for 101, then replay the session start and swallow its reply.
     let ub = Buffer.alloc(0);
     await new Promise((resolve) => {
+      let gotHead = false;
       const onData = (d) => {
         ub = Buffer.concat([ub, d]);
-        if (!ub.includes("\r\n\r\n")) return;
-        if (!/^HTTP\/1\.1 101/.test(ub.toString("latin1", 0, 20))) { up.destroy(); return resolve(); }
-        if (!up.sentInit) { up.sentInit = true; ub = ub.subarray(ub.indexOf("\r\n\r\n") + 4);
+        if (!gotHead) {
+          if (!ub.includes("\r\n\r\n")) return;
+          if (!/^HTTP\/1\.1 101/.test(ub.toString("latin1", 0, 20))) { up.destroy(); return resolve(); }
+          gotHead = true; ub = ub.subarray(ub.indexOf("\r\n\r\n") + 4);
           up.write(frame(1, Buffer.from(JSON.stringify({ id: "pitcrew-init", method: "initialize", params: { ...initParams, resumeSessionId: null } })), true));
-          up.write(frame(1, Buffer.from(JSON.stringify({ method: "initialized", params: {} })), true)); }
-        const { frames, rest } = parse(ub); ub = rest;
-        if (frames.some((f) => f.op === 1 && f.data.includes('"pitcrew-init"'))) { up.off("data", onData); resolve(); }
+          up.write(frame(1, Buffer.from(JSON.stringify({ method: "initialized", params: {} })), true));
+        }
+        // Swallow our replayed initialize reply; anything after it is Codex's and is forwarded once we hand over.
+        const { frames, rest } = parse(ub);
+        const i = frames.findIndex((f) => f.op === 1 && f.data.includes('"pitcrew-init"'));
+        if (i >= 0) { ub = Buffer.concat([...frames.slice(i + 1).map((f) => f.raw), rest]); up.off("data", onData); resolve(); }
       };
       up.on("data", onData);
       setTimeout(resolve, 15000);
@@ -92,6 +98,7 @@ createServer((client) => {
     for (const q of queue.splice(0)) up.write(q.raw);
     if (buf.length) { up.write(buf); buf = Buffer.alloc(0); }
     mode = "remote";
+    console.error(`gateway ${bot}: computer handover in ${Date.now() - t0} ms (boot ${r.bootMs ?? "?"} ms)`);
     client.on("data", (x) => { if (mode === "remote") { touch(); up.write(x); } });
     return { ok: true };
   }

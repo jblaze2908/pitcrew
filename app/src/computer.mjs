@@ -277,7 +277,7 @@ export function startBootSocket(hooks) {
       const c = computerFor(bot, hooks);
       if (msg.op === "touch") { c.touch(); return s.end('{"ok":true}\n'); }
       if (msg.op === "fs") { let r; try { r = execFs(bot.id, String(msg.method), msg.params || {}); } catch { r = { fallback: true }; } if (c.up) c.touch(); return s.end(JSON.stringify(r) + "\n"); }
-      try { await c.ensure(); hooks.onComputerBoot?.(bot.id); s.end(JSON.stringify({ ok: true, host: c.name }) + "\n"); }
+      try { const t0 = Date.now(), was = c.up; await c.ensure(); hooks.onComputerBoot?.(bot.id); s.end(JSON.stringify({ ok: true, host: c.name, bootMs: was ? 0 : Date.now() - t0 }) + "\n"); }
       catch (e) { s.end(JSON.stringify({ ok: false, error: e.message }) + "\n"); }
     });
   }).listen(path, () => chmodSync(path, 0o666));
