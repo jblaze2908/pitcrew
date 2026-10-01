@@ -344,7 +344,8 @@ server.on("upgrade", (req, sock) => {
   const m = /^\/live\/([\w-]+)\/ws$/.exec(new URL(req.url, "http://x").pathname);
   if (!m || !authed(req) || !sameOrigin(req) || !getBot(m[1]) || !req.headers["sec-websocket-key"]) { sock.end("HTTP/1.1 403 Forbidden\r\n\r\n"); return; }
   const path = `${botDir(m[1])}/run/vnc.sock`;
-  if (!existsSync(path)) { sock.end("HTTP/1.1 409 Conflict\r\n\r\n"); return; }
+  // A socket file can outlive its computer (a deploy restarts them); only a running desktop has a live one.
+  if (!existsSync(path) || !allComputers().find((c) => c.bot.id === m[1])?.desktopUp) { sock.end("HTTP/1.1 409 Conflict\r\n\r\n"); return; }
   const accept = createHash("sha1").update(req.headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
   const proto = String(req.headers["sec-websocket-protocol"] || "").split(",").map((s) => s.trim()).includes("binary") ? "Sec-WebSocket-Protocol: binary\r\n" : "";
   sock.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n${proto}\r\n`);

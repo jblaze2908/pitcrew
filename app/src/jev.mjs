@@ -88,8 +88,7 @@ export function ruleVerdict(call, policy = DEFAULT_POLICY) {
     // Only elements found in the snapshot the agent read: an ungrounded ref could be any field or button.
     const grounded = els.length > 0 && els.every((e) => e && !/not in the last snapshot/.test(e));
     if (call.tool === "browser_press_key" && NAV_KEY.test(a.key || "")) return ok("browse", `navigation key ${a.key}`);
-    // Fill and click allows wait for the checkout/payment guard; until it ships they stay behind this switch.
-    if (!grounded || process.env.PITCREW_BROWSER_RULES !== "1") return null;
+    if (!grounded) return null;
     if (/^browser_(fill_form|type|select_option)$/.test(call.tool)) {
       const fields = Array.isArray(a.fields) ? a.fields : [];
       // An unlabelled box could be a password field; only named fields are known to be safe to draft into.

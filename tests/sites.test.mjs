@@ -9,8 +9,7 @@ import { domainToASCII } from "node:url";
 const root = mkdtempSync(`${tmpdir()}/pitcrew-sites-`);
 mkdirSync(`${root}/data`);
 writeFileSync(`${root}/chrome-policy.json`, JSON.stringify({ URLBlocklist: ["file://*"], SSLErrorOverrideAllowed: false }));
-// Fill/click rule allows on (they sit behind PITCREW_BROWSER_RULES), so the tests show the guard holding them back.
-Object.assign(process.env, { PITCREW_BROWSER_RULES: "1", PITCREW_ROOT: root, PITCREW_DATA: `${root}/data`, PITCREW_CHROME_POLICY: `${root}/chrome-policy.json` });
+Object.assign(process.env, { PITCREW_ROOT: root, PITCREW_DATA: `${root}/data`, PITCREW_CHROME_POLICY: `${root}/chrome-policy.json` });
 const S = await import("../app/src/sites.mjs");
 const D = await import("../app/src/domains.mjs");
 const J = await import("../app/src/jev.mjs");

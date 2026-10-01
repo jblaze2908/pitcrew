@@ -157,7 +157,6 @@ test("shared screenshots come from the tool result or Playwright's own output di
 });
 
 // Synthetic shapes of the jev-bound calls seen in production (no real data); expected effect, or null = still goes to jev.
-process.env.PITCREW_BROWSER_RULES = "1";
 const J = await import("../app/src/jev.mjs");
 const el = (element, ref = "e1") => ({ page_url: "https://example.com/form", grounded_elements: [{ ref, element }] });
 const click = (element) => ({ kind: "mcp", server: "browser", tool: "browser_click", arguments: { target: "e1", ...el(element) } });
