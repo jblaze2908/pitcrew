@@ -1,6 +1,6 @@
 // The runtime: turns on each crew member's brain, its computer on demand, the jev gate and pit stops, Pitcrew tools,
 // schedules, kill switch.
-import { writeFileSync, chownSync, readFileSync } from "node:fs";
+import { writeFileSync, chownSync, readFileSync, statSync, openSync, fstatSync, readSync, closeSync } from "node:fs";
 import { posix } from "node:path";
 import { execFs } from "./execfs.mjs";
 import { one, all, run, now, uid, json, getSetting, setSetting, audit, pruneLabels } from "./db.mjs";
@@ -14,12 +14,20 @@ import { snapshot, changes } from "./snapshot.mjs";
 import { imageFrom, saveShot, startShotSweeper } from "./shots.mjs";
 
 // ---------- live bus (SSE) ----------
-const clients = new Set();
+// Transcript events go only to clients watching that thread (?thread=); a delta per token to every tab adds up.
+const clients = new Map(); // res → thread id it watches, or null
+const SCOPED = new Set(["event", "delta", "activity", "context", "jev"]);
+export const SSE_CAP = 1 << 20;
+// A client that stopped reading would buffer every event in memory; past the cap it's dropped and EventSource reconnects.
+const push = (c, s) => { if (c.writableLength > SSE_CAP) { clients.delete(c); c.destroy(); } else c.write(s); };
 export const bus = {
-  add(res) { clients.add(res); res.on("close", () => clients.delete(res)); },
-  emit(type, data) { const s = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`; for (const c of clients) c.write(s); },
+  add(res, thread = null) { clients.set(res, thread); res.on("close", () => clients.delete(res)); },
+  emit(type, data) {
+    const scoped = SCOPED.has(type); let s;
+    for (const [c, th] of clients) if (!scoped || th === data.threadId) push(c, (s ??= `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`));
+  },
 };
-setInterval(() => { for (const c of clients) c.write(": ping\n\n"); }, 25000).unref();
+setInterval(() => { for (const c of clients.keys()) push(c, ": ping\n\n"); }, 25000).unref();
 
 // ---------- state ----------
 const active = new Map();   // our thread id → { turnId, codexTurnId, base, total, last }
@@ -35,10 +43,11 @@ export const getThread = (id) => one("SELECT * FROM threads WHERE id=?", id);
 export const isRunning = (threadId) => active.has(threadId);
 const isBusy = (c) => [...active.keys()].some((t) => getThread(t)?.bot_id === c.bot.id) || one("SELECT 1 FROM pitstops WHERE bot_id=? AND status='pending' AND kind!='hire'", c.bot.id);
 
-function addEvent(threadId, turnId, kind, data) {
+// `live` rides on the SSE payload only (the pit stop or surface row), so an open thread draws it without a refetch.
+function addEvent(threadId, turnId, kind, data, live = null) {
   const r = run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES(?,?,?,?,?)", threadId, turnId, kind, JSON.stringify(data), now());
   run("UPDATE threads SET updated_at=? WHERE id=?", now(), threadId);
-  bus.emit("event", { id: Number(r.lastInsertRowid), threadId, turnId, kind, data, ts: now() });
+  bus.emit("event", { id: Number(r.lastInsertRowid), threadId, turnId, kind, data, ts: now(), ...live });
 }
 // A thread's status is only its live state (idle | running | needs). How a run ended belongs to the turn.
 function setThreadStatus(threadId, status) {
@@ -147,7 +156,7 @@ async function startTurn(threadId, text, attachments, trigger) {
   if (weekSpend(b.id) >= b.weekly_cap_usd) throw new Error(`${b.name} has reached this week's cap ($${b.weekly_cap_usd.toFixed(2)}). Raise the cap to continue.`);
   if (!providerReady(b.provider)) throw new Error(`${b.name} uses ${b.provider === "openai" ? "the ChatGPT plan" : b.provider}, which isn't connected. Add it in Settings → Providers.`);
   const turnId = uid("tu");
-  active.set(threadId, { turnId, codexTurnId: null, base: null, total: null, last: null });
+  active.set(threadId, { turnId, codexTurnId: null, base: null, total: null, last: null, usageFrom: logSize(b.id) });
   run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,provider,model,started_at) VALUES(?,?,?,?,?,?,?,?)", turnId, threadId, b.id, "starting", trigger, b.provider, b.model, now());
   setThreadStatus(threadId, "running");
   try {
@@ -187,7 +196,7 @@ async function finishTurn(threadId, status, error) {
   active.delete(threadId);
   const t = getThread(threadId), b = getBot(t.bot_id);
   const u = a.total && a.base ? { input: a.total.inputTokens - a.base.inputTokens, cached: a.total.cachedInputTokens - a.base.cachedInputTokens, output: a.total.outputTokens - a.base.outputTokens } : { input: 0, cached: 0, output: 0 };
-  const billed = billedUsage(b.id, a.turnId);
+  const billed = billedUsage(b.id, a.turnId, a.usageFrom);
   if (billed) Object.assign(u, { input: billed.input, cached: billed.cached, output: billed.output });
   const cost = billed?.cost != null ? { usd: billed.cost, basis: "billed" } : await estimateCost(b.provider, b.model, u).catch(() => ({ usd: 0, basis: "unknown" }));
   run("UPDATE turns SET status=?, error=?, ended_at=?, input_tokens=?, cached_tokens=?, output_tokens=?, cost_usd=?, cost_basis=? WHERE id=?",
@@ -208,10 +217,15 @@ async function finishTurn(threadId, status, error) {
 }
 
 // The brain's LLM proxy logs each model request's provider-reported usage and cost, keyed by turn.
-// Read once per finished turn; the file is append-only and small (one line per model request).
-function billedUsage(botId, turnId) {
+// Read once per finished turn, from the log's size when the turn started: the file only grows, so a full read would too.
+const logSize = (botId) => { try { return statSync(usageLog(botId)).size; } catch { return 0; } };
+export function billedUsage(botId, turnId, from = 0) {
   let lines = [];
-  try { lines = readFileSync(usageLog(botId), "utf8").split("\n").filter((l) => l.includes(turnId)).map((l) => JSON.parse(l)); } catch { return null; }
+  try {
+    const fd = openSync(usageLog(botId), "r");
+    try { const size = fstatSync(fd).size, at = from <= size ? from : 0, buf = Buffer.alloc(size - at); readSync(fd, buf, 0, buf.length, at); lines = buf.toString("utf8").split("\n").filter((l) => l.includes(turnId)).map((l) => JSON.parse(l)); }
+    finally { closeSync(fd); }
+  } catch { return null; }
   if (!lines.length) return null;
   const sum = (k) => lines.reduce((s, x) => s + (x[k] || 0), 0);
   return { input: sum("input"), cached: sum("cached"), output: sum("output"), cost: lines.every((x) => typeof x.cost === "number") ? sum("cost") : null, requests: lines.length };
@@ -432,11 +446,13 @@ export function logDecision(threadId, botId, v, call, { decision = v.decision, b
 }
 const gateSummary = (c) => (c.kind === "shell" ? { kind: "shell", command: String(c.command).slice(0, 300) } : { kind: c.kind, server: c.server, tool: c.tool, args: JSON.stringify(c.arguments || {}).slice(0, 300) });
 
+export const pitRow = (p) => p && { ...p, detail: json(p.detail, {}), jev: json(p.jev, {}), learn: p.status === "pending" ? learnProgress(p) : null };
 export function pitStop({ id = uid("ps"), botId, threadId, kind, effect, title, detail, jev: v = {}, expiresMin = 30 }) {
   run("INSERT INTO pitstops(id,bot_id,thread_id,turn_id,kind,effect,title,detail,jev,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
     id, botId, threadId, threadId ? active.get(threadId)?.turnId ?? null : null, kind, effect, title, JSON.stringify(detail), JSON.stringify(v), now(), now() + expiresMin * 60000);
-  if (threadId) { addEvent(threadId, active.get(threadId)?.turnId, "pitstop", { id }); setThreadStatus(threadId, "needs"); }
-  bus.emit("pitstop", { id, botId, status: "pending" });
+  const row = pitRow(one("SELECT * FROM pitstops WHERE id=?", id));
+  if (threadId) { addEvent(threadId, active.get(threadId)?.turnId, "pitstop", { id }, { pitstop: row }); setThreadStatus(threadId, "needs"); }
+  bus.emit("pitstop", { id, botId, threadId, status: "pending", pitstop: row });
   audit("jev", "pitstop.opened", { id, botId, kind, effect, title });
   if (kind === "hire") return Promise.resolve("pending");
   return new Promise((resolve) => {
@@ -466,11 +482,12 @@ export async function decide(id, decision, { scope = "once", note = "", spec = n
   const label = note === "Kill switch" ? "expired" : status;
   run("UPDATE jev_labels SET driver_decision=?, driver_scope=? WHERE pitstop_id=?", label, label === "expired" ? null : scope, id);
   audit(status === "expired" ? "system" : "driver", `pitstop.${status}`, { id, scope, title: ps.title });
-  bus.emit("pitstop", { id, botId: ps.bot_id, status });
+  const row = one("SELECT * FROM pitstops WHERE id=?", id);
+  bus.emit("pitstop", { id, botId: ps.bot_id, threadId: ps.thread_id, status, pitstop: pitRow(row) });
   if (ps.thread_id && active.has(ps.thread_id)) setThreadStatus(ps.thread_id, "running");
   if (ps.thread_id && status === "expired") addEvent(ps.thread_id, null, "system", { text: `Pit stop expired after 30 minutes: nothing was done. (${ps.title})` });
   waits.get(id)?.(status); waits.delete(id);
-  return one("SELECT * FROM pitstops WHERE id=?", id);
+  return row;
 }
 
 async function onRequest(c, method, p) {
@@ -516,7 +533,7 @@ async function dynamicTool(c, threadId, p) {
       if (!v.ok) return say(`VALIDATION_FAILED. Fix these and call render_surface again:\n${v.errors.join("\n")}`, false);
       const id = uid("sf");
       run("INSERT INTO surfaces(id,thread_id,bot_id,title,spec,created_at) VALUES(?,?,?,?,?,?)", id, threadId, b.id, a.title, JSON.stringify(a), now());
-      addEvent(threadId, active.get(threadId)?.turnId, "surface", { id, title: a.title });
+      addEvent(threadId, active.get(threadId)?.turnId, "surface", { id, title: a.title }, { surface: { id, title: a.title, spec: a, saved: 0 } });
       return say(`Rendered surface ${id} for the driver.${v.actions.length ? ` Its actions (${v.actions.join(", ")}) will come back to you as a message.` : ""}`);
     }
     case "share_screenshot": {

@@ -261,3 +261,79 @@ test("every gate decision is labelled; pit stop answers fill the label in; old l
   assert.equal(pruneLabels(), 1);
   assert.equal(row("ps_lab2"), undefined);
 });
+
+test("static files negotiate br/gzip, carry a strong ETag per encoding and revalidate to 304", async () => {
+  const { serveFile, negotiate, send } = await import("../app/src/delivery.mjs");
+  const { createServer, request } = await import("node:http");
+  const { brotliDecompressSync, gunzipSync } = await import("node:zlib");
+  const { utimesSync } = await import("node:fs");
+  assert.equal(negotiate("gzip, deflate, br, zstd"), "br");
+  assert.equal(negotiate("gzip"), "gzip");
+  assert.equal(negotiate("br;q=0, gzip;q=0.5"), "gzip");
+  assert.equal(negotiate("*"), "br");
+  assert.equal(negotiate("identity"), null);
+  assert.equal(negotiate(undefined), null);
+  const file = `${root}/web-app.js`, src = "export const x = 1;\n".repeat(200);
+  writeFileSync(file, src);
+  const srv = createServer((req, res) => (req.url === "/json" ? send(res, 200, { big: "y".repeat(5000) }) : req.url === "/small" ? send(res, 200, { ok: true }) : serveFile(req, res, file, "no-cache") || send(res, 404, "Not found")));
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  const get = (path, headers = {}) => new Promise((res, rej) => request({ host: "127.0.0.1", port: srv.address().port, path, headers }, (s) => { const c = []; s.on("data", (d) => c.push(d)); s.on("end", () => res({ status: s.statusCode, h: s.headers, body: Buffer.concat(c) })); }).on("error", rej).end());
+  try {
+    const br = await get("/", { "accept-encoding": "gzip, br" });
+    assert.equal(br.h["content-encoding"], "br"); assert.equal(br.h.vary, "Accept-Encoding"); assert.equal(br.h["cache-control"], "no-cache");
+    assert.equal(Number(br.h["content-length"]), br.body.length); assert.equal(brotliDecompressSync(br.body).toString(), src);
+    const gz = await get("/", { "accept-encoding": "gzip" });
+    assert.equal(gz.h["content-encoding"], "gzip"); assert.equal(gunzipSync(gz.body).toString(), src);
+    const plain = await get("/");
+    assert.equal(plain.h["content-encoding"], undefined); assert.equal(plain.body.toString(), src);
+    assert.ok(br.h.etag !== gz.h.etag && gz.h.etag !== plain.h.etag && /^"[\w-]+"$/.test(plain.h.etag));
+    const again = await get("/", { "accept-encoding": "gzip, br", "if-none-match": br.h.etag });
+    assert.equal(again.status, 304); assert.equal(again.body.length, 0); assert.equal(again.h.etag, br.h.etag); assert.equal(again.h.vary, "Accept-Encoding");
+    // A copy held in another encoding is still this content.
+    assert.equal((await get("/", { "accept-encoding": "br", "if-none-match": gz.h.etag })).status, 304);
+    writeFileSync(file, `${src}// changed\n`); utimesSync(file, new Date(), new Date(Date.now() + 5000));
+    const changed = await get("/", { "accept-encoding": "br", "if-none-match": br.h.etag });
+    assert.equal(changed.status, 200); assert.notEqual(changed.h.etag, br.h.etag); assert.ok(brotliDecompressSync(changed.body).toString().endsWith("// changed\n"));
+    const j = await get("/json", { "accept-encoding": "gzip, br" });
+    assert.equal(j.h["content-encoding"], "gzip"); assert.equal(j.h.vary, "Accept-Encoding"); assert.equal(j.h["cache-control"], "no-store"); assert.equal(JSON.parse(gunzipSync(j.body)).big.length, 5000);
+    assert.equal((await get("/json")).h["content-encoding"], undefined);
+    assert.equal((await get("/small", { "accept-encoding": "gzip" })).h["content-encoding"], undefined);
+  } finally { srv.close(); }
+});
+
+test("SSE: transcript events reach only that thread's watchers, pit stops carry their row, slow clients are dropped", async () => {
+  const fake = (writableLength = 0) => { const c = { got: [], writableLength, destroyed: false, closers: [], write(s) { c.got.push(s.split("\n")[0].slice(7)); }, on(ev, fn) { if (ev === "close") c.closers.push(fn); }, destroy() { c.destroyed = true; } }; return c; };
+  const a = fake(), b = fake(), none = fake(), slow = fake(R.SSE_CAP + 1);
+  R.bus.add(a, "t_a"); R.bus.add(b, "t_b"); R.bus.add(none); R.bus.add(slow, "t_a");
+  try {
+    R.bus.emit("delta", { threadId: "t_a", text: "hi" }); R.bus.emit("event", { threadId: "t_b", kind: "agent" }); R.bus.emit("context", { threadId: "t_a" });
+    R.bus.emit("thread", { id: "t_b", status: "idle" });
+    assert.deepEqual(a.got, ["delta", "context", "thread"]); assert.deepEqual(b.got, ["event", "thread"]); assert.deepEqual(none.got, ["thread"]);
+    assert.equal(slow.destroyed, true); assert.deepEqual(slow.got, []);
+    const seen = [], tap = fake(); tap.write = (s) => s.startsWith("event: pitstop") && seen.push(JSON.parse(s.split("\ndata: ")[1]));
+    R.bus.add(tap); a.closers.push(...tap.closers.splice(0));
+    run("INSERT INTO bots(id,name,created_at) VALUES('b_sse','Sse',0)");
+    R.pitStop({ botId: "b_sse", threadId: null, kind: "mcp", effect: "send", title: "send it", detail: { tool: "x" } });
+    const id = seen[0].id;
+    assert.equal(seen[0].pitstop.id, id); assert.equal(seen[0].pitstop.status, "pending"); assert.deepEqual(seen[0].pitstop.detail, { tool: "x" });
+    const row = await R.decide(id, "deny");
+    assert.equal(seen[1].status, "denied"); assert.equal(seen[1].pitstop.status, "denied"); assert.equal(row.status, "denied");
+  } finally { for (const c of [a, b, none, slow]) c.closers.forEach((f) => f()); }
+});
+
+test("the snapshot manifest survives a restart; the usage log is read from where the turn started", async () => {
+  const { utimesSync, statSync, appendFileSync } = await import("node:fs");
+  const w = `${root}/bots/b_snap/work`; mkdirSync(w, { recursive: true }); writeFileSync(`${w}/a.txt`, "one"); utimesSync(`${w}/a.txt`, 1e9, 1e9);
+  const S1 = await import("../app/src/snapshot.mjs?first");
+  const h1 = S1.snapshot("b_snap").files["a.txt"].hash;
+  // Same size and mtime, new bytes: only a remembered manifest keeps the old hash.
+  writeFileSync(`${w}/a.txt`, "two"); utimesSync(`${w}/a.txt`, 1e9, 1e9);
+  const S2 = await import("../app/src/snapshot.mjs?restarted");
+  assert.equal(S2.snapshot("b_snap").files["a.txt"].hash, h1);
+  mkdirSync(`${root}/brains/_usage`, { recursive: true });
+  const log = `${root}/brains/_usage/b_use.jsonl`, line = (turn, cost) => `${JSON.stringify({ turn, input: 10, cached: 0, output: 2, cost })}\n`;
+  writeFileSync(log, line("tu_old", 5)); const from = statSync(log).size; appendFileSync(log, line("tu_new", 0.25) + line("tu_new", 0.5));
+  assert.deepEqual(R.billedUsage("b_use", "tu_new", from), { input: 20, cached: 0, output: 4, cost: 0.75, requests: 2 });
+  assert.equal(R.billedUsage("b_use", "tu_old", from), null);
+  assert.equal(R.billedUsage("b_use", "tu_old", 1e9).cost, 5); // a truncated log is read from the start
+});

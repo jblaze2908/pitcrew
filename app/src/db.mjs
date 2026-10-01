@@ -59,6 +59,11 @@ CREATE TABLE IF NOT EXISTS jev_labels (
   driver_decision TEXT CHECK (driver_decision IN ('approved','denied','expired')), driver_scope TEXT);
 CREATE INDEX IF NOT EXISTS jev_labels_ts ON jev_labels(ts);
 CREATE INDEX IF NOT EXISTS jev_labels_pitstop ON jev_labels(pitstop_id);
+-- Every /api/state poll runs mood, weekSpend and the day/week totals per bot; ruleFor runs on every gated tool call.
+CREATE INDEX IF NOT EXISTS turns_bot ON turns(bot_id, started_at);
+CREATE INDEX IF NOT EXISTS turns_started ON turns(started_at);
+CREATE INDEX IF NOT EXISTS threads_bot ON threads(bot_id, archived, pinned, updated_at);
+CREATE INDEX IF NOT EXISTS rules_match ON rules(bot_id, match, effect);
 `);
 
 // Columns added after v1 shipped; ALTER fails harmlessly once they exist.

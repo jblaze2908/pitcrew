@@ -56,11 +56,11 @@ export async function setKey(provider, key) {
   if (typeof key !== "string" || key.trim().length < 10 || key.length > 400) throw Object.assign(new Error("That doesn't look like a key"), { status: 400 });
   const r = await testKey(provider, key.trim());
   // A key that fails its test is still saved when the failure is billing-side (AI Gateway 403), so the driver can fix billing later.
-  if (r.ok || provider === "aigateway") putSecret(p.secret, key.trim());
+  if (r.ok || provider === "aigateway") { putSecret(p.secret, key.trim()); forgetOpenrouterUsage(); }
   audit("driver", "provider.key.set", { provider, ok: r.ok });
   return r;
 }
-export function removeKey(provider) { const p = PROVIDERS[provider]; if (p?.secret) deleteSecret(p.secret); audit("driver", "provider.key.removed", { provider }); }
+export function removeKey(provider) { const p = PROVIDERS[provider]; if (p?.secret) deleteSecret(p.secret); forgetOpenrouterUsage(); audit("driver", "provider.key.removed", { provider }); }
 
 // Model catalogue + list prices, cached 6 h. Price per token in USD.
 let catalog = { at: 0, openrouter: [], aigateway: [] };
@@ -91,11 +91,16 @@ export async function estimateCost(provider, model, u) {
   return { usd: fresh * m.price.in + u.cached * m.price.cached + u.output * m.price.out, basis: "list" };
 }
 
-// What OpenRouter itself reports for the key (a cross-check on our estimates).
-export async function openrouterUsage() {
+// What OpenRouter itself reports for the key (a cross-check on our estimates). Every telemetry view asks, so one
+// outbound call a minute serves them all; concurrent askers share the in-flight call. A key change clears it.
+let orUsage = { at: 0, p: null };
+export const forgetOpenrouterUsage = () => { orUsage = { at: 0, p: null }; };
+export function openrouterUsage() {
+  if (orUsage.p && Date.now() - orUsage.at < 60000) return orUsage.p;
   const key = getSecret("openrouter");
-  if (!key) return null;
-  try { const b = await (await timed("https://openrouter.ai/api/v1/key", { headers: { Authorization: `Bearer ${key}` } })).json(); return b.data || null; } catch { return null; }
+  if (!key) return Promise.resolve(null);
+  orUsage = { at: Date.now(), p: timed("https://openrouter.ai/api/v1/key", { headers: { Authorization: `Bearer ${key}` } }).then((r) => r.json()).then((b) => b.data || null, () => null) };
+  return orUsage.p;
 }
 
 // Sign in with ChatGPT by device code: `codex login --device-auth` in a throwaway computer with only /auth mounted.
