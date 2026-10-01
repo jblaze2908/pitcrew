@@ -906,10 +906,14 @@ async function askCrew(from, threadId, a) {
 // ---------- plans (prototype, behind the "plans" setting) ----------
 // The Crew Chief edits a todo; Pitcrew starts every item whose `after` items are done, hands it their results, records
 // what comes back and wakes the Chief after each item. Starting, waiting and passing results is code, not the model.
-const PLAN = { budget: 1, chiefRuns: 12, reopens: 2, items: 20, itemWaitMs: 10 * 60000 };
+const PLAN = { budget: 1, chiefRuns: 12, memberRuns: 3, items: 20, itemWaitMs: 10 * 60000, sweepWaitMs: 5 * 60000 };
 const planRow = (id) => { const p = one("SELECT * FROM plans WHERE id=?", id); return p && { ...p, constraints: json(p.constraints, []), checks: json(p.checks, null) }; };
 const activePlan = (threadId) => { const p = one("SELECT id FROM plans WHERE thread_id=? AND status='running' ORDER BY created_at DESC LIMIT 1", threadId); return p && planRow(p.id); };
 const planItems = (planId) => all("SELECT * FROM plan_items WHERE plan_id=? ORDER BY seq", planId).map((i) => ({ ...i, after: json(i.after, []), result: json(i.result, null), history: json(i.history, []) }));
+// Runs a member has had or is queued for in this plan: each item counts once plus each reopen. Counted per member, not
+// per item, so adding a fresh key can't sidestep the limit.
+const memberRuns = (planId, botId) => one("SELECT COUNT(*) n, COALESCE(SUM(reopened),0) r FROM plan_items WHERE plan_id=? AND owner_bot=? AND NOT (status='cancelled' AND started_at IS NULL)", planId, botId);
+const runsOf = (planId, botId) => { const x = memberRuns(planId, botId); return x.n + x.r; };
 const ownerOf = (q, chief) => (/^(crew )?chief$/i.test(String(q || "").trim()) || q === chief.id ? chief : findMember(q, chief.id));
 function planSpend(p) {
   const items = one("SELECT COALESCE(SUM(cost_usd),0) s FROM plan_items WHERE plan_id=?", p.id).s;
@@ -927,9 +931,9 @@ function emitPlan(p) {
 }
 // Splits a member's reply into the handoff shape the plan asks for; a reply without the sections is all answer.
 export function parseHandoff(text) {
-  const t = String(text || ""), heads = [["data", /from my data/i], ["assumed", /assumed/i], ["unchecked", /couldn[’']?t check/i]];
+  const t = String(text || ""), heads = [["data", /from my data/i], ["assumed", /assumed/i], ["unchecked", /couldn[’']?t check/i], ["options", /other options/i]];
   const marks = heads.map(([k, re]) => { const m = new RegExp(`^[\\s>*_#-]*(?:${re.source})[*_:\\s]*:?[*_]*\\s*`, "im").exec(t); return m && { k, at: m.index, end: m.index + m[0].length }; }).filter(Boolean).sort((a, b) => a.at - b.at);
-  const out = { answer: (marks.length ? t.slice(0, marks[0].at) : t).trim(), data: "", assumed: "", unchecked: "" };
+  const out = { answer: (marks.length ? t.slice(0, marks[0].at) : t).trim(), data: "", assumed: "", unchecked: "", options: "" };
   marks.forEach((m, i) => { out[m.k] = t.slice(m.end, marks[i + 1]?.at ?? t.length).trim(); });
   return out;
 }
@@ -959,19 +963,22 @@ async function startItem(p, it, items) {
     dispatchPlan(p.id);
     const r = result || {}, running = planItems(p.id).filter((i) => i.status === "doing").map((i) => i.key);
     wakeChief(fresh, [`Plan update from Pitcrew: "${it.key}" (${owner.name}) ${status === "done" ? "finished" : "did not finish"}.`, `Answer: ${r.answer || "(none)"}`,
-      r.data && `From their data: ${r.data}`, r.assumed && `Assumed: ${r.assumed}`, r.unchecked && `Couldn't check: ${r.unchecked}`,
+      r.data && `From their data: ${r.data}`, r.assumed && `Assumed: ${r.assumed}`, r.unchecked && `Couldn't check: ${r.unchecked}`, r.options && `Other options: ${r.options}`,
       `Todo now:\n${planText(fresh)}`, `Constraints:\n${fresh.constraints.map((c, i) => `${i + 1}. ${c}`).join("\n")}`,
       running.length ? `Still running: ${running.join(", ")}. If nothing needs to change, reply "waiting".` : "Nothing is running. Reopen or add items, or finish."].filter(Boolean).join("\n\n"), `Plan update: ${it.key} ${status === "done" ? "done" : "didn't finish"}`);
   };
   const why = blockedReason(owner);
   if (why) return end("failed", { answer: why });
-  const toThread = uid("th"), inputs = it.after.map((k) => items.find((x) => x.key === k)).filter(Boolean);
+  // Every finished result goes along, the ones this item waits on first: a step that only saw its `after` items once
+  // judged a budget without the fares (2026-10-01 gate).
+  const finished = planItems(p.id).filter((x) => x.status === "done" && x.id !== it.id && x.result);
+  const toThread = uid("th"), inputs = [...finished.filter((x) => it.after.includes(x.key)), ...finished.filter((x) => !it.after.includes(x.key))];
   run("INSERT INTO threads(id,bot_id,title,origin,created_at,updated_at) VALUES(?,?,?,?,?,?)", toThread, owner.id, `Plan · ${short(it.task, 80)}`, JSON.stringify({ kind: "delegated", fromBot: chief.id, fromThread: p.thread_id, planId: p.id, itemKey: it.key }), now(), now());
   run("UPDATE plan_items SET status='doing', to_thread=?, started_at=? WHERE id=?", toThread, now(), it.id);
   emitPlan(planRow(p.id));
   const text = [`${chief.name} is running a plan for ${driver} and needs this from you.`, `Goal: ${p.goal}`, `Your task: ${it.task}`,
-    inputs.length ? `Results from earlier steps you can build on:\n${inputs.map((x) => `- ${x.key} (${getBot(x.owner_bot)?.name}): ${x.result?.answer}${x.result?.assumed ? `\n  (they assumed: ${x.result.assumed})` : ""}`).join("\n")}` : "",
-    `Reply with your answer, then end with three short sections titled exactly:\nFrom my data: what came from your own memory, logins or tools.\nAssumed: anything you assumed or estimated, or "nothing".\nCouldn't check: what you couldn't verify, or "nothing".\nDon't add costs, allowances or facts you weren't given; anything estimated goes under Assumed.`].filter(Boolean).join("\n\n");
+    inputs.length ? `Results from earlier steps you can build on:\n${inputs.map((x) => `- ${x.key} (${getBot(x.owner_bot)?.name}): ${short(x.result?.answer, 900)}${x.result?.options && !/^nothing\.?$/i.test(x.result.options) ? `\n  (other options they know of: ${short(x.result.options, 300)})` : ""}${x.result?.assumed && !/^nothing\.?$/i.test(x.result.assumed) ? `\n  (they assumed: ${short(x.result.assumed, 300)})` : ""}`).join("\n")}` : "",
+    `Reply with your answer, then end with three short sections titled exactly:\nFrom my data: what came from your own memory, logins or tools.\nAssumed: anything you assumed or estimated, or "nothing".\nCouldn't check: what you couldn't verify, or "nothing".\nOther options: alternatives you know of that weren't asked for (cheaper, other dates, other providers), with figures, or "nothing".\nAnswer only what's asked. Don't add costs, allowances or facts you weren't given; anything estimated goes under Assumed.${p.live === 0 ? "\nThis plan runs on what you already know: live lookups are off." : ""}`].filter(Boolean).join("\n\n");
   const doneP = nextTurn(toThread);
   await sendMessage(toThread, { text, trigger: "delegation", display: it.task }).catch(() => {});
   const r = await Promise.race([doneP, new Promise((res) => setTimeout(() => res(null), PLAN.itemWaitMs).unref())]);
@@ -979,6 +986,59 @@ async function startItem(p, it, items) {
   const reply = lastAgentText(toThread, r.turnId);
   end(r.status === "completed" ? "done" : "failed", r.status === "completed" ? parseHandoff(reply) : { answer: `Run ended ${r.status}. ${short(reply, 400)}` }, r.cost || 0);
 }
+// Before a plan may finish, every member that contributed is asked once, in its own item thread (cached, cheap), for an
+// alternative that would better meet the constraints. Structural, because two gate runs showed the Chief grading its own
+// search as complete. One follow-up per member, in parallel; once per plan.
+async function sweep(p) {
+  run("UPDATE plans SET swept=1 WHERE id=?", p.id);
+  const latest = new Map();
+  for (const i of planItems(p.id)) if (i.status === "done" && i.to_thread) latest.set(i.owner_bot, i);
+  addEvent(p.thread_id, null, "system", { text: `Before finishing, asking ${[...latest.values()].map((i) => getBot(i.owner_bot)?.name).join(", ")} for alternatives.` });
+  const summary = planItems(p.id).filter((i) => i.status === "done").map((i) => `- ${i.key} (${getBot(i.owner_bot)?.name}): ${short(i.result?.answer, 400)}`).join("\n");
+  const answers = await Promise.all([...latest.values()].map(async (i) => {
+    const doneP = nextTurn(i.to_thread);
+    await sendMessage(i.to_thread, { text: `Before the plan finishes: the driver's constraints are\n${p.constraints.map((c, n) => `${n + 1}. ${c}`).join("\n")}\n\nWhat the plan found:\n${summary}\n\nDo you know any alternative, within your job, that would better meet a constraint (cheaper, other dates or times, another provider)? Reply "No alternative" or give it with figures. Nothing else.`, trigger: "delegation", display: "Any alternative before the plan finishes?" }).catch(() => {});
+    const r = await Promise.race([doneP, new Promise((res) => setTimeout(() => res(null), PLAN.sweepWaitMs).unref())]);
+    if (r?.cost) run("UPDATE plan_items SET cost_usd=cost_usd+? WHERE id=?", r.cost, i.id);
+    return { who: getBot(i.owner_bot)?.name, text: r ? lastAgentText(i.to_thread, r.turnId) : "(no reply in time)" };
+  }));
+  const fresh = planRow(p.id); emitPlan(fresh);
+  if (fresh.status !== "running") return;
+  const found = answers.filter((a) => !/^\W*no alternative/i.test(a.text.trim()));
+  wakeChief(fresh, [`Alternatives check from Pitcrew, before finishing:`, ...answers.map((a) => `- ${a.who}: ${short(a.text, 700)}`),
+    found.length ? `Some members know alternatives. If one could change the answer, reopen or add an item to test it; a constraint it could meet stays untested until tested. Then finish.` : `No member knows a better alternative. You can finish now.`].join("\n"), "Plan update: alternatives check");
+}
+export function stopPlan(planId) {
+  const p = planRow(planId);
+  if (!p || p.status !== "running") return false;
+  for (const i of planItems(p.id).filter((x) => ["todo", "doing", "failed"].includes(x.status))) {
+    run("UPDATE plan_items SET status='cancelled', ended_at=? WHERE id=?", now(), i.id);
+    if (i.status === "doing" && i.to_thread) interrupt(i.to_thread).catch(() => {});
+  }
+  run("UPDATE plans SET status='stopped', ended_at=? WHERE id=?", now(), p.id);
+  audit("driver", "plan.stopped", { id: p.id });
+  emitPlan(planRow(p.id));
+  addEvent(p.thread_id, null, "system", { text: "You stopped the plan. Nothing more will run for it." });
+  return true;
+}
+// Live lookups are decided once per plan: the first browser action in any plan step asks the driver, and the answer holds
+// for every step after (site rules still apply). Before this, each first-visit site was its own pit stop.
+// Runs on every browser action: two indexed reads, then nothing for threads outside a plan.
+async function planLive(threadId) {
+  const o = json(getThread(threadId)?.origin);
+  if (!o?.planId) return true;
+  let p = planRow(o.planId);
+  if (!p) return true;
+  if (p.live == null) {
+    const chief = getBot(one("SELECT bot_id FROM threads WHERE id=?", p.thread_id).bot_id);
+    if (!planLiveAsk.has(p.id)) planLiveAsk.set(p.id, pitStop({ botId: chief.id, threadId: p.thread_id, kind: "plan", effect: "browse", title: `Let the crew look things up online for this plan? (${short(p.goal, 80)})`, detail: { planId: p.id } })
+      .then((d) => { run("UPDATE plans SET live=? WHERE id=?", d === "approved" ? 1 : 0, p.id); planLiveAsk.delete(p.id); }));
+    await planLiveAsk.get(p.id);
+    p = planRow(o.planId);
+  }
+  return p.live === 1;
+}
+const planLiveAsk = new Map();
 function planTool(chief, threadId, a) {
   if (json(getThread(threadId)?.origin)?.kind === "delegated") return say("Plans are run from the Crew Chief's own thread, not from a plan step.", false);
   let p = activePlan(threadId);
@@ -998,6 +1058,7 @@ function planTool(chief, threadId, a) {
     if (!owner) { errs.push(`add ${key}: no crew member called "${short(x.member, 40)}"`); continue; }
     if (owner.private) { errs.push(`add ${key}: ${owner.name} is private; only ${getSetting("driver_name", "the driver")} talks to it`); continue; }
     if (seq >= PLAN.items) { errs.push(`add ${key}: a plan holds at most ${PLAN.items} items`); continue; }
+    if (runsOf(p.id, owner.id) >= PLAN.memberRuns) { errs.push(`add ${key}: ${owner.name} has had ${PLAN.memberRuns} runs in this plan; ask ${getSetting("driver_name", "the driver")} before going again`); continue; }
     const after = (x.after || []).map(String).filter((k) => byKey.has(k) || (a.add || []).some((y) => y.key === k));
     const row = { id: uid("pi"), key }; byKey.set(key, row);
     run("INSERT INTO plan_items(id,plan_id,seq,key,owner_bot,task,after,status) VALUES(?,?,?,?,?,?,?,?)", row.id, p.id, seq++, key, owner.id, String(x.task || "").slice(0, 2000), JSON.stringify(after), "todo");
@@ -1006,7 +1067,7 @@ function planTool(chief, threadId, a) {
     const it = byKey.get(String(x.key));
     if (!it?.status) { errs.push(`reopen ${x.key}: no such item`); continue; }
     if (it.status === "doing") { errs.push(`reopen ${x.key}: still running`); continue; }
-    if (it.reopened >= PLAN.reopens) { errs.push(`reopen ${x.key}: already reopened ${PLAN.reopens} times; ask ${getSetting("driver_name", "the driver")} before going again`); continue; }
+    if (runsOf(p.id, it.owner_bot) >= PLAN.memberRuns) { errs.push(`reopen ${x.key}: ${getBot(it.owner_bot)?.name} has had ${PLAN.memberRuns} runs in this plan; ask ${getSetting("driver_name", "the driver")} before going again`); continue; }
     run("UPDATE plan_items SET status='todo', task=?, why=?, reopened=reopened+1, history=?, result=NULL WHERE id=?", String(x.task).slice(0, 2000), String(x.why || "").slice(0, 300), JSON.stringify([...it.history, { task: it.task, result: it.result }]), it.id);
   }
   // Cancelling a running item stops its run; marked cancelled first so its ending doesn't wake the Chief as a result.
@@ -1021,6 +1082,7 @@ function planTool(chief, threadId, a) {
     const missing = p.constraints.filter((c) => !checks.some((k) => k.text.trim().toLowerCase() === c.trim().toLowerCase()));
     if (missing.length) return say(`Not finished: mark every constraint, word for word. Missing: ${missing.join(" | ")}`, false);
     if (planItems(p.id).some((i) => i.status === "doing")) return say("Not finished: items are still running. Cancel them (that stops them) or wait.", false);
+    if (!p.swept) { sweep(p); return say("Not finished yet: before any plan finishes, Pitcrew asks each member who contributed whether they know an alternative that would better meet the constraints. You'll be woken with what they say. End this turn now."); }
     run("UPDATE plan_items SET status='cancelled' WHERE plan_id=? AND status='todo'", p.id);
     run("UPDATE plans SET status='done', answer=?, checks=?, ended_at=? WHERE id=?", String(a.finish.answer).slice(0, 4000), JSON.stringify(checks), now(), p.id);
     audit(chief.id, "plan.finished", { id: p.id, spend: planSpend(p).usd });
@@ -1039,6 +1101,7 @@ async function runtimeTool(br, threadId, p) {
   const b = getBot(br.bot.id), turnId = active.get(threadId)?.turnId, t0 = Date.now();
   const kind = p.tool.startsWith("browser_") ? "browser" : "computer", reading = p.tool === "browser_read";
   if (/^browser_(evaluate|run_code)/.test(p.tool)) return say("Page JavaScript isn't available. Use the element tools (click, type, fill_form, snapshot).", false);
+  if (kind === "browser" && !(await planLive(threadId))) return say("This plan runs on what the crew already knows: the driver turned live lookups off. Answer from your memory and say what you couldn't check.", false);
   // `snapshot` (what the result shows of the page afterwards) is ours; Playwright never sees it.
   const { snapshot: snapArg, ...given } = p.arguments || {};
   const tool = reading ? "browser_snapshot" : kind === "browser" ? p.tool : p.tool.replace(/^computer_/, "");
