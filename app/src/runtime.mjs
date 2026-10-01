@@ -38,6 +38,7 @@ const queues = new Map();   // our thread id → [message]
 const waits = new Map();    // pitstop id → resolve(decision)
 const leases = new Map();   // bot id → { since, waiters: [] }
 const items = new Map();    // codex item id → item (for file-change paths)
+const turnWaiters = new Map(); // our thread id → [resolve] for the next finished turn (delegation)
 const usage = new Map();    // codex thread id → last total usage
 const snapshots = new Map(); // codex thread id → { url, text, lines } from the last browser snapshot the agent saw (noteSnapshot)
 
@@ -153,11 +154,17 @@ function toInput(botId, text, attachments) {
 }
 
 const ENVS = [{ environmentId: "computer", cwd: "/bot/work" }];
+// Why a member can't start a run now, or null. Delegation checks it first, so the Chief gets a reason instead of a wait.
+export function blockedReason(b) {
+  if (getSetting("paused") === "1") return "The crew is stopped (kill switch). Resume the crew in Settings first.";
+  if (weekSpend(b.id) >= b.weekly_cap_usd) return `${b.name} has reached this week's cap ($${b.weekly_cap_usd.toFixed(2)}). Raise the cap to continue.`;
+  if (!providerReady(b.provider)) return `${b.name} uses ${b.provider === "openai" ? "the ChatGPT plan" : b.provider}, which isn't connected. Add it in Settings → Providers.`;
+  return null;
+}
 async function startTurn(threadId, text, attachments, trigger) {
   const t = getThread(threadId), b = getBot(t.bot_id);
-  if (getSetting("paused") === "1") throw new Error("The crew is stopped (kill switch). Resume the crew in Settings first.");
-  if (weekSpend(b.id) >= b.weekly_cap_usd) throw new Error(`${b.name} has reached this week's cap ($${b.weekly_cap_usd.toFixed(2)}). Raise the cap to continue.`);
-  if (!providerReady(b.provider)) throw new Error(`${b.name} uses ${b.provider === "openai" ? "the ChatGPT plan" : b.provider}, which isn't connected. Add it in Settings → Providers.`);
+  const why = blockedReason(b);
+  if (why) throw new Error(why);
   const warm = warmPlan(threadId);
   if (warm) computer(b).prewarm(warm.desktop);
   const turnId = uid("tu");
@@ -251,6 +258,7 @@ async function finishTurn(threadId, status, error) {
   } catch {}
   setThreadStatus(threadId, "idle");
   bus.emit("turn", { threadId, turnId: a.turnId, status, cost: cost.usd, botId: b.id });
+  for (const w of turnWaiters.get(threadId)?.splice(0) || []) w({ turnId: a.turnId, status, cost: cost.usd });
   const next = queues.get(threadId)?.shift();
   if (next) startTurn(threadId, next.text, next.attachments, next.trigger).catch((e) => { if (!e.silent) addEvent(threadId, null, "error", { text: e.message }); });
 }
@@ -702,6 +710,9 @@ const gateSummary = (c) => (c.kind === "shell" ? { kind: "shell", command: Strin
 
 export const pitRow = (p) => p && { ...p, detail: json(p.detail, {}), jev: json(p.jev, {}), learn: p.status === "pending" ? learnProgress(p) : null };
 export function pitStop({ id = uid("ps"), botId, threadId, kind, effect, title, detail, jev: v = {}, expiresMin = 30 }) {
+  // Work another member asked for says so wherever the pit stop shows (wall, pit stops, phone).
+  const o = threadId && json(getThread(threadId)?.origin);
+  if (o?.kind === "delegated") title = `${title} · for ${getBot(o.fromBot)?.name || "another member"}`;
   run("INSERT INTO pitstops(id,bot_id,thread_id,turn_id,kind,effect,title,detail,jev,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
     id, botId, threadId, threadId ? active.get(threadId)?.turnId ?? null : null, kind, effect, title, JSON.stringify(detail), JSON.stringify(v), now(), now() + expiresMin * 60000);
   const row = pitRow(one("SELECT * FROM pitstops WHERE id=?", id));
@@ -835,6 +846,7 @@ async function dynamicTool(c, threadId, p) {
       return say(found.map((t) => `- [${t.title}](${threadLink(t.id)}) · last active ${day(t.updated_at)} IST${t.archived ? " · archived" : ""}${t.of ? ` · matched ${t.matched}/${t.of} terms` : ""}${t.snippet ? `\n  ${t.snippet}` : ""}`).join("\n")
         + "\n\nGive the driver the matching thread as a markdown link exactly as written above.");
     }
+    case "ask_crew_member": return askCrew(b, threadId, a);
     case "propose_crew_member": {
       if (b.kind !== "chief") return say("Only the Crew Chief can propose crew members.", false);
       const spec = normaliseSpec(a);
@@ -845,6 +857,49 @@ async function dynamicTool(c, threadId, p) {
       if (/^(browser|computer)_/.test(p.tool)) return runtimeTool(c, threadId, p);
       return say(`Unknown tool ${p.tool}`, false);
   }
+}
+
+// ---------- delegation ----------
+// The Crew Chief asks another member and waits for the answer. The member works in its own thread under its own policy,
+// cap and computer; none of the Chief's authority travels with the question. One level deep: only the Chief has the tool.
+const ASK_WAIT_MS = 10 * 60000;
+const nextTurn = (threadId) => new Promise((resolve) => (turnWaiters.get(threadId) || turnWaiters.set(threadId, []).get(threadId)).push(resolve));
+const lastAgentText = (threadId, turnId) => json(one("SELECT data FROM events WHERE thread_id=? AND turn_id=? AND kind='agent' ORDER BY id DESC LIMIT 1", threadId, turnId)?.data, {}).text || "";
+export function findMember(q, exceptId) {
+  const s = String(q || "").trim().toLowerCase();
+  const crew = listBots().filter((x) => x.id !== exceptId);
+  return crew.find((x) => x.id === q) || crew.find((x) => x.name.toLowerCase() === s) || crew.find((x) => s && x.name.toLowerCase().startsWith(s)) || null;
+}
+async function askCrew(from, threadId, a) {
+  const driver = getSetting("driver_name", "the driver");
+  if (from.kind !== "chief") return say("Only the Crew Chief can ask other crew members.", false);
+  const to = findMember(a.member, from.id);
+  if (!to) return say(`No crew member called "${short(a.member, 60)}". Your crew: ${listBots().filter((x) => x.id !== from.id).map((x) => x.name).join(", ")}.`, false);
+  if (to.private) return say(`${to.name} is private: only ${driver} talks to it. Suggest ${driver} asks ${to.name} directly.`, false);
+  const question = String(a.question || "").trim().slice(0, 4000);
+  if (!question) return say("Pass the question.", false);
+  const why = blockedReason(to);
+  if (why) return say(`Couldn't ask ${to.name}: ${why}`, false);
+  const id = uid("dg"), toThread = uid("th");
+  run("INSERT INTO threads(id,bot_id,title,origin,created_at,updated_at) VALUES(?,?,?,?,?,?)", toThread, to.id, `From ${from.name}: ${short(question, 80)}`, JSON.stringify({ kind: "delegated", fromBot: from.id, fromThread: threadId, delegationId: id }), now(), now());
+  run("INSERT INTO delegations(id,from_bot,from_thread,to_bot,to_thread,question,status,created_at) VALUES(?,?,?,?,?,?,?,?)", id, from.id, threadId, to.id, toThread, question, "asking", now());
+  const card = { id, toBot: to.id, toName: to.name, toThread, question: short(question, 300) };
+  addEvent(threadId, active.get(threadId)?.turnId, "delegation", { ...card, status: "asking" });
+  audit(from.id, "delegation.asked", { id, to: to.id, fromThread: threadId, toThread });
+  const done = nextTurn(toThread);
+  // Recorded whenever it ends, also after the Chief stopped waiting.
+  done.then((r) => {
+    const answer = lastAgentText(toThread, r.turnId), status = r.status === "completed" ? "answered" : "failed";
+    run("UPDATE delegations SET status=?, answer=?, cost_usd=?, ended_at=? WHERE id=?", status, answer, r.cost, now(), id);
+    addEvent(threadId, null, "delegation", { ...card, status, answer: short(answer, 4000), cost: r.cost });
+    audit(to.id, "delegation.ended", { id, status, cost: r.cost });
+  });
+  await sendMessage(toThread, { text: `${from.name} is asking you this for ${driver}. Answer it fully in your reply; your reply goes back to ${from.name}. Anything that needs ${driver}'s approval still comes to them as a pit stop.\n\n${question}`, trigger: "delegation", display: question });
+  const r = await Promise.race([done, new Promise((res) => setTimeout(() => res(null), ASK_WAIT_MS).unref())]);
+  if (!r) return say(`${to.name} is still working after 10 minutes. Their answer will appear in this thread when it's ready, and in theirs: ${threadLink(toThread)}. Tell ${driver} that.`);
+  const answer = lastAgentText(toThread, r.turnId);
+  if (r.status !== "completed") return say(`${to.name}'s run ended ${r.status}${answer ? `. Last thing they said:\n${answer}` : ""}. Their thread: ${threadLink(toThread)}`, false);
+  return say(`${to.name} answered (their thread: ${threadLink(toThread)}):\n\n${answer || "(no text reply)"}`);
 }
 
 // Browser and pixel tools run on the crew member's computer, booting it (and its desktop) on first use.
