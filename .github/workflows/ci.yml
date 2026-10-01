@@ -18,6 +18,10 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
+      - name: Lockfile uses the public registry
+        # A laptop behind a company npm proxy records the proxy's URLs; CI and the host can't reach it. Packages are
+        # identical (integrity hashes), so rewrite resolved hosts to https://registry.npmjs.org/ before committing.
+        run: "! grep -E '\"resolved\": \"https?://' app/package-lock.json | grep -v '\"https://registry.npmjs.org/'"
       - name: Install (control plane)
         run: npm ci --no-audit --no-fund
         working-directory: app
