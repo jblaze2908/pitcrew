@@ -30,7 +30,8 @@ See [`docs/brief.md`](docs/brief.md) for the product brief.
 |---|---|
 | `app/` | Control plane: Node 22, no npm dependencies. Auth, crew, threads, jev pit stops, telemetry, generative UI, scheduler, live-view bridge. Web app in `app/web/` (Pitcrew design system from Draft). |
 | `computer/` | One computer per crew member: desktop, Chromium, Codex app-server, Playwright MCP and pixel computer MCP. Started on demand, stopped when idle. |
-| `deploy/` | `deploy.sh` (sync, build, restart on the host), `compose.yml`, `e2e.mjs` (end-to-end check), `shots.mjs` (UI screenshots). |
+| `deploy/` | Pull-based deploy: `pitcrew.timer` on the host runs `pull-update.sh` every 2 min (fetch main → build per-commit images → health check → roll back on failure). `deploy.sh` triggers it now. Also `compose.yml`, `e2e.mjs`, `shots.mjs`. |
+| `.github/workflows/ci.yml` | Syntax checks and unit tests (`tests/`) on every PR and push to main. Merging to main deploys within ~2 minutes. |
 | `poc/` | The harness, jev, isolation and browser POCs that v1 is built on. |
 
 First run: open the site, paste the setup token from `/srv/pitcrew/data/setup-token` on the host, choose a password, then connect a provider in Settings.

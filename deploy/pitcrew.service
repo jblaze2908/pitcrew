@@ -1,0 +1,16 @@
+[Unit]
+Description=Verify and deploy Pitcrew
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/pitcrew
+Environment=DEPLOY_DIR=/opt/pitcrew
+Environment=DEPLOY_BRANCH=main
+# A computer-image rebuild (Chromium layer) takes several minutes on 2 vCPU.
+TimeoutStartSec=30min
+NoNewPrivileges=true
+PrivateTmp=true
+ExecStart=/opt/pitcrew/deploy/pull-update.sh

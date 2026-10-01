@@ -1,6 +1,7 @@
 # Pitcrew control plane. Zero npm dependencies; the Docker CLI drives the crew's computers through the host socket.
+ARG COMPUTER_IMAGE=pitcrew-computer:1
 FROM docker:29-cli AS dockercli
-FROM pitcrew-computer:1 AS computer
+FROM ${COMPUTER_IMAGE} AS computer
 
 FROM node:22-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata && rm -rf /var/lib/apt/lists/*

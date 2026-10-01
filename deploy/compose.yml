@@ -1,8 +1,9 @@
 # Pitcrew on the host. Persistent: the control plane and the brain. Crew computers are started on demand by the app.
+# Image tags come from the release env written by deploy/pull-update.sh (one tag per commit).
 name: pitcrew
 services:
   app:
-    image: pitcrew-app:1
+    image: pitcrew-app:${PITCREW_TAG:-1}
     container_name: pitcrew-app
     restart: unless-stopped
     ports:
@@ -14,6 +15,7 @@ services:
     environment:
       PITCREW_HOST: pitcrew.example.com
       PITCREW_MAX_COMPUTERS: "3"
+      PITCREW_COMPUTER_IMAGE: pitcrew-computer:${PITCREW_COMPUTER_TAG:-1}
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
@@ -21,7 +23,7 @@ services:
   # Codex app-servers (one per active crew member), the LLM proxy and the exec gateway. No Docker socket,
   # no workspace mounts, its own network (it can't reach the app's API); it joins a bot's network only while that bot's computer is up.
   brain:
-    image: pitcrew-brain:1
+    image: pitcrew-brain:${PITCREW_TAG:-1}
     container_name: pitcrew-brain
     restart: unless-stopped
     user: "1500:1500"
