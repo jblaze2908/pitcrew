@@ -13,6 +13,7 @@ import type { HttpError } from "./auth.js";
 import { api } from "./api/index.js";
 import { serveRaw } from "./http/raw.js";
 import { liveView } from "./http/liveview.js";
+import { startEngram } from "./engram.js";
 
 const PORT = Number(process.env.PORT || 8330);
 // dist/src/server.js → dist/web, the Vite build.
@@ -47,6 +48,7 @@ R.bootRuntime();
 await reapOrphans();
 await reapCode();
 startCodeSweeper();
+startEngram();
 startIdleSweeper(R.isBusy, R.isThinking);
 startBootSocket(R.computerHooks);
 toolManifest().then((m) => console.log(`tool manifest: ${m.browser.length} browser, ${m.computer.length} pixel`)).catch((e) => console.error("tool manifest failed:", e.message));

@@ -1,6 +1,7 @@
-// Settings: general, model providers and keys, crew-wide sites, safety (the kill switch), account.
+// Settings: general, model providers and keys, the Engram link, crew-wide sites, safety (the kill switch), account.
 import { useEffect, useState } from "react";
 import type { ProviderId, ProviderStatus, State } from "../../../shared/types";
+import { EngramSettings } from "../components/Engram";
 import { SitesEditor } from "../components/SitesEditor";
 import { BusyButton, ConfirmButton, Field, Loader, Seg } from "../components/ui";
 import { api } from "../lib/api";
@@ -10,7 +11,7 @@ import { toast } from "../lib/toast";
 import { useFetch } from "../lib/useFetch";
 
 type Providers = Record<ProviderId, ProviderStatus>;
-const TAB_IDS = ["general", "models", "sites", "safety", "account"] as const;
+const TAB_IDS = ["general", "models", "engram", "sites", "safety", "account"] as const;
 
 export function Settings({ tab: asked }: { tab: string }) {
   const { S } = useStore();
@@ -20,7 +21,7 @@ export function Settings({ tab: asked }: { tab: string }) {
   const p = prov.data;
   const tab = (TAB_IDS as readonly string[]).includes(asked) ? asked : "general";
   const anyKey = Object.values(p).some((x) => x.connected);
-  const tabs: [string, string, boolean][] = [["general", "General", false], ["models", "Models and keys", !anyKey], ["sites", "Sites", false], ["safety", "Safety", S.paused], ["account", "Account", false]];
+  const tabs: [string, string, boolean][] = [["general", "General", false], ["models", "Models and keys", !anyKey], ["engram", "Engram", false], ["sites", "Sites", false], ["safety", "Safety", S.paused], ["account", "Account", false]];
   return (
     <div className="page">
       <h1 className="pc-h2">Settings</h1>
@@ -30,7 +31,8 @@ export function Settings({ tab: asked }: { tab: string }) {
         <div className="grid3"><KeyCard id="openrouter" hint="sk-or-…" p={p.openrouter} reload={prov.reload} /><KeyCard id="aigateway" hint="AI Gateway key" p={p.aigateway} reload={prov.reload} /><ChatGpt p={p.openai} reload={prov.reload} /></div>
         <p className="small faint">jev (the pit-stop decider) runs on TypeSafe Jev through your OpenRouter key. Without one, every consequential action becomes a pit stop.</p>
       </div>}
-      {tab === "sites" && <SitesEditor scope="global" help="Every crew member gets these. A member's own entry wins, except a crew-wide block. Loopback (the crew's own file server) is always allowed; private network addresses never are." />}
+      {tab === "engram" && <EngramSettings />}
+      {tab === "sites" &&<SitesEditor scope="global" help="Every crew member gets these. A member's own entry wins, except a crew-wide block. Loopback (the crew's own file server) is always allowed; private network addresses never are." />}
       {tab === "safety" && <Safety jev={!!p.openrouter?.connected} />}
       {tab === "account" && <Account />}
     </div>

@@ -11,6 +11,7 @@ import { getThread, addEvent, setThreadStatus, nameThread } from "./threads.js";
 import { brain, computer } from "./machines.js";
 import { weekSpend, logSize, billedUsage } from "./spend.js";
 import { activePlan, planLog, emitPlan, planRow } from "./planStore.js";
+import { ensureMemberToken, threadContext, skillsIndex } from "../engram.js";
 import type { Bot } from "../../shared/types.js";
 
 export const isRunning = (threadId: string) => active.has(threadId);
@@ -72,10 +73,13 @@ export async function startTurn(threadId: string, text: string, attachments: str
   setThreadStatus(threadId, "running");
   try {
     const c = brain(b);
+    if (!c.up) await ensureMemberToken(b);
     await c.ensure();
     const mems = all<{ id: string; text: string }>("SELECT id,text FROM memory WHERE bot_id=? AND forgotten_at IS NULL ORDER BY created_at LIMIT 60", b.id);
-    const common = { model: b.model, modelProvider: b.provider, cwd: "/bot/work", developerInstructions: instructions(b, mems) };
     let codexId = t.codex_id;
+    // Engram context only where instructions are sent (start/resume), so a normal turn makes no Engram call.
+    const eg = !codexId || !c.loaded.has(codexId) ? await threadContext(b) : null;
+    const common = { model: b.model, modelProvider: b.provider, cwd: "/bot/work", developerInstructions: instructions(b, mems, eg && { profile: eg.profile, skills: skillsIndex(eg.skills) }) };
     if (!codexId) {
       const st = await c.request("thread/start", { ...common, sandbox: "danger-full-access", approvalPolicy: "untrusted", environments: ENVS, dynamicTools: dynamicTools(b, await toolManifest()) }, 120000);
       codexId = st.thread.id as string;

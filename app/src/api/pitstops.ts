@@ -5,6 +5,7 @@ import { one, all, run, now, audit } from "../db.js";
 import { httpErr } from "../auth.js";
 import * as R from "../runtime/index.js";
 import { getBot } from "../crew.js";
+import * as E from "../engram.js";
 import { listSites, setSite, removeSite, MODES } from "../domains.js";
 import { signedIn, type Env } from "../http/guard.js";
 import { readJson, jsonBody, pick, field } from "../http/body.js";
@@ -23,13 +24,20 @@ export const pitstopRoutes = new Hono<Env>()
     const st = c.req.query("status");
     return c.json(st === "pending" ? all<PitstopRow>("SELECT * FROM pitstops WHERE status='pending' ORDER BY created_at").map(pitRow) : all<PitstopRow>("SELECT * FROM pitstops ORDER BY created_at DESC LIMIT 200").map(pitRow));
   })
-  .post("/api/pitstops/:id/decide", signedIn, async (c) => { const b = await jsonBody(c, Decide); return c.json(pitRow(await R.decide(c.req.param("id"), b.decision, { scope: b.scope, note: b.note, spec: b.spec })) ?? { ok: true }); })
+  .post("/api/pitstops/:id/decide", signedIn, async (c) => {
+    const id = c.req.param("id"), b = await jsonBody(c, Decide), kind = one<{ kind: string }>("SELECT kind FROM pitstops WHERE id=?", id)?.kind;
+    // Engram proposals are decided in Engram: approve accepts, deny rejects.
+    if (kind === "engram") return c.json(await E.decideProposal(id, b.decision === "approve" ? "accept" : "reject"));
+    const r = pitRow(await R.decide(id, b.decision, { scope: b.scope, note: b.note, spec: b.spec }));
+    if (kind === "hire" && r?.status === "approved") E.linkMissing().catch(() => {});
+    return c.json(r ?? { ok: true });
+  })
   .post("/api/pitstops/batch", signedIn, async (c) => {
     const b = await jsonBody(c, Batch);
     const out: unknown[] = [];
     for (const id of b.ids) {
       const ps = one<{ kind: string }>("SELECT kind FROM pitstops WHERE id=?", id as string);
-      if (ps && ps.kind !== "hire") out.push(await R.decide(id as string, b.decision, { scope: "once", note: "batch" }));
+      if (ps && ps.kind !== "hire" && ps.kind !== "engram") out.push(await R.decide(id as string, b.decision, { scope: "once", note: "batch" }));
     }
     return c.json({ decided: out.length });
   })
