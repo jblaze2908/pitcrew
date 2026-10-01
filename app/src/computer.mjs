@@ -22,6 +22,8 @@ const BRAIN_IDLE_MS = 20 * 60 * 1000;
 const HEX = { c1: "#4f7dff", c2: "#16c2c2", c3: "#2fcc80", c5: "#ff6fab", c6: "#9577ff" };
 
 export const botDir = (id) => `${ROOT}/bots/${id}`;
+// Inside the computer; on the host under botDir, so the control plane can read Playwright's snapshot files.
+export const PW_OUT = "/bot/run/playwright";
 export const brainDir = (id) => `${ROOT}/brains/${id}`;
 export const usageLog = (id) => `${ROOT}/brains/_usage/${id}.jsonl`;
 export const chatgptAuthPath = () => `${ROOT}/chatgpt/auth.json`;
@@ -224,10 +226,12 @@ export class Computer {
     return this.desk;
   }
   // MCP servers that live inside the computer (Playwright over CDP, pixel control), reached over docker exec stdio.
+  // Playwright's per-action snapshot files go to PW_OUT, not the default ./.playwright-mcp in the workspace, where they
+  // showed up as the run's "changed files".
   async mcp(kind) {
     await this.desktop();
     if (this.mcps[kind] && !this.mcps[kind].closed) return this.mcps[kind];
-    const cmd = kind === "browser" ? ["-e", "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright", this.name, "playwright-mcp", "--cdp-endpoint", "http://127.0.0.1:9222"] : ["-e", "DISPLAY=:1", this.name, "node", "/opt/pitcrew/computer-mcp.mjs"];
+    const cmd = kind === "browser" ? ["-e", "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright", this.name, "playwright-mcp", "--cdp-endpoint", "http://127.0.0.1:9222", "--output-dir", PW_OUT, "--output-max-size", String(32 << 20)] : ["-e", "DISPLAY=:1", this.name, "node", "/opt/pitcrew/computer-mcp.mjs"];
     const rpc = new Rpc(spawn("docker", ["exec", "-i", ...cmd], { stdio: ["pipe", "pipe", "pipe"] }), { name: `${kind} tools` });
     await rpc.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "pitcrew", version: "1.1" } }, 30000);
     rpc.notify("notifications/initialized", {});

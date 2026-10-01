@@ -1,11 +1,13 @@
 // The runtime: turns on each crew member's brain, its computer on demand, the jev gate and pit stops, Pitcrew tools,
 // schedules, kill switch.
 import { writeFileSync, chownSync, readFileSync } from "node:fs";
+import { posix } from "node:path";
+import { execFs } from "./execfs.mjs";
 import { one, all, run, now, uid, json, getSetting, setSetting, audit } from "./db.mjs";
 import { getSecret } from "./auth.mjs";
 import { jev } from "./jev.mjs";
 import { getBot, listBots, instructions, dynamicTools, normaliseSpec, createBot } from "./crew.mjs";
-import { brainFor, computerFor, allComputers, allBrains, botDir, ensureDirs, usageLog, toolManifest } from "./computer.mjs";
+import { brainFor, computerFor, allComputers, allBrains, botDir, ensureDirs, usageLog, toolManifest, PW_OUT } from "./computer.mjs";
 import { providerReady, estimateCost } from "./providers.mjs";
 import { validateSurface } from "./surfaces.mjs";
 import { snapshot, changes } from "./snapshot.mjs";
@@ -37,10 +39,29 @@ function addEvent(threadId, turnId, kind, data) {
   run("UPDATE threads SET updated_at=? WHERE id=?", now(), threadId);
   bus.emit("event", { id: Number(r.lastInsertRowid), threadId, turnId, kind, data, ts: now() });
 }
+// A thread's status is only its live state (idle | running | needs). How a run ended belongs to the turn.
 function setThreadStatus(threadId, status) {
   run("UPDATE threads SET status=?, updated_at=? WHERE id=?", status, now(), threadId);
   const t = getThread(threadId);
   bus.emit("thread", { id: threadId, botId: t?.bot_id, status });
+}
+
+// Names an untitled thread from its first message, locally: no extra model call, and the text goes nowhere new.
+export const UNTITLED = "New thread";
+export function titleFrom(text, attachments = []) {
+  let s = String(text || "").replace(/```[\s\S]*?(```|$)/g, " ").replace(/[`*_#>]+/g, "").replace(/\s+/g, " ").trim();
+  if (!s) return attachments.length ? `Shared ${attachments[0].split("/").pop().replace(/^[a-z0-9]+-/, "")}`.slice(0, 60) : UNTITLED;
+  const sentence = /^(.{12,}?[.?!])(\s|$)/.exec(s)?.[1];
+  if (sentence && sentence.length <= 60) s = sentence;
+  if (s.length > 60) s = `${s.slice(0, 58).replace(/\s+\S*$/, "")}…`;
+  return s[0].toUpperCase() + s.slice(1);
+}
+function nameThread(t, text, attachments) {
+  if (t.title !== UNTITLED || one("SELECT 1 FROM events WHERE thread_id=? AND kind='user' LIMIT 1", t.id)) return;
+  const title = titleFrom(text, attachments);
+  if (title === UNTITLED) return;
+  run("UPDATE threads SET title=? WHERE id=?", title, t.id);
+  bus.emit("thread", { id: t.id, botId: t.bot_id, status: t.status, title });
 }
 
 // Monday 00:00 in Asia/Kolkata (UTC+5:30, no DST).
@@ -80,6 +101,7 @@ export async function sendMessage(threadId, { text, attachments = [], mode = "au
   if (!t) throw Object.assign(new Error("No such thread"), { status: 404 });
   text = String(text || "").slice(0, 20000);
   if (!text.trim() && !attachments.length) throw Object.assign(new Error("Say something"), { status: 400 });
+  nameThread(t, text, attachments);
   addEvent(threadId, null, "user", { text, attachments, via: trigger, ...(display ? { display } : {}) });
   const a = active.get(threadId);
   if (a) {
@@ -90,7 +112,7 @@ export async function sendMessage(threadId, { text, attachments = [], mode = "au
   startTurn(threadId, text, attachments, trigger).catch((e) => {
     if (e.silent) return;
     addEvent(threadId, null, "error", { text: e.message });
-    setThreadStatus(threadId, "failed");
+    setThreadStatus(threadId, "idle");
   });
   return { started: true };
 }
@@ -171,7 +193,7 @@ async function finishTurn(threadId, status, error) {
       addEvent(threadId, a.turnId, "changes", { turnId: a.turnId, botId: b.id, count: ch.length, files: ch.slice(0, 12).map((c) => ({ path: c.path, status: c.status, lines: c.lines })) });
     }
   } catch {}
-  setThreadStatus(threadId, status === "completed" ? "done" : status === "interrupted" ? "idle" : "failed");
+  setThreadStatus(threadId, "idle");
   bus.emit("turn", { threadId, turnId: a.turnId, status, cost: cost.usd, botId: b.id });
   const next = queues.get(threadId)?.shift();
   if (next) startTurn(threadId, next.text, next.attachments, next.trigger).catch((e) => { if (!e.silent) addEvent(threadId, null, "error", { text: e.message }); });
@@ -270,21 +292,35 @@ const subtract = (x, y) => Object.fromEntries(Object.keys(x).map((k) => [k, (x[k
 // ---------- grounding ----------
 // Playwright MCP acts on bare refs ("e44"). Resolve them against the snapshot the agent itself read, so jev judges
 // 'button "Submit order"' on httpbin.org, not "e44". Runs once per browser action; the lookup is a line scan.
-function keepSnapshot(codexId, text) {
-  if (!text.includes("[ref=")) return;
-  snapshots.set(codexId, { url: /Page URL: (\S+)/.exec(text)?.[1] || snapshots.get(codexId)?.url || null, lines: text.split("\n").filter((l) => l.includes("[ref=")) });
+// Playwright MCP writes the snapshot it takes after each action to a file (PW_OUT, see computer.mjs) and returns only a
+// link, so read that file too: otherwise refs from any page but the last explicit snapshot ground to nothing.
+function keepSnapshot(botId, codexId, text) {
+  let refs = text;
+  if (!text.includes("[ref=")) {
+    const link = /\[Snapshot\]\(([^)\s]+\.yml)\)/.exec(text)?.[1];
+    const abs = link && posix.resolve("/bot/work", link);
+    if (!abs?.startsWith(`${PW_OUT}/`)) return;
+    const r = execFs(botId, "fs/readFile", { path: `file://${abs}` });
+    if (!r.result) return;
+    refs = Buffer.from(r.result.dataBase64, "base64").toString("utf8");
+  }
+  if (!refs.includes("[ref=")) return;
+  snapshots.set(codexId, { url: /Page URL: (\S+)/.exec(text)?.[1] || snapshots.get(codexId)?.url || null, lines: refs.split("\n").filter((l) => l.includes("[ref=")) });
 }
 const CONSEQUENTIAL_PAY = /\b(pay|buy|purchase|place order|checkout|check out|transfer|subscribe|donate|confirm payment)\b/i;
-const CONSEQUENTIAL_SEND = /\b(submit|send|post|publish|reply|confirm|sign up|register|book|reserve|apply|delete|remove|cancel (my )?(order|subscription|account))\b/i;
-function ground(codexId, tool, args) {
-  const snap = snapshots.get(codexId);
+const CONSEQUENTIAL_SEND = /\b(submit|send|post|publish|reply|confirm|sign up|register|book|reserve|apply|delete|remove|unsubscribe|cancel (my )?(order|subscription|account))\b/i;
+const roleOf = (element) => /^([a-z]+)\b/.exec(element || "")?.[1] || null;
+const hostOf = (url) => { try { return url ? new URL(url).hostname : ""; } catch { return ""; } };
+export function ground(snap, tool, args) {
   const find = (ref) => snap?.lines.find((l) => l.includes(`[ref=${ref}]`))?.replace(/\[ref=[^\]]+\]/, "").replace(/^\s*-\s*/, "").trim().slice(0, 160);
   const refs = [args.target, args.ref, ...(Array.isArray(args.fields) ? args.fields.map((f) => f.target || f.ref) : [])].filter(Boolean);
   const elements = refs.map((r) => ({ ref: r, element: find(r) || "(not in the last snapshot)" }));
   const grounded = { ...args, page_url: snap?.url || null, ...(elements.length ? { grounded_elements: elements } : {}) };
   let effect = null;
   const label = elements.map((e) => e.element).join(" ");
-  if (/^browser_(click|press_key|select_option)$/.test(tool) && elements.length) effect = CONSEQUENTIAL_PAY.test(label) ? "pay" : CONSEQUENTIAL_SEND.test(label) ? "send" : null;
+  // A plain link click is navigation; links that pay, send or delete still get their consequential class.
+  if (/^browser_(click|press_key|select_option)$/.test(tool) && elements.length)
+    effect = CONSEQUENTIAL_PAY.test(label) ? "pay" : CONSEQUENTIAL_SEND.test(label) ? "send" : tool === "browser_click" && elements.every((e) => roleOf(e.element) === "link") ? "browse" : null;
   return { grounded, effect, label };
 }
 
@@ -294,8 +330,53 @@ function signature(call) {
   if (call.kind === "mcp") return `mcp:${call.server}/${call.tool}`;
   return `${call.kind}:*`;
 }
-function ruleFor(botId, threadId, sig) {
-  return one("SELECT * FROM rules WHERE bot_id=? AND match=? AND revoked_at IS NULL AND (thread_id IS NULL OR thread_id=?)", botId, sig, threadId);
+// What one decision generalises to. Browser actions key on site and element role, so approving a link click on
+// example.com says nothing about its buttons or another site. Ungrounded and pixel actions generalise to nothing.
+export function pattern(call) {
+  if (call.kind === "mcp" && call.server === "computer") return null;
+  if (call.kind === "mcp" && call.server === "browser") {
+    const a = call.arguments || {}, host = hostOf(a.page_url), roles = (a.grounded_elements || []).map((e) => roleOf(e.element));
+    if (!host || !roles.length || roles.includes(null)) return null;
+    return `browser:${call.tool.replace(/^browser_/, "")}:${host}:${[...new Set(roles)].sort().join("+")}`;
+  }
+  return signature(call);
+}
+export function describePattern(p) {
+  const m = /^browser:([^:]+):([^:]+):(.+)$/.exec(p || "");
+  if (m) return `${m[1].replace(/_/g, " ")} ${m[3].replace(/\+/g, " or ")} on ${m[2]}`;
+  return String(p || "").replace(/^cmd:/, "run ").replace(/^mcp:/, "").replace("/", " ");
+}
+// Standing approvals hold only for the effect they were granted for: "always" on a link click never covers a Send.
+function ruleFor(botId, threadId, matches, effect) {
+  return matches.filter(Boolean).map((m) => one("SELECT * FROM rules WHERE bot_id=? AND match=? AND effect=? AND revoked_at IS NULL AND (thread_id IS NULL OR thread_id=?)", botId, m, effect, threadId)).find(Boolean);
+}
+
+// Learning from pit stops: after LEARN_AFTER approvals in a row (no denial since) of one pattern with one effect, the
+// crew stops asking. It only lifts jev's uncertainty escalations: the effect must be one the member's policy already
+// allows, judged by a real classifier (not a fail-closed verdict). Sign-in, send, pay, delete and share never qualify.
+export const LEARN_AFTER = 2;
+const learnable = (policy, effect, by) => policy?.[effect] === "allow" && /^(jev|judge):/.test(by || "");
+function learnedTrust(b, pat, v) {
+  if (!pat || !learnable(b.policy, v.effect, v.by)) return null;
+  const r = one("SELECT * FROM learned WHERE bot_id=? AND pattern=? AND effect=?", b.id, pat, v.effect);
+  return r?.streak >= LEARN_AFTER ? r : null;
+}
+function learn(ps, detail, status) {
+  const ok = status === "approved";
+  run(`INSERT INTO learned(bot_id,pattern,effect,label,approvals,denials,streak,updated_at) VALUES(?,?,?,?,?,?,?,?)
+    ON CONFLICT(bot_id,pattern,effect) DO UPDATE SET approvals=approvals+excluded.approvals, denials=denials+excluded.denials,
+      streak=CASE WHEN excluded.denials>0 THEN 0 ELSE streak+1 END, label=excluded.label, updated_at=excluded.updated_at`,
+    ps.bot_id, detail.pattern, ps.effect, describePattern(detail.pattern), ok ? 1 : 0, ok ? 0 : 1, ok ? 1 : 0, now());
+  const r = one("SELECT streak FROM learned WHERE bot_id=? AND pattern=? AND effect=?", ps.bot_id, detail.pattern, ps.effect);
+  if (ok && r.streak === LEARN_AFTER && ps.thread_id)
+    addEvent(ps.thread_id, null, "system", { text: `Learned: “${describePattern(detail.pattern)}” won't ask again (you approved it ${LEARN_AFTER} times in a row). Undo it under Rules.` });
+}
+// Shown on a pending pit stop: how far this pattern is from being learned, or null if it can't be.
+export function learnProgress(ps) {
+  const d = json(ps.detail, {}), v = json(ps.jev, {});
+  if (!d.pattern || ps.kind === "hire" || !learnable(getBot(ps.bot_id)?.policy, ps.effect, v.by)) return null;
+  const r = one("SELECT streak FROM learned WHERE bot_id=? AND pattern=? AND effect=?", ps.bot_id, d.pattern, ps.effect);
+  return { label: describePattern(d.pattern), streak: r?.streak || 0, need: LEARN_AFTER };
 }
 
 async function waitLease(botId, threadId) {
@@ -309,14 +390,16 @@ async function waitLease(botId, threadId) {
 async function gate(c, threadId, call, pit) {
   const b = getBot(c.bot.id);
   if (call.kind === "mcp" && ["browser", "computer"].includes(call.server) && !(await waitLease(b.id, threadId))) return false;
-  const sig = signature(call);
-  const standing = ruleFor(b.id, threadId, sig);
+  const sig = signature(call), pat = pattern(call);
   const v = await jev(call, { policy: b.policy, apiKey: getSecret("openrouter") || "missing" });
   if (v.decision === "block") { audit("jev", "gate.block", { threadId, effect: v.effect, reason: v.reason, call: gateSummary(call) }); addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Blocked by jev: ${v.reason}. Nothing ran.`, tone: "bad" }); return false; }
   if (v.decision === "allow") return logDecision(threadId, v, call);
   // A standing approval covers repeats of the same action, but never money, deletion or sharing.
+  const standing = ruleFor(b.id, threadId, [pat, sig], v.effect === "unknown" ? "ask" : v.effect);
   if (standing && !["pay", "delete", "share"].includes(v.effect)) return logDecision(threadId, { ...v, decision: "allow", by: `rule:${standing.label}` }, call);
-  const decision = await pitStop({ botId: b.id, threadId, kind: pit.kind, effect: v.effect === "unknown" ? "ask" : v.effect, title: pit.title, detail: { ...pit.detail, signature: sig }, jev: v });
+  const learned = learnedTrust(b, pat, v);
+  if (learned) return logDecision(threadId, { ...v, decision: "allow", by: `learned:${pat} (${learned.approvals} approvals)` }, call);
+  const decision = await pitStop({ botId: b.id, threadId, kind: pit.kind, effect: v.effect === "unknown" ? "ask" : v.effect, title: pit.title, detail: { ...pit.detail, signature: sig, pattern: pat }, jev: v });
   return decision === "approved";
 }
 // Every gate decision lands in the audit log, so "why did this run without asking?" always has an answer.
@@ -352,9 +435,11 @@ export async function decide(id, decision, { scope = "once", note = "", spec = n
     note = `Hired ${bot.name}`;
   }
   const detail = json(ps.detail, {});
-  if (status === "approved" && ["thread", "always"].includes(scope) && detail.signature && !["pay", "delete", "share"].includes(ps.effect)) {
-    run("INSERT INTO rules(id,bot_id,thread_id,effect,match,label,created_at) VALUES(?,?,?,?,?,?,?)", uid("ru"), ps.bot_id, scope === "thread" ? ps.thread_id : null, ps.effect, detail.signature, `${detail.signature.replace(/^(cmd|mcp):/, "")}${scope === "thread" ? " (this thread)" : ""}`, now());
+  const match = detail.pattern || detail.signature;
+  if (status === "approved" && ["thread", "always"].includes(scope) && match && !["pay", "delete", "share"].includes(ps.effect)) {
+    run("INSERT INTO rules(id,bot_id,thread_id,effect,match,label,created_at) VALUES(?,?,?,?,?,?,?)", uid("ru"), ps.bot_id, scope === "thread" ? ps.thread_id : null, ps.effect, match, `${describePattern(match)}${scope === "thread" ? " (this thread)" : ""}`, now());
   }
+  if (detail.pattern && ps.kind !== "hire" && (status === "approved" || status === "denied") && note !== "Kill switch" && learnable(getBot(ps.bot_id)?.policy, ps.effect, json(ps.jev, {}).by)) learn(ps, detail, status);
   run("UPDATE pitstops SET status=?, scope=?, note=?, decided_at=? WHERE id=?", status, scope, String(note).slice(0, 500), now(), id);
   audit(status === "expired" ? "system" : "driver", `pitstop.${status}`, { id, scope, title: ps.title });
   bus.emit("pitstop", { id, botId: ps.bot_id, status });
@@ -448,8 +533,8 @@ async function runtimeTool(br, threadId, p) {
   const kind = p.tool.startsWith("browser_") ? "browser" : "computer";
   const tool = kind === "browser" ? p.tool : p.tool.replace(/^computer_/, "");
   if (/^browser_(evaluate|run_code)/.test(p.tool)) return say("Page JavaScript isn't available. Use the element tools (click, type, fill_form, snapshot).", false);
-  const g = kind === "browser" ? ground(p.threadId, p.tool, args) : { grounded: args, effect: null, label: "" };
-  const host = (() => { try { return g.grounded.page_url ? new URL(g.grounded.page_url).hostname : ""; } catch { return ""; } })();
+  const g = kind === "browser" ? ground(snapshots.get(p.threadId), p.tool, args) : { grounded: args, effect: null, label: "" };
+  const host = hostOf(g.grounded.page_url);
   const title = `${tool.replace(/^browser_/, "").replace(/_/g, " ")} ${short(g.label || summariseArgs(args), 140)}${host ? ` on ${host}` : ""}`.trim();
   bus.emit("activity", { threadId, botId: b.id, text: title });
   const ok = await gate(br, threadId, { kind: "mcp", server: kind, tool, arguments: g.grounded, ...(g.effect ? { effect: g.effect } : {}) }, { kind: "mcp", title, detail: { server: kind, tool, args: g.grounded } });
@@ -459,16 +544,40 @@ async function runtimeTool(br, threadId, p) {
     if (!comp.desktopUp) bus.emit("activity", { threadId, botId: b.id, text: comp.up ? "Starting the desktop…" : "Starting the computer…" });
     const mcp = await comp.mcp(kind);
     comp.touch();
+    if (kind === "browser" && tool !== "browser_tabs") await frontTab(mcp);
     const r = await mcp.request("tools/call", { name: tool, arguments: args }, 120000);
     const content = Array.isArray(r.content) ? r.content : [];
     const text = content.filter((x) => x.type === "text").map((x) => x.text).join("\n");
-    if (kind === "browser") keepSnapshot(p.threadId, text);
+    if (kind === "browser") { keepSnapshot(b.id, p.threadId, text); const t = readTabs(text); if (t) tabCounts.set(mcp, t.count); }
     addEvent(threadId, turnId, "tool", { type: kind, title, status: r.isError ? "failed" : "completed", output: text.slice(0, 1500) });
     return { success: !r.isError, contentItems: content.map((x) => x.type === "image" ? { type: "inputImage", imageUrl: `data:${x.mimeType || "image/png"};base64,${x.data}` } : { type: "inputText", text: x.type === "text" ? x.text : JSON.stringify(x).slice(0, 4000) }) };
   } catch (e) {
     addEvent(threadId, turnId, "tool", { type: kind, title, status: "failed", error: e.message });
     return say(`The computer couldn't run ${tool}: ${e.message}`, false);
   }
+}
+
+// ---------- tab focus ----------
+// Playwright drives its own current tab, which needn't be Chrome's foreground one (a popup opened, the driver switched
+// tabs in the live view, or a fresh MCP session adopted tab 0). Then the live view shows another tab, and Chrome throttles
+// the background tab's animation frames, so clicks wait on stability checks and time out. Before each action, bring the
+// agent's tab to the front. Costs two local MCP calls, only while more than one tab is open.
+const tabCounts = new WeakMap(); // browser MCP session → tab count from its last response
+export function readTabs(text) {
+  const tabs = new Map();
+  for (const m of String(text).matchAll(/^- (\d+):( \(current\))? \[/gm)) tabs.set(+m[1], tabs.get(+m[1]) || !!m[2]);
+  if (!tabs.size) return /^### Page$/m.test(text) ? { count: 1, current: 0 } : null;
+  const current = [...tabs].find(([, cur]) => cur)?.[0];
+  return { count: Math.max(...tabs.keys()) + 1, current: current ?? 0 };
+}
+export async function frontTab(mcp) {
+  if (tabCounts.get(mcp) === 1) return;
+  try {
+    const call = (args) => mcp.request("tools/call", { name: "browser_tabs", arguments: args }, 15000);
+    const t = readTabs(((await call({ action: "list" })).content || []).map((x) => x.text || "").join("\n"));
+    tabCounts.set(mcp, t?.count ?? 1);
+    if (t?.count > 1) await call({ action: "select", index: t.current });
+  } catch {}
 }
 
 // ---------- schedules ----------
@@ -542,7 +651,7 @@ export function bootRuntime() {
   // Pit stops from a previous process can't be answered: their Codex requests died with the computers.
   for (const ps of all("SELECT id,thread_id FROM pitstops WHERE status='pending' AND kind!='hire'")) run("UPDATE pitstops SET status='expired', note='Control plane restarted', decided_at=? WHERE id=?", now(), ps.id);
   run("UPDATE turns SET status='failed', error='Control plane restarted', ended_at=? WHERE status IN ('starting','running')", now());
-  run("UPDATE threads SET status='idle' WHERE status IN ('running','needs')");
+  run("UPDATE threads SET status='idle' WHERE status!='idle'"); // also clears pre-v1.2 'done'/'failed' thread states
   setInterval(tickSchedules, 30000).unref();
 }
 export { isBusy, isThinking };

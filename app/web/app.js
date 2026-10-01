@@ -153,6 +153,7 @@ function pitCard(p, { onDone } = {}) {
       h("span", { class: "pc-m small faint" }, done ? `${p.status} ${ago(p.decided_at)}` : `expires ${when(p.expires_at)}`)),
     h("p", { class: "t" }, p.title), body,
     j.reason && h("p", { class: "why" }, `jev · ${j.by || ""} · ${j.reason}${j.ms ? ` · ${j.ms} ms` : ""}`),
+    !done && p.learn && h("p", { class: "small faint" }, p.learn.need - p.learn.streak <= 1 ? `Approve this and ${b?.name || "the crew"} stops asking for “${p.learn.label}”.` : `Approve “${p.learn.label}” ${p.learn.need - p.learn.streak} times in a row and ${b?.name || "the crew"} stops asking.`),
     !done && p.kind === "hire" && h("div", { class: "acts" }, h("a", { class: "pc-pill sig s", href: `#/hire/${p.id}` }, "Review & hire"), h("button", { class: "pc-pill o s", onclick: () => decide("deny") }, "Decline")),
     !done && p.kind !== "hire" && [note, h("div", { class: "acts" },
       h("button", { class: "pc-pill sig s", onclick: () => decide("approve", "once") }, "Approve once"),
@@ -204,8 +205,12 @@ async function crewView(id, tab = "threads", ...rest) {
   const tabs = h("div", { class: "tabs" }, ["threads", "files", "computer", "profile", "memory", "schedules", "rules"].map((t) => h("a", { href: `#/crew/${id}/${t}`, class: tab === t ? "on" : "" }, t[0].toUpperCase() + t.slice(1))));
   const newThread = async () => { const r = await api("POST", "/api/threads", { botId: id, title: "New thread" }); location.hash = `#/t/${r.id}`; };
   let body;
-  if (tab === "threads") body = h("div", { class: "pc-card tight" }, b.threads.length ? h("table", { class: "tbl" }, h("tbody", {}, b.threads.map((t) => {
-    const tr = h("tr", { style: "cursor:pointer" }, h("td", {}, h("b", {}, t.title), t.pinned ? h("span", { class: "pc-chip", style: "margin-left:8px" }, "pinned") : null), h("td", {}, h("span", { class: `pc-chip ${t.status === "needs" ? "hot" : t.status === "failed" ? "bad" : t.status === "running" ? "blue" : ""}` }, t.status)), h("td", { class: "num faint small" }, ago(t.updated_at)));
+  // Threads carry no outcome of their own; only a live run (working, or waiting on a pit stop) earns a chip.
+  if (tab === "threads") body = h("div", { class: "pc-card tight" }, b.threads.length ? h("table", { class: "tbl" },
+    h("thead", {}, h("tr", {}, h("th", {}, "Thread"), h("th", { class: "num" }, "Created"), h("th", { class: "num" }, "Last active"))), h("tbody", {}, b.threads.map((t) => {
+    const live = t.status === "running" ? h("span", { class: "pc-chip blue" }, "working") : t.status === "needs" ? h("span", { class: "pc-chip hot" }, "pit stop") : null;
+    const tr = h("tr", { style: "cursor:pointer" }, h("td", {}, h("div", { class: "row", style: "gap:8px" }, h("b", {}, t.title), t.pinned ? h("span", { class: "pc-chip" }, "pinned") : null, live)),
+      h("td", { class: "num faint small" }, when(t.created_at)), h("td", { class: "num faint small", title: when(t.updated_at) }, ago(t.updated_at)));
     tr.addEventListener("click", () => (location.hash = `#/t/${t.id}`)); return tr;
   }))) : h("p", { class: "empty" }, "No threads yet."));
   else if (tab === "files") body = await filesView(b, ...rest);
@@ -213,7 +218,7 @@ async function crewView(id, tab = "threads", ...rest) {
   else if (tab === "profile") body = await profileEditor(b);
   else if (tab === "memory") body = memoryEditor(b, d.memory);
   else if (tab === "schedules") body = schedulesEditor(b, d.schedules);
-  else body = rulesList(d.rules, () => renderView());
+  else body = h("div", { class: "col" }, rulesList(d.rules, () => renderView()), learnedList(d.learned, () => renderView()));
   return h("div", { class: "page" },
     h("div", { class: "spread" }, h("div", { class: "row", style: "gap:16px" }, face(b, "lg"), h("div", { class: "col", style: "gap:4px" }, h("h1", { class: "pc-h2" }, b.name), h("p", { class: "muted" }, b.job), h("div", { class: "row" }, h("span", { class: "pc-chip" }, b.provider), h("span", { class: "pc-chip" }, b.model), h("span", { class: "pc-chip" }, `${usd(b.spend)} / ${usd(b.weekly_cap_usd)} wk`)))),
       h("button", { class: "pc-pill", onclick: newThread }, "+ New thread")),
@@ -281,6 +286,17 @@ function schedulesEditor(b, list) {
   return h("div", { class: "col" }, h("div", { class: "grid2" }, spec, h("div", { class: "row" }, h("div", { style: "flex:1" }, prompt), h("button", { class: "pc-pill s", onclick: add }, "Add"))),
     h("div", { class: "pc-card tight" }, list.length ? h("table", { class: "tbl" }, h("tbody", {}, list.map((s) => h("tr", {}, h("td", { class: "pc-m" }, s.spec), h("td", {}, s.prompt), h("td", { class: "small faint" }, s.next_run ? `next ${when(s.next_run)}` : ""),
       h("td", { class: "num" }, h("button", { class: "small faint", onclick: async () => { await api("PATCH", `/api/schedules/${s.id}`, { enabled: !s.enabled }); renderView(); } }, s.enabled ? "Pause" : "Resume")))))) : h("p", { class: "empty" }, "No schedules.")));
+}
+function learnedList(items, after) {
+  return h("div", { class: "pc-card tight scrollx" }, items.length ? h("table", { class: "tbl" }, h("thead", {}, h("tr", {}, h("th", {}, "Learned from your approvals"), h("th", {}, "Effect"), h("th", {}, "Crew"), h("th", { class: "num" }, "Approved"), h("th", {}, "State"), h("th"))),
+    h("tbody", {}, items.map((l) => {
+      const on = l.streak >= l.need;
+      return h("tr", {}, h("td", {}, l.label), h("td", {}, h("pc-effect", { kind: l.effect }, l.effect.replace("_", " "))), h("td", {}, l.bot_name || l.bot_id),
+        h("td", { class: "num pc-m small" }, `${l.approvals}${l.denials ? ` · ${l.denials} denied` : ""}`),
+        h("td", {}, h("span", { class: `pc-chip ${on ? "ok" : ""}` }, on ? "no longer asks" : `${l.streak} of ${l.need}`)),
+        h("td", { class: "num" }, on && h("button", { class: "small sig", onclick: async () => { await api("POST", `/api/learned/${l.id}/reset`); toast("It will ask again"); after(); } }, "Ask again")));
+    })))
+    : h("p", { class: "empty" }, "Nothing learned yet. Approve the same kind of action twice in a row and the crew stops asking, unless it signs in, installs, sends, pays, deletes or shares."));
 }
 function rulesList(rules, after) {
   return h("div", { class: "pc-card tight" }, rules.length ? h("table", { class: "tbl" }, h("thead", {}, h("tr", {}, h("th", {}, "Standing approval"), h("th", {}, "Effect"), h("th", {}, "Crew"), h("th", {}, "Since"), h("th"))), h("tbody", {}, rules.map((r) => h("tr", {}, h("td", { class: "pc-m" }, r.label), h("td", {}, h("pc-effect", { kind: r.effect }, r.effect)), h("td", {}, r.bot_name || r.bot_id), h("td", { class: "small faint" }, when(r.created_at)),
@@ -440,7 +456,7 @@ async function threadView(id) {
       const el = renderEvent(x); if (el) { liveLine.before(el); scroll(x.kind === "user"); }
     } else if (type === "activity") { liveLine.lastChild.textContent = x.text; }
     else if (type === "context") setCtx(x.tokens, x.window);
-    else if (type === "thread") setRunning(x.status === "running" || x.status === "needs");
+    else if (type === "thread") { setRunning(x.status === "running" || x.status === "needs"); if (x.title && title.isConnected) { d.thread.title = x.title; title.textContent = x.title; } }
     else if (type === "turn") { setRunning(false); if (streaming) { streaming.el.remove(); streaming = null; } }
     else if (type === "pitstop" && x.status !== "pending") { const all = await api("GET", `/api/threads/${id}`, undefined, { quiet: true }).catch(() => null); if (all) { for (const p of all.pitstops) pits.set(p.id, p); stream.querySelectorAll(".pit").forEach(() => {}); } }
   };
@@ -450,7 +466,7 @@ async function threadView(id) {
 
 // ---------- pit stops ----------
 async function pitstopsView() {
-  const [pending, history, rules] = await Promise.all([api("GET", "/api/pitstops?status=pending"), api("GET", "/api/pitstops"), api("GET", "/api/rules")]);
+  const [pending, history, rules, learned] = await Promise.all([api("GET", "/api/pitstops?status=pending"), api("GET", "/api/pitstops"), api("GET", "/api/rules"), api("GET", "/api/learned")]);
   const picks = new Set();
   const batch = async (decision) => { if (!picks.size) return toast("Pick some pit stops first"); await api("POST", "/api/pitstops/batch", { ids: [...picks], decision }); toast(`${decision === "approve" ? "Approved" : "Denied"} ${picks.size}`); renderView(); };
   return h("div", { class: "page" },
@@ -458,6 +474,7 @@ async function pitstopsView() {
     pending.length ? h("div", { class: "col" }, pending.map((p) => h("div", { class: "row", style: "align-items:flex-start;flex-wrap:nowrap" }, p.kind !== "hire" ? h("input", { type: "checkbox", style: "margin-top:22px", onchange: (e) => (e.target.checked ? picks.add(p.id) : picks.delete(p.id)) }) : h("span", { style: "width:13px" }), h("div", { style: "flex:1" }, pitCard(p, { onDone: () => renderView() })))))
       : h("div", { class: "pc-card empty" }, h("pc-bot", { size: "lg", hue: "c3", mood: "done" }), h("p", { style: "margin-top:12px" }, "Nothing waiting. Ignored pit stops expire after 30 minutes and nothing happens.")),
     h("p", { class: "pc-lab" }, "Standing approvals"), rulesList(rules, () => renderView()),
+    h("p", { class: "pc-lab" }, "Learned"), learnedList(learned, () => renderView()),
     h("p", { class: "pc-lab" }, "History"),
     h("div", { class: "pc-card tight scrollx" }, h("table", { class: "tbl" }, h("thead", {}, h("tr", {}, h("th", {}, "When"), h("th", {}, "Crew"), h("th", {}, "Effect"), h("th", {}, "What"), h("th", {}, "Outcome"), h("th", {}, "Decided by"))),
       h("tbody", {}, history.filter((p) => p.status !== "pending").slice(0, 80).map((p) => h("tr", {}, h("td", { class: "small faint" }, when(p.created_at)), h("td", {}, bot(p.bot_id)?.name || p.bot_id), h("td", {}, effectChip(p.effect)), h("td", {}, p.title),
