@@ -25,6 +25,8 @@ const HEX = { c1: "#4f7dff", c2: "#16c2c2", c3: "#2fcc80", c5: "#ff6fab", c6: "#
 export const botDir = (id) => `${ROOT}/bots/${id}`;
 // Inside the computer; on the host under botDir, so the control plane can read Playwright's snapshot files.
 export const PW_OUT = "/bot/run/playwright";
+// Playwright MCP waits this long after each action for triggered work (default 500 ms; click 589-620 → 196-226 ms, measured).
+export const PW_SETTLE_MS = 100;
 export const brainDir = (id) => `${ROOT}/brains/${id}`;
 export const usageLog = (id) => `${ROOT}/brains/_usage/${id}.jsonl`;
 export const chatgptAuthPath = () => `${ROOT}/chatgpt/auth.json`;
@@ -185,7 +187,7 @@ export class Brain {
 
 // ---------- computer (machine) ----------
 export class Computer {
-  constructor(bot, hooks) { this.bot = bot; this.hooks = hooks; this.ready = null; this.desk = null; this.mcps = {}; this.up = false; this.desktopUp = false; this.startedAt = null; this.viewers = 0; this.lastActive = Date.now(); }
+  constructor(bot, hooks) { this.bot = bot; this.hooks = hooks; this.ready = null; this.desk = null; this.mcps = {}; this.starting = {}; this.up = false; this.desktopUp = false; this.startedAt = null; this.viewers = 0; this.lastActive = Date.now(); }
   get name() { return `pc-bot-${this.bot.id}`; }
   touch() { this.lastActive = Date.now(); }
   ensure() {
@@ -240,14 +242,22 @@ export class Computer {
     return this.desk;
   }
   // MCP servers that live inside the computer (Playwright over CDP, pixel control), reached over docker exec stdio.
-  // Playwright's per-action snapshot files go to PW_OUT, not the default ./.playwright-mcp in the workspace, where they
-  // showed up as the run's "changed files".
+  // Neither touches Chrome or X before its first tool call, so spawn + initialize (449-631 ms for Playwright, measured)
+  // overlaps the desktop boot (~1.26 s) instead of following it.
   async mcp(kind) {
-    await this.desktop();
-    if (this.mcps[kind] && !this.mcps[kind].closed) return this.mcps[kind];
-    const cmd = kind === "browser" ? ["-e", "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright", this.name, "playwright-mcp", "--cdp-endpoint", "http://127.0.0.1:9222", "--output-dir", PW_OUT, "--output-max-size", String(32 << 20)] : ["-e", "DISPLAY=:1", this.name, "node", "/opt/pitcrew/computer-mcp.mjs"];
+    const live = this.mcps[kind];
+    if (live && !live.closed) { await this.desktop(); return live; }
+    await this.ensure();
+    this.starting[kind] ??= this.#spawnMcp(kind).finally(() => { delete this.starting[kind]; });
+    return (await Promise.all([this.starting[kind], this.desktop()]))[0];
+  }
+  // Playwright's per-action snapshot files go to PW_OUT, not the default ./.playwright-mcp in the workspace, where they
+  // showed up as the run's "changed files". --codegen none drops the "Ran Playwright code" block from every result.
+  async #spawnMcp(kind) {
+    const cmd = kind === "browser" ? ["-e", "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright", this.name, "playwright-mcp", "--cdp-endpoint", "http://127.0.0.1:9222", "--output-dir", PW_OUT, "--output-max-size", String(32 << 20), "--codegen", "none", "--timeout-settle", String(PW_SETTLE_MS)] : ["-e", "DISPLAY=:1", this.name, "node", "/opt/pitcrew/computer-mcp.mjs"];
     const rpc = new Rpc(spawn("docker", ["exec", "-i", ...cmd], { stdio: ["pipe", "pipe", "pipe"] }), { name: `${kind} tools` });
-    await rpc.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "pitcrew", version: "1.1" } }, 30000);
+    try { await rpc.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "pitcrew", version: "1.1" } }, 30000); }
+    catch (e) { rpc.proc.kill(); throw e; }
     rpc.notify("notifications/initialized", {});
     this.mcps[kind] = rpc;
     return rpc;

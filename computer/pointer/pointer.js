@@ -8,7 +8,7 @@
   root.innerHTML = `<style>
     :host{all:initial}
     .layer{position:fixed;inset:0;pointer-events:none;z-index:2147483647}
-    .p{position:absolute;left:0;top:0;transform:translate(-100px,-100px);transition:transform .5s cubic-bezier(.25,.8,.25,1),opacity .4s;will-change:transform;opacity:0}
+    .p{position:absolute;left:0;top:0;transform:translate(-100px,-100px);transition:transform .25s cubic-bezier(.25,.8,.25,1),opacity .4s;will-change:transform;opacity:0}
     .p.on{opacity:1}.p.idle{opacity:.45}
     svg{display:block;filter:drop-shadow(0 2px 3px rgba(0,0,0,.35));transform-origin:3px 3px;transition:transform .12s}
     .p.down svg{transform:scale(.82)}
@@ -26,7 +26,7 @@
   const p = root.querySelector(".p"), tag = root.querySelector(".tag"), layer = root.querySelector(".layer");
   tag.textContent = name;
   // GLIDE matches the transform transition; a press waits for the glide so it never lands mid-flight.
-  const GLIDE = 500;
+  const GLIDE = 250;
   let x = -100, y = -100, idleT = 0, typingT = 0, saveT = 0, arrive = 0;
   const place = (nx, ny) => { if (Math.hypot(nx - x, ny - y) > 4) arrive = Date.now() + GLIDE; x = nx; y = ny; p.style.transform = `translate(${x}px,${y}px)`; wake(); };
   const wake = () => { p.classList.add("on"); p.classList.remove("idle"); clearTimeout(idleT); idleT = setTimeout(() => p.classList.add("idle"), 4000); };
