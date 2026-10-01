@@ -168,8 +168,10 @@ route("POST", "/api/ask", async (req) => {
     audit("driver", "ask.routed", { botId: to.id, by: "driver" });
     return openRouted(to.id, text, { kind: "routed", by: "driver" });
   }
-  const pick = await routeMessage(text, listBots());
-  if (b.dry) return pick;  // routing only, no thread: for checking the router against real wording
+  // dry: routing only, no thread. A dry run may pass a hypothetical crew ([{name, job}]) to try the router before hiring.
+  const crew = b.dry && Array.isArray(b.crew) ? [listBots().find((x) => x.kind === "chief"), ...b.crew.slice(0, 20).map((x, i) => ({ id: `try${i}`, kind: "specialist", name: String(x.name).slice(0, 60), job: String(x.job || "").slice(0, 300) }))] : listBots();
+  const pick = await routeMessage(text, crew);
+  if (b.dry) return { ...pick, name: crew.find((x) => x.id === pick.botId)?.name, alternatives: pick.alternatives.map((a) => ({ ...a, name: crew.find((x) => x.id === a.botId)?.name })) };
   const sure = pick.confidence == null || pick.confidence >= SURE || !pick.alternatives.length;
   audit("driver", "ask.routed", { botId: pick.botId, by: pick.by, confidence: pick.confidence, ms: pick.ms, asked: !sure });
   if (!sure) return { choose: [pick.botId, ...pick.alternatives.map((a) => a.botId)] };
