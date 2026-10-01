@@ -179,6 +179,7 @@ route("POST", "/api/ask", async (req) => {
   return openRouted(pick.botId, text, { kind: "routed", by: pick.by, confidence: pick.confidence });
 });
 // "Change": the message moves to another member; the first thread stops and is archived. Audited, so routing accuracy can be measured.
+route("POST", "/api/plans/:id/stop", (req, res, { id }) => ({ ok: R.stopPlan(id) }));
 route("POST", "/api/threads/:id/reroute", async (req, res, { id }) => {
   const b = await jbody(req), t = R.getThread(id), to = getBot(b.botId);
   if (!t) throw A.httpErr(404, "No such thread");

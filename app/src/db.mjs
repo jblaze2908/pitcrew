@@ -74,9 +74,6 @@ CREATE TABLE IF NOT EXISTS known_hosts (
   bot_id TEXT NOT NULL, domain TEXT NOT NULL, visits INTEGER NOT NULL DEFAULT 1, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL, PRIMARY KEY (bot_id, domain));
 `);
 
-// Columns added after v1 shipped; ALTER fails harmlessly once they exist.
-for (const sql of ["ALTER TABLE turns ADD COLUMN changes TEXT", "ALTER TABLE jev_labels ADD COLUMN shadow TEXT",
-  "ALTER TABLE threads ADD COLUMN origin TEXT", "ALTER TABLE bots ADD COLUMN private INTEGER NOT NULL DEFAULT 0"]) { try { db.exec(sql); } catch {} }
 db.exec(`CREATE TABLE IF NOT EXISTS delegations (
   id TEXT PRIMARY KEY, from_bot TEXT NOT NULL, from_thread TEXT NOT NULL, to_bot TEXT NOT NULL, to_thread TEXT NOT NULL,
   question TEXT NOT NULL, status TEXT NOT NULL, answer TEXT, cost_usd REAL, created_at INTEGER NOT NULL, ended_at INTEGER)`);
@@ -88,6 +85,10 @@ CREATE TABLE IF NOT EXISTS plan_items (
   id TEXT PRIMARY KEY, plan_id TEXT NOT NULL, seq INTEGER NOT NULL, key TEXT NOT NULL, owner_bot TEXT NOT NULL, task TEXT NOT NULL,
   after TEXT NOT NULL, status TEXT NOT NULL, result TEXT, why TEXT, reopened INTEGER NOT NULL DEFAULT 0, history TEXT NOT NULL DEFAULT '[]',
   to_thread TEXT, cost_usd REAL NOT NULL DEFAULT 0, started_at INTEGER, ended_at INTEGER)`);
+// Columns added after v1 shipped; ALTER fails harmlessly once they exist.
+for (const sql of ["ALTER TABLE turns ADD COLUMN changes TEXT", "ALTER TABLE jev_labels ADD COLUMN shadow TEXT",
+  "ALTER TABLE threads ADD COLUMN origin TEXT", "ALTER TABLE bots ADD COLUMN private INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE plans ADD COLUMN live INTEGER", "ALTER TABLE plans ADD COLUMN swept INTEGER NOT NULL DEFAULT 0"]) { try { db.exec(sql); } catch {} }
 
 export const now = () => Date.now();
 export const uid = (p) => `${p}_${randomBytes(9).toString("base64url")}`;

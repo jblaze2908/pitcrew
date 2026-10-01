@@ -129,6 +129,7 @@ const planRules = (driver) => [`Plans: when work needs one or more crew members,
   `- Don't search, browse or calculate members' work yourself. If you must do a step, add it as an item with member "Crew Chief".`,
   `- Before calling a preference unmet, ask the member who could change the outcome whether an alternative exists (cheaper, other dates, another provider). If you didn't ask, it's untested, not unmet.`,
   `- ${driver}'s messages override the plan: if they say stop something, cancel it (that stops running items).`,
+  `- Answer the question as ${driver} asked it. Don't add costs or criteria they didn't mention (food, transport, fees); put those in a note, never in the verdict.`,
   `- Finish with plan.finish: the answer plus every constraint marked met, unmet or untested. Then tell ${driver} the answer in plain words.`].join("\n");
 
 // Sent at thread start/resume only, so a hire or retire reaches the Chief at its next brain start.

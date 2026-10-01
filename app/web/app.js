@@ -178,7 +178,7 @@ function pitCard(p, { onDone } = {}) {
     : p.kind === "file" ? h("pre", {}, (d.paths || []).join("\n"))
     : p.kind === "hire" ? hireSummary(d.spec || {})
     : p.kind === "site" ? siteSummary(d) : null;
-  const noAlways = ["pay", "delete", "share"].includes(p.effect) || p.kind === "hire";
+  const noAlways = ["pay", "delete", "share"].includes(p.effect) || p.kind === "hire" || p.kind === "plan";
   const el = h("div", { class: `pit ${done ? "done" : ""}` },
     h("div", { class: "spread" }, h("div", { class: "row" }, face(b, "sm", done ? "idle" : "needs"), h("b", {}, b?.name || p.bot_id), effectChip(p.effect)),
       h("span", { class: "pc-m small faint" }, done ? `${p.status} ${ago(p.decided_at)}` : `expires ${when(p.expires_at)}`)),
@@ -560,7 +560,8 @@ async function threadView(id) {
         const old = delegs.get(e.data.id), P = e.data;
         const st = { todo: ["to do", ""], doing: ["on track", "blue"], done: ["done", "ok"], failed: ["didn't finish", "bad"], cancelled: ["cancelled", ""] };
         const el = h("div", { class: "deleg plan pc-card col" },
-          h("div", { class: "spread" }, h("b", { class: "pc-h3" }, P.status === "done" ? "Plan · done" : "Plan"), h("span", { class: "pc-m small faint" }, `${usd(P.spend)} of ${usd(P.budget)} · ${P.chiefRuns} Chief run${P.chiefRuns === 1 ? "" : "s"}`)),
+          h("div", { class: "spread" }, h("b", { class: "pc-h3" }, P.status === "done" ? "Plan · done" : P.status === "stopped" ? "Plan · stopped" : "Plan"), h("div", { class: "row", style: "gap:8px" }, h("span", { class: "pc-m small faint" }, `${usd(P.spend)} of ${usd(P.budget)}`),
+            P.status === "running" && h("button", { class: "pc-pill o s", onclick: async (ev) => { if (!confirmInline(ev.target, "Stop?")) return; await api("POST", `/api/plans/${P.id}/stop`); } }, "Stop plan"))),
           h("p", { class: "small muted" }, P.goal),
           P.constraints?.length > 0 && h("div", { class: "col", style: "gap:2px" }, P.constraints.map((c) => { const k = P.checks?.find((x) => x.text.trim().toLowerCase() === c.trim().toLowerCase()); return h("p", { class: "small" }, h("span", { class: `pc-chip ${k?.status === "met" ? "ok" : k?.status === "unmet" ? "bad" : ""}` }, k?.status || "constraint"), " ", c, k?.note ? h("span", { class: "faint" }, ` · ${k.note}`) : null); })),
           h("div", { class: "col", style: "gap:0" }, P.items.map((i) => { const who = bot(i.owner) || { name: i.ownerName }; const [lab, cls] = st[i.status] || [i.status, ""];

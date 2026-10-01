@@ -491,3 +491,10 @@ test("plan handoffs split a member's reply into answer, data, assumptions and ga
   assert.equal(r.unchecked, "taxes");
   assert.equal(parseHandoff("just an answer").answer, "just an answer");
 });
+
+test("plan handoffs carry other options the member knows of", async () => {
+  const { parseHandoff } = await import("../app/src/runtime.mjs");
+  const r = parseHandoff("IndiGo Rs 14,500.\nFrom my data: fares checked today\nAssumed: nothing\nCouldn't check: nothing\nOther options: Air India Rs 12,900, 05:40 out");
+  assert.equal(r.options, "Air India Rs 12,900, 05:40 out");
+  assert.equal(r.unchecked, "nothing");
+});
