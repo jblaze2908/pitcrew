@@ -10,7 +10,7 @@ import { checkoutWhy, confirmationOf } from "./sites.mjs";
 import { siteVerdict, siteTag, applySiteChoice, recordVisit } from "./domains.mjs";
 import { getBot, listBots, instructions, dynamicTools, normaliseSpec, createBot } from "./crew.mjs";
 import { brainFor, computerFor, allComputers, allBrains, botDir, ensureDirs, usageLog, toolManifest, PW_OUT, PW_SETTLE_MS } from "./computer.mjs";
-import { providerReady, estimateCost } from "./providers.mjs";
+import { providerReady, estimateCost, recordChatgptLimits, chatgptLimits } from "./providers.mjs";
 import { validateSurface } from "./surfaces.mjs";
 import { snapshot, changes } from "./snapshot.mjs";
 import { imageFrom, saveShot, startShotSweeper } from "./shots.mjs";
@@ -313,6 +313,7 @@ function mcpResultText(it) {
 }
 
 function onNotify(c, method, p) {
+  if (method === "account/rateLimits/updated") return recordChatgptLimits(p.rateLimits);
   const threadId = p.threadId ? byCodex.get(p.threadId) : null;
   if (!threadId) return;
   const a = active.get(threadId);
@@ -347,6 +348,17 @@ function onNotify(c, method, p) {
     case "error": if (!p.willRetry) addEvent(threadId, a?.turnId, "error", { text: short(p.error?.message || "Model error", 500) }); break;
     case "thread/compacted": addEvent(threadId, null, "system", { text: "Thread compacted." }); break;
   }
+}
+// Telemetry page: asks a running brain at most once a minute, never starts one. Goes through rpc directly so the read
+// doesn't count as activity and keep an idle brain alive.
+let limitsAskedAt = 0;
+export async function planLimits() {
+  const br = providerReady("openai") && allBrains().find((x) => x.up);
+  if (br && Date.now() - limitsAskedAt > 60000) {
+    limitsAskedAt = Date.now();
+    try { const r = await br.rpc.request("account/rateLimits/read", { excludeResetCreditDetails: true }, 10000); recordChatgptLimits(r.rateLimitsByLimitId?.codex ?? r.rateLimits); } catch {}
+  }
+  return { connected: providerReady("openai"), ...chatgptLimits() };
 }
 const subtract = (x, y) => Object.fromEntries(Object.keys(x).map((k) => [k, (x[k] || 0) - (y?.[k] || 0)]));
 
