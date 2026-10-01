@@ -258,6 +258,7 @@ async function finishTurn(threadId, status, error) {
   } catch {}
   setThreadStatus(threadId, "idle");
   bus.emit("turn", { threadId, turnId: a.turnId, status, cost: cost.usd, botId: b.id });
+  if (wakeFor.has(threadId)) { const p = activePlan(threadId); if (p) { planLog(p.id, `Looked after ${wakeFor.get(threadId)}: no change`); emitPlan(planRow(p.id)); } wakeFor.delete(threadId); }
   for (const w of turnWaiters.get(threadId)?.splice(0) || []) w({ turnId: a.turnId, status, cost: cost.usd });
   const next = queues.get(threadId)?.shift();
   if (next) startTurn(threadId, next.text, next.attachments, next.trigger).catch((e) => { if (!e.silent) addEvent(threadId, null, "error", { text: e.message }); });
@@ -907,13 +908,27 @@ async function askCrew(from, threadId, a) {
 // The Crew Chief edits a todo; Pitcrew starts every item whose `after` items are done, hands it their results, records
 // what comes back and wakes the Chief after each item. Starting, waiting and passing results is code, not the model.
 const PLAN = { budget: 1, chiefRuns: 12, memberRuns: 3, items: 20, itemWaitMs: 10 * 60000, sweepWaitMs: 5 * 60000 };
-const planRow = (id) => { const p = one("SELECT * FROM plans WHERE id=?", id); return p && { ...p, constraints: json(p.constraints, []), checks: json(p.checks, null) }; };
+const planRow = (id) => { const p = one("SELECT * FROM plans WHERE id=?", id); return p && { ...p, constraints: json(p.constraints, []), checks: json(p.checks, null), limits: { chiefRuns: PLAN.chiefRuns, extra: {}, ...json(p.limits, {}) }, log: json(p.log, []), sweep: json(p.sweep, null) }; };
+const setLimits = (p, limits) => run("UPDATE plans SET limits=? WHERE id=?", JSON.stringify(limits), p.id);
+// What the Chief decided at each look, shown as the dashed lines on the plan card. Capped at 40 lines.
+function planLog(planId, text) { const p = planRow(planId); if (p) run("UPDATE plans SET log=? WHERE id=?", JSON.stringify([...p.log, { at: now(), text: short(text, 200) }].slice(-40)), planId); }
+const chiefOf = (p) => getBot(one("SELECT bot_id FROM threads WHERE id=?", p.thread_id).bot_id);
+// Hitting a limit asks the driver instead of refusing outright; one pending ask per plan and limit.
+const planAsks = new Map();
+function askToContinue(p, key, title) {
+  const k = `${p.id}:${key}`;
+  if (!planAsks.has(k)) planAsks.set(k, pitStop({ botId: chiefOf(p).id, threadId: p.thread_id, kind: "plan", effect: "plan_limit", title, detail: { planId: p.id, limit: key } })
+    .then((d) => { planAsks.delete(k); return d === "approved"; }));
+  return planAsks.get(k);
+}
+const wakeFor = new Map(); // Chief thread id → item key it was woken for, until it acts or its turn ends
 const activePlan = (threadId) => { const p = one("SELECT id FROM plans WHERE thread_id=? AND status='running' ORDER BY created_at DESC LIMIT 1", threadId); return p && planRow(p.id); };
 const planItems = (planId) => all("SELECT * FROM plan_items WHERE plan_id=? ORDER BY seq", planId).map((i) => ({ ...i, after: json(i.after, []), result: json(i.result, null), history: json(i.history, []) }));
 // Runs a member has had or is queued for in this plan: each item counts once plus each reopen. Counted per member, not
 // per item, so adding a fresh key can't sidestep the limit.
 const memberRuns = (planId, botId) => one("SELECT COUNT(*) n, COALESCE(SUM(reopened),0) r FROM plan_items WHERE plan_id=? AND owner_bot=? AND NOT (status='cancelled' AND started_at IS NULL)", planId, botId);
 const runsOf = (planId, botId) => { const x = memberRuns(planId, botId); return x.n + x.r; };
+const runsAllowed = (p, botId) => PLAN.memberRuns + (p.limits.extra[botId] || 0);
 const ownerOf = (q, chief) => (/^(crew )?chief$/i.test(String(q || "").trim()) || q === chief.id ? chief : findMember(q, chief.id));
 function planSpend(p) {
   const items = one("SELECT COALESCE(SUM(cost_usd),0) s FROM plan_items WHERE plan_id=?", p.id).s;
@@ -926,8 +941,9 @@ function planText(p, items = planItems(p.id)) {
 }
 function emitPlan(p) {
   const items = planItems(p.id), spend = planSpend(p);
-  addEvent(p.thread_id, null, "plan", { id: p.id, goal: p.goal, constraints: p.constraints, status: p.status, answer: p.answer, checks: p.checks, budget: p.budget_usd, spend: spend.usd, chiefRuns: spend.chiefRuns,
-    items: items.map((i) => ({ key: i.key, owner: i.owner_bot, ownerName: getBot(i.owner_bot)?.name, task: short(i.task, 300), status: i.status, after: i.after, why: i.why, reopened: i.reopened, toThread: i.to_thread, cost: i.cost_usd, result: i.result && { answer: short(i.result.answer, 600), assumed: short(i.result.assumed || "", 300), unchecked: short(i.result.unchecked || "", 300) } })) });
+  addEvent(p.thread_id, null, "plan", { id: p.id, goal: p.goal, constraints: p.constraints, status: p.status, answer: p.answer, checks: p.checks, budget: p.budget_usd, spend: spend.usd, chiefRuns: spend.chiefRuns, chiefLimit: p.limits.chiefRuns, live: p.live, log: p.log.slice(-12), sweep: p.sweep,
+    items: items.map((i) => ({ key: i.key, owner: i.owner_bot, ownerName: getBot(i.owner_bot)?.name, task: short(i.task, 300), status: i.status, after: i.after, why: i.why, reopened: i.reopened, runs: runsOf(p.id, i.owner_bot), allowed: runsAllowed(p, i.owner_bot), toThread: i.to_thread, cost: i.cost_usd,
+      result: i.result && { answer: short(i.result.answer, 600), assumed: short(i.result.assumed || "", 300), unchecked: short(i.result.unchecked || "", 300), options: short(i.result.options || "", 300) } })) });
 }
 // Splits a member's reply into the handoff shape the plan asks for; a reply without the sections is all answer.
 export function parseHandoff(text) {
@@ -937,9 +953,17 @@ export function parseHandoff(text) {
   marks.forEach((m, i) => { out[m.k] = t.slice(m.end, marks[i + 1]?.at ?? t.length).trim(); });
   return out;
 }
-function wakeChief(p, text, display) {
+function wakeChief(p, text, display, key = null) {
   const spend = planSpend(p);
-  if (spend.chiefRuns >= PLAN.chiefRuns) { addEvent(p.thread_id, null, "system", { text: `Plan paused: the Crew Chief has run ${PLAN.chiefRuns} times on it. Send a message to let it continue.`, tone: "bad" }); return; }
+  if (spend.chiefRuns >= p.limits.chiefRuns) {
+    askToContinue(p, "chief", `The Crew Chief has looked at this plan ${spend.chiefRuns} times. Let it keep going? (${short(p.goal, 70)})`).then((ok) => {
+      const fresh = planRow(p.id); if (!fresh || fresh.status !== "running") return;
+      setLimits(fresh, { ...fresh.limits, chiefRuns: fresh.limits.chiefRuns + (ok ? 6 : 1) });
+      wakeChief(planRow(p.id), ok ? text : `${text}\n\n${getSetting("driver_name", "The driver")} said to finish with what the crew has. Finish now.`, display, key);
+    });
+    return;
+  }
+  if (key) wakeFor.set(p.thread_id, key);
   const q = queues.get(p.thread_id), last = q?.at(-1);
   if (active.has(p.thread_id) && last?.trigger === "plan") { last.text += `\n\n${text}`; return; }
   sendMessage(p.thread_id, { text, trigger: "plan", mode: "queue", display }).catch((e) => addEvent(p.thread_id, null, "error", { text: e.message }));
@@ -949,7 +973,13 @@ function dispatchPlan(planId) {
   if (!p || p.status !== "running") return;
   const items = planItems(p.id), done = new Set(items.filter((i) => i.status === "done").map((i) => i.key));
   for (const it of items.filter((i) => i.status === "todo" && i.after.every((k) => done.has(k)))) {
-    if (planSpend(p).usd >= p.budget_usd) { addEvent(p.thread_id, null, "system", { text: `Plan budget reached ($${p.budget_usd.toFixed(2)}); ${it.key} didn't start.`, tone: "bad" }); return; }
+    if (planSpend(p).usd >= p.budget_usd) {
+      askToContinue(p, "budget", `This plan has spent $${planSpend(p).usd.toFixed(2)} of $${p.budget_usd.toFixed(2)}. Allow another $1.00? (${short(p.goal, 70)})`).then((ok) => {
+        if (ok) { run("UPDATE plans SET budget_usd=budget_usd+1 WHERE id=?", p.id); emitPlan(planRow(p.id)); dispatchPlan(p.id); }
+        else wakeChief(planRow(p.id), `${getSetting("driver_name", "The driver")} didn't allow more spending on this plan. Finish with what the crew has.`, "Plan update: budget reached");
+      });
+      return;
+    }
     startItem(p, it, items);
   }
 }
@@ -965,7 +995,7 @@ async function startItem(p, it, items) {
     wakeChief(fresh, [`Plan update from Pitcrew: "${it.key}" (${owner.name}) ${status === "done" ? "finished" : "did not finish"}.`, `Answer: ${r.answer || "(none)"}`,
       r.data && `From their data: ${r.data}`, r.assumed && `Assumed: ${r.assumed}`, r.unchecked && `Couldn't check: ${r.unchecked}`, r.options && `Other options: ${r.options}`,
       `Todo now:\n${planText(fresh)}`, `Constraints:\n${fresh.constraints.map((c, i) => `${i + 1}. ${c}`).join("\n")}`,
-      running.length ? `Still running: ${running.join(", ")}. If nothing needs to change, reply "waiting".` : "Nothing is running. Reopen or add items, or finish."].filter(Boolean).join("\n\n"), `Plan update: ${it.key} ${status === "done" ? "done" : "didn't finish"}`);
+      running.length ? `Still running: ${running.join(", ")}. If nothing needs to change, reply "waiting".` : "Nothing is running. Reopen or add items, or finish."].filter(Boolean).join("\n\n"), `Plan update: ${it.key} ${status === "done" ? "done" : "didn't finish"}`, it.key);
   };
   const why = blockedReason(owner);
   if (why) return end("failed", { answer: why });
@@ -1002,6 +1032,7 @@ async function sweep(p) {
     if (r?.cost) run("UPDATE plan_items SET cost_usd=cost_usd+? WHERE id=?", r.cost, i.id);
     return { who: getBot(i.owner_bot)?.name, text: r ? lastAgentText(i.to_thread, r.turnId) : "(no reply in time)" };
   }));
+  run("UPDATE plans SET sweep=? WHERE id=?", JSON.stringify(answers.map((a) => ({ who: a.who, text: short(a.text, 600), found: !/^\W*no alternative/i.test(a.text.trim()) }))), p.id);
   const fresh = planRow(p.id); emitPlan(fresh);
   if (fresh.status !== "running") return;
   const found = answers.filter((a) => !/^\W*no alternative/i.test(a.text.trim()));
@@ -1039,10 +1070,18 @@ async function planLive(threadId) {
   return p.live === 1;
 }
 const planLiveAsk = new Map();
-function planTool(chief, threadId, a) {
+async function planTool(chief, threadId, a) {
   if (json(getThread(threadId)?.origin)?.kind === "delegated") return say("Plans are run from the Crew Chief's own thread, not from a plan step.", false);
   let p = activePlan(threadId);
-  const errs = [];
+  const errs = [], did = [], after = wakeFor.get(threadId);
+  wakeFor.delete(threadId);
+  // A member past its run limit asks the driver once; yes grants one more run for that member.
+  const roomFor = async (owner) => {
+    if (runsOf(p.id, owner.id) < runsAllowed(p, owner.id)) return true;
+    const ok = await askToContinue(p, `runs:${owner.id}`, `${owner.name} has had ${runsOf(p.id, owner.id)} runs in this plan. Allow one more? (${short(p.goal, 70)})`);
+    if (ok) { p = planRow(p.id); setLimits(p, { ...p.limits, extra: { ...p.limits.extra, [owner.id]: (p.limits.extra[owner.id] || 0) + 1 } }); p = planRow(p.id); }
+    return ok;
+  };
   if (!p) {
     if (!a.goal || !Array.isArray(a.add) || !a.add.length) return say("Start a plan with goal, constraints and add.", false);
     const id = uid("pl");
@@ -1058,17 +1097,19 @@ function planTool(chief, threadId, a) {
     if (!owner) { errs.push(`add ${key}: no crew member called "${short(x.member, 40)}"`); continue; }
     if (owner.private) { errs.push(`add ${key}: ${owner.name} is private; only ${getSetting("driver_name", "the driver")} talks to it`); continue; }
     if (seq >= PLAN.items) { errs.push(`add ${key}: a plan holds at most ${PLAN.items} items`); continue; }
-    if (runsOf(p.id, owner.id) >= PLAN.memberRuns) { errs.push(`add ${key}: ${owner.name} has had ${PLAN.memberRuns} runs in this plan; ask ${getSetting("driver_name", "the driver")} before going again`); continue; }
+    if (!(await roomFor(owner))) { errs.push(`add ${key}: ${getSetting("driver_name", "the driver")} said ${owner.name} shouldn't run again; finish with what the crew has`); continue; }
     const after = (x.after || []).map(String).filter((k) => byKey.has(k) || (a.add || []).some((y) => y.key === k));
     const row = { id: uid("pi"), key }; byKey.set(key, row);
     run("INSERT INTO plan_items(id,plan_id,seq,key,owner_bot,task,after,status) VALUES(?,?,?,?,?,?,?,?)", row.id, p.id, seq++, key, owner.id, String(x.task || "").slice(0, 2000), JSON.stringify(after), "todo");
+    did.push(`added ${key} for ${owner.name}`);
   }
   for (const x of a.reopen || []) {
     const it = byKey.get(String(x.key));
     if (!it?.status) { errs.push(`reopen ${x.key}: no such item`); continue; }
     if (it.status === "doing") { errs.push(`reopen ${x.key}: still running`); continue; }
-    if (runsOf(p.id, it.owner_bot) >= PLAN.memberRuns) { errs.push(`reopen ${x.key}: ${getBot(it.owner_bot)?.name} has had ${PLAN.memberRuns} runs in this plan; ask ${getSetting("driver_name", "the driver")} before going again`); continue; }
+    if (!(await roomFor(getBot(it.owner_bot)))) { errs.push(`reopen ${x.key}: ${getSetting("driver_name", "the driver")} said ${getBot(it.owner_bot)?.name} shouldn't run again; finish with what the crew has`); continue; }
     run("UPDATE plan_items SET status='todo', task=?, why=?, reopened=reopened+1, history=?, result=NULL WHERE id=?", String(x.task).slice(0, 2000), String(x.why || "").slice(0, 300), JSON.stringify([...it.history, { task: it.task, result: it.result }]), it.id);
+    did.push(`sent ${x.key} back: ${x.why || "no reason given"}`);
   }
   // Cancelling a running item stops its run; marked cancelled first so its ending doesn't wake the Chief as a result.
   for (const k of a.cancel || []) {
@@ -1076,19 +1117,22 @@ function planTool(chief, threadId, a) {
     if (!it?.status || ["done", "cancelled"].includes(it.status)) continue;
     run("UPDATE plan_items SET status='cancelled', ended_at=? WHERE id=?", now(), it.id);
     if (it.status === "doing" && it.to_thread) interrupt(it.to_thread).catch(() => {});
+    did.push(`cancelled ${k}`);
   }
   if (a.finish) {
     const checks = (a.finish.constraints || []).map((c) => ({ text: String(c.text || "").slice(0, 300), status: ["met", "unmet", "untested"].includes(c.status) ? c.status : "untested", note: String(c.note || "").slice(0, 300) }));
     const missing = p.constraints.filter((c) => !checks.some((k) => k.text.trim().toLowerCase() === c.trim().toLowerCase()));
     if (missing.length) return say(`Not finished: mark every constraint, word for word. Missing: ${missing.join(" | ")}`, false);
     if (planItems(p.id).some((i) => i.status === "doing")) return say("Not finished: items are still running. Cancel them (that stops them) or wait.", false);
-    if (!p.swept) { sweep(p); return say("Not finished yet: before any plan finishes, Pitcrew asks each member who contributed whether they know an alternative that would better meet the constraints. You'll be woken with what they say. End this turn now."); }
+    if (!p.swept) { planLog(p.id, "Chief wants to finish; asking members for alternatives first"); sweep(p); return say("Not finished yet: before any plan finishes, Pitcrew asks each member who contributed whether they know an alternative that would better meet the constraints. You'll be woken with what they say. End this turn now."); }
     run("UPDATE plan_items SET status='cancelled' WHERE plan_id=? AND status='todo'", p.id);
     run("UPDATE plans SET status='done', answer=?, checks=?, ended_at=? WHERE id=?", String(a.finish.answer).slice(0, 4000), JSON.stringify(checks), now(), p.id);
+    planLog(p.id, "Chief finished the plan");
     audit(chief.id, "plan.finished", { id: p.id, spend: planSpend(p).usd });
     emitPlan(planRow(p.id));
     return say("Plan finished. Now tell the driver the answer in plain words, saying which constraints were met, unmet or untested and anything that rests on an assumption.");
   }
+  if (did.length) planLog(p.id, `${after ? `After ${after}: ` : ""}${did.join("; ")}`);
   emitPlan(planRow(p.id));
   dispatchPlan(p.id);
   return say(`${errs.length ? `Not applied:\n- ${errs.join("\n- ")}\n\n` : ""}Todo now:\n${planText(planRow(p.id))}\n\nPitcrew runs ready items and wakes you after each one ends. End this turn now unless you have more to change.`, !errs.length || errs.length < (a.add || []).length + (a.reopen || []).length);

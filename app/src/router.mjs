@@ -6,6 +6,10 @@ const CHIEF_WHAT = "general requests, anything no other member's job covers, and
 // Below this the driver picks from the top candidates instead of a run starting with the wrong member.
 export const SURE = 0.55;
 
+// Members named in the message, as whole words (an optional @ in front). Two or more means a plan for the Crew Chief.
+const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+export const namedMembers = (text, bots) => bots.filter((b) => b.kind !== "chief" && new RegExp(`(^|[^\\p{L}])@?${escRe(b.name)}(?![\\p{L}])`, "iu").test(text));
+
 export const routeCriteria = (bots) => Object.fromEntries(bots.map((b) => [b.id, { what: `${b.name}: ${b.kind === "chief" ? CHIEF_WHAT : b.job || b.name}`.slice(0, 400) }]));
 
 export async function routeMessage(text, bots, { apiKey = getSecret("openrouter"), timeoutMs = 5000, model = process.env.JEV_MODEL || "~typesafe/jev-latest" } = {}) {

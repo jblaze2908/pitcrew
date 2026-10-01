@@ -88,7 +88,8 @@ CREATE TABLE IF NOT EXISTS plan_items (
 // Columns added after v1 shipped; ALTER fails harmlessly once they exist.
 for (const sql of ["ALTER TABLE turns ADD COLUMN changes TEXT", "ALTER TABLE jev_labels ADD COLUMN shadow TEXT",
   "ALTER TABLE threads ADD COLUMN origin TEXT", "ALTER TABLE bots ADD COLUMN private INTEGER NOT NULL DEFAULT 0",
-  "ALTER TABLE plans ADD COLUMN live INTEGER", "ALTER TABLE plans ADD COLUMN swept INTEGER NOT NULL DEFAULT 0"]) { try { db.exec(sql); } catch {} }
+  "ALTER TABLE plans ADD COLUMN live INTEGER", "ALTER TABLE plans ADD COLUMN swept INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE plans ADD COLUMN limits TEXT", "ALTER TABLE plans ADD COLUMN log TEXT", "ALTER TABLE plans ADD COLUMN sweep TEXT"]) { try { db.exec(sql); } catch {} }
 
 export const now = () => Date.now();
 export const uid = (p) => `${p}_${randomBytes(9).toString("base64url")}`;

@@ -498,3 +498,10 @@ test("plan handoffs carry other options the member knows of", async () => {
   assert.equal(r.options, "Air India Rs 12,900, 05:40 out");
   assert.equal(r.unchecked, "nothing");
 });
+
+test("front door finds members named in the sentence as whole words", async () => {
+  const { namedMembers } = await import("../app/src/router.mjs");
+  const crew = [{ id: "c", kind: "chief", name: "Crew Chief" }, { id: "t", name: "Travel" }, { id: "k", name: "Tickets" }, { id: "f", name: "Finance" }];
+  assert.deepEqual(namedMembers("Travel finds days, then @tickets checks and Finance confirms", crew).map((b) => b.id), ["t", "k", "f"]);
+  assert.deepEqual(namedMembers("I'm travelling soon; ask the crew chief", crew), []);
+});

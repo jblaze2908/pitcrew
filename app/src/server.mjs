@@ -8,8 +8,8 @@ import { one, all, run, now, uid, json, getSetting, setSetting, audit } from "./
 import * as A from "./auth.mjs";
 import * as P from "./providers.mjs";
 import * as R from "./runtime.mjs";
-import { routeMessage, SURE } from "./router.mjs";
-import { getBot, listBots, ensureChief, updateBot, normaliseSpec, createBot } from "./crew.mjs";
+import { routeMessage, SURE, namedMembers } from "./router.mjs";
+import { getBot, listBots, ensureChief, updateBot, normaliseSpec, createBot, plansOn } from "./crew.mjs";
 import { objectText } from "./snapshot.mjs";
 import { serveShot, SHOT_NAME } from "./shots.mjs";
 import { send, serveFile as serveCached, warm } from "./delivery.mjs";
@@ -57,7 +57,7 @@ function state() {
   const dayStart = (() => { const d = new Date(now() + 330 * 60000); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - 330 * 60000; })();
   return {
     driverName: getSetting("driver_name", "Driver"), paused: getSetting("paused") === "1", defaultProvider: getSetting("default_provider", "openrouter"), plainVoice: getSetting("plain_voice") === "1",
-    bots: listBots().map((b) => botCard(b, pending, 12)), pitstops: pending, providers: P.providerStatus(),
+    bots: listBots().map((b) => botCard(b, pending, 12)), pitstops: pending, providers: P.providerStatus(), plans: plansOn(),
     today: one("SELECT COALESCE(SUM(cost_usd),0) usd, COUNT(*) runs FROM turns WHERE started_at>=?", dayStart),
     week: one("SELECT COALESCE(SUM(cost_usd),0) usd, COUNT(*) runs FROM turns WHERE started_at>=?", R.weekStart()),
     weekCap: one("SELECT COALESCE(SUM(weekly_cap_usd),0) c FROM bots WHERE archived=0").c,
@@ -171,7 +171,10 @@ route("POST", "/api/ask", async (req) => {
   }
   // dry: routing only, no thread. A dry run may pass a hypothetical crew ([{name, job}]) to try the router before hiring.
   const crew = b.dry && Array.isArray(b.crew) ? [listBots().find((x) => x.kind === "chief"), ...b.crew.slice(0, 20).map((x, i) => ({ id: `try${i}`, kind: "specialist", name: String(x.name).slice(0, 60), job: String(x.job || "").slice(0, 300) }))] : listBots();
-  const pick = await routeMessage(text, crew);
+  const named = namedMembers(text, crew);
+  const pick = named.length > 1 ? { botId: crew.find((x) => x.kind === "chief").id, confidence: null, alternatives: [], by: "names" }
+    : named.length === 1 ? { botId: named[0].id, confidence: null, alternatives: [], by: "named" } : await routeMessage(text, crew);
+  pick.named = named.map((x) => x.id);
   if (b.dry) return { ...pick, name: crew.find((x) => x.id === pick.botId)?.name, alternatives: pick.alternatives.map((a) => ({ ...a, name: crew.find((x) => x.id === a.botId)?.name })) };
   const sure = pick.confidence == null || pick.confidence >= SURE || !pick.alternatives.length;
   audit("driver", "ask.routed", { botId: pick.botId, by: pick.by, confidence: pick.confidence, ms: pick.ms, asked: !sure });
@@ -179,6 +182,15 @@ route("POST", "/api/ask", async (req) => {
   return openRouted(pick.botId, text, { kind: "routed", by: pick.by, confidence: pick.confidence });
 });
 // "Change": the message moves to another member; the first thread stops and is archived. Audited, so routing accuracy can be measured.
+// Your asks on the Pit wall: the latest front-door threads with their live state and a short answer. Per wall render:
+// one indexed query, then two small reads per row (8 rows max).
+route("GET", "/api/asks", () => all(`SELECT id,bot_id,title,status,origin,updated_at FROM threads WHERE archived=0 AND origin LIKE '{"kind":"routed"%' ORDER BY updated_at DESC LIMIT 8`).map((t) => {
+  const last = json(one("SELECT data FROM events WHERE thread_id=? AND kind='agent' ORDER BY id DESC LIMIT 1", t.id)?.data, {});
+  const plan = one("SELECT id,status FROM plans WHERE thread_id=? ORDER BY created_at DESC LIMIT 1", t.id);
+  const items = plan ? all("SELECT owner_bot,status FROM plan_items WHERE plan_id=? AND status!='cancelled'", plan.id) : [];
+  return { id: t.id, botId: t.bot_id, title: t.title, status: t.status, running: R.isRunning(t.id), updatedAt: t.updated_at, origin: json(t.origin, {}), answer: last.text ? last.text.slice(0, 280) : null,
+    plan: plan && { status: plan.status, members: [...new Set(items.map((i) => i.owner_bot))], done: items.filter((i) => i.status === "done").length, total: items.length } };
+}));
 route("POST", "/api/plans/:id/stop", (req, res, { id }) => ({ ok: R.stopPlan(id) }));
 route("POST", "/api/threads/:id/reroute", async (req, res, { id }) => {
   const b = await jbody(req), t = R.getThread(id), to = getBot(b.botId);
