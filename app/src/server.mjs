@@ -239,7 +239,7 @@ route("POST", "/api/kill", () => R.killSwitch());
 route("POST", "/api/resume", () => { R.resumeCrew(); return state(); });
 
 // Telemetry, library, export
-route("GET", "/api/telemetry", async () => ({ ...telemetry(), openrouter: await P.openrouterUsage() }));
+route("GET", "/api/telemetry", async () => { const [openrouter, chatgpt] = await Promise.all([P.openrouterUsage(), R.planLimits()]); return { ...telemetry(), openrouter, chatgpt }; });
 route("GET", "/api/library", () => listBots().map((b) => ({ id: b.id, name: b.name, hue: b.hue, shape: b.shape, files: listFiles(b.id) })));
 route("GET", "/api/export", (req, res) => {
   const dump = { exportedAt: new Date().toISOString(), note: "Pitcrew export. Provider keys and auth tokens are never included.",

@@ -647,10 +647,11 @@ async function telemetryView() {
   const waitMin = Math.round((t.pitstops?.wait_ms || 0) / 60000);
   return h("div", { class: "page" },
     h("div", { class: "spread" }, h("h1", { class: "pc-h2" }, "Telemetry"), h("div", { class: "row" }, h("a", { class: "pc-pill o s", href: "/api/export", download: "" }, "Export everything (JSON)"))),
-    h("div", { class: "grid3" },
+    h("div", { class: "grid2" },
       h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "Handled this week"), h("span", { class: "big num" }, String(t.handled)), h("p", { class: "small muted" }, "runs completed")),
-      h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "Asked of you"), h("span", { class: "big num" }, String(t.pitstops?.total || 0)), h("p", { class: "small muted" }, `pit stops · ${t.pitstops?.approved || 0} approved · ${t.pitstops?.denied || 0} denied · ${t.pitstops?.expired || 0} expired · crew waited ${waitMin} min on you`)),
-      h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "OpenRouter says"), t.openrouter ? [h("span", { class: "big num" }, usd(t.openrouter.usage_daily ?? t.openrouter.usage ?? 0)), h("p", { class: "small muted" }, `${t.openrouter.usage_daily != null ? "today" : "total"} on this key, as reported by OpenRouter · weekly ${usd(t.openrouter.usage_weekly ?? 0)}`)] : h("p", { class: "small muted" }, "No OpenRouter key connected."))),
+      h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "Asked of you"), h("span", { class: "big num" }, String(t.pitstops?.total || 0)), h("p", { class: "small muted" }, `pit stops · ${t.pitstops?.approved || 0} approved · ${t.pitstops?.denied || 0} denied · ${t.pitstops?.expired || 0} expired · crew waited ${waitMin} min on you`))),
+    h("p", { class: "pc-lab" }, "What's left with each provider"),
+    h("div", { class: "grid2" }, openrouterLeft(t.openrouter), planLeft(t.chatgpt)),
     h("p", { class: "pc-lab" }, "Spend by crew member (this week; billed by the provider, list-price estimate otherwise)"),
     h("div", { class: "pc-card col" }, t.bots.map((b) => h("div", { class: "col", style: "gap:4px" }, h("div", { class: "spread" }, h("div", { class: "row" }, h("pc-bot", { size: "xs", hue: b.hue, shape: b.shape }), h("b", {}, b.name), h("span", { class: "small faint" }, `${b.runs} runs${b.failed ? ` · ${b.failed} failed` : ""}`)), h("span", { class: "pc-m small" }, `${usd(b.spend)} / ${usd(b.cap)}`)),
       h("pc-track", { pct: Math.min(100, (b.spend / (b.cap || 1)) * 100).toFixed(0), hue: b.hue, shape: b.shape, state: "working" })))),
@@ -660,6 +661,34 @@ async function telemetryView() {
     h("div", { class: "pc-card tight scrollx" }, t.runs.length ? h("table", { class: "tbl" }, h("thead", {}, h("tr", {}, h("th", {}, "Started"), h("th", {}, "Crew"), h("th", {}, "Thread"), h("th", {}, "Trigger"), h("th", {}, "Outcome"), h("th", { class: "num" }, "Tokens in/out"), h("th", { class: "num" }, "Cost"))),
       h("tbody", {}, t.runs.map((r) => { const tr = h("tr", { style: "cursor:pointer" }, h("td", { class: "small faint" }, when(r.started_at)), h("td", {}, r.bot_name), h("td", {}, r.thread_title), h("td", { class: "small" }, r.trigger), h("td", {}, h("span", { class: `pc-chip ${r.status === "completed" ? "ok" : r.status === "failed" ? "bad" : ""}` }, r.status), r.error && h("p", { class: "small badc" }, r.error.slice(0, 120))),
         h("td", { class: "num pc-m small" }, `${(r.input_tokens || 0).toLocaleString("en-IN")} / ${(r.output_tokens || 0).toLocaleString("en-IN")}`), h("td", { class: "num pc-m", title: r.cost_basis === "billed" ? "Billed by the provider" : r.cost_basis === "list" ? "Estimate from list price" : "" }, r.cost_basis === "plan" ? "plan" : r.cost_basis === "unknown" ? "?" : `${usd(r.cost_usd)}${r.cost_basis === "list" ? " est." : ""}`)); tr.addEventListener("click", () => (location.hash = `#/t/${r.thread_id}`)); return tr; }))) : h("p", { class: "empty" }, "No runs yet.")));
+}
+
+const until = (t) => { const m = Math.max(0, Math.round((t - Date.now()) / 60000)); return m < 60 ? `${m}m` : m < 2880 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${Math.round(m / 1440)}d`; };
+const leftMeter = (usedPct) => h("div", { class: `meter${usedPct >= 90 ? " bad" : usedPct >= 70 ? " hot" : ""}` }, h("b", { style: `width:${Math.min(100, Math.max(0, usedPct)).toFixed(0)}%` }));
+
+function openrouterLeft(o) {
+  const card = (...kids) => h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "OpenRouter"), ...kids);
+  if (!o) return card(h("p", { class: "small muted" }, "No OpenRouter key connected."));
+  const spent = `Spent on this key: ${usd(o.usage_daily ?? 0)} today · ${usd(o.usage_weekly ?? 0)} this week · ${usd(o.usage ?? 0)} all time.`;
+  if (o.balance != null) return card(h("span", { class: "big num" }, usd(o.balance)), h("p", { class: "small muted" }, "credits left on the account"), h("p", { class: "small faint" }, spent));
+  if (o.limit != null) return card(h("span", { class: "big num" }, usd(o.limit_remaining ?? 0)), h("p", { class: "small muted" }, `left of this key's ${usd(o.limit)} cap${o.limit_reset ? ` · resets ${o.limit_reset}` : ""}`),
+    leftMeter(o.limit ? ((o.limit - (o.limit_remaining ?? 0)) / o.limit) * 100 : 0), h("p", { class: "small faint" }, spent));
+  return card(h("span", { class: "big num" }, "No cap"), h("p", { class: "small muted" }, "This key has no spend cap. The account's credit balance is only shown to management keys."), h("p", { class: "small faint" }, spent));
+}
+
+function planLeft(c) {
+  const card = (...kids) => h("div", { class: "pc-card col" }, h("div", { class: "spread" }, h("p", { class: "pc-lab" }, "ChatGPT plan"), c?.plan && h("span", { class: "pc-chip" }, c.plan)), ...kids);
+  if (!c?.primary && !c?.secondary) return card(h("p", { class: "small muted" }, c?.connected ? "No reading yet. Codex reports it after the first run on the plan." : "ChatGPT plan not connected."));
+  const name = (w, d) => (w.windowMins === 300 ? "5-hour window" : w.windowMins === 10080 ? "Weekly" : w.windowMins ? `${Math.round(w.windowMins / 60)}-hour window` : d);
+  const row = (w, d) => {
+    const reset = w.resetsAt && w.resetsAt <= Date.now(), used = reset ? 0 : w.usedPercent;
+    return h("div", { class: "col", style: "gap:4px" }, h("div", { class: "spread" }, h("b", {}, name(w, d)), h("span", { class: "pc-m small" }, `${100 - used}% left`)), leftMeter(used),
+      h("p", { class: "small faint" }, reset ? "Reset since this reading" : w.resetsAt ? `Resets in ${until(w.resetsAt)} · ${when(w.resetsAt)}` : ""));
+  };
+  const cr = c.credits;
+  return card(c.reached && h("span", { class: "pc-chip bad" }, "Limit reached"), c.primary && row(c.primary, "Short window"), c.secondary && row(c.secondary, "Long window"),
+    cr?.has && h("p", { class: "small muted" }, cr.unlimited ? "Credits: unlimited" : `Credits: ${cr.balance ?? "available"}`),
+    h("p", { class: "small faint" }, `As of ${ago(c.at)}. Refreshes after each run on the plan.`));
 }
 
 // ---------- library ----------

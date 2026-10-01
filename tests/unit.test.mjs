@@ -462,3 +462,14 @@ test("a shared screenshot can also come from Playwright's relative link", async 
   assert.deepEqual(imageFrom(said("- [Screenshot of viewport](../run/playwright/page-1.jpeg)"), "b_rel"), jpg);
   assert.equal(imageFrom(said("- [Screenshot](../x.jpg)"), "b_rel"), null);
 });
+
+test("ChatGPT plan limits keep the codex bucket and the other window's last reading", async () => {
+  const { recordChatgptLimits, chatgptLimits } = await import("../app/src/providers.mjs");
+  recordChatgptLimits({ limitId: "codex", planType: "pro", primary: { usedPercent: 40, windowDurationMins: 300, resetsAt: 1900000000 }, secondary: { usedPercent: 12, windowDurationMins: 10080, resetsAt: 1900500000 } });
+  recordChatgptLimits({ limitId: "other", primary: { usedPercent: 99 } });
+  recordChatgptLimits({ primary: { usedPercent: 55, windowDurationMins: 300, resetsAt: 1900001000 } });
+  const l = chatgptLimits();
+  assert.equal(l.plan, "pro");
+  assert.deepEqual(l.primary, { usedPercent: 55, windowMins: 300, resetsAt: 1900001000000 });
+  assert.equal(l.secondary.usedPercent, 12);
+});

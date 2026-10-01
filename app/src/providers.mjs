@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, chownSync, chmodSync, unlinkSync, statSync } from "node:fs";
 import { getSecret, putSecret, deleteSecret, secretMeta } from "./auth.mjs";
 import { ROOT, IMAGE, chatgptAuthPath } from "./computer.mjs";
-import { audit } from "./db.mjs";
+import { audit, getSetting, setSetting } from "./db.mjs";
 
 export const PROVIDERS = {
   openrouter: { label: "OpenRouter", secret: "openrouter" },
@@ -99,9 +99,22 @@ export function openrouterUsage() {
   if (orUsage.p && Date.now() - orUsage.at < 60000) return orUsage.p;
   const key = getSecret("openrouter");
   if (!key) return Promise.resolve(null);
-  orUsage = { at: Date.now(), p: timed("https://openrouter.ai/api/v1/key", { headers: { Authorization: `Bearer ${key}` } }).then((r) => r.json()).then((b) => b.data || null, () => null) };
+  // /credits (account balance) answers only management keys; an ordinary key gets 403 and we show its own cap instead.
+  const get = (path) => timed(`https://openrouter.ai/api/v1/${path}`, { headers: { Authorization: `Bearer ${key}` } }).then((r) => (r.ok ? r.json() : {})).then((b) => b.data || null, () => null);
+  orUsage = { at: Date.now(), p: Promise.all([get("key"), get("credits")]).then(([k, c]) => k && { ...k, balance: c ? c.total_credits - c.total_usage : null }) };
   return orUsage.p;
 }
+
+// ChatGPT plan usage as Codex reports it: primary is the 5-hour window, secondary the weekly one. Kept in settings so the
+// last reading survives restarts; Codex pushes a fresh one after each turn on the plan.
+const pickWindow = (w) => w && { usedPercent: w.usedPercent, windowMins: w.windowDurationMins ?? null, resetsAt: w.resetsAt ? w.resetsAt * 1000 : null };
+export function recordChatgptLimits(s) {
+  if (!s || (s.limitId && s.limitId !== "codex") || (!s.primary && !s.secondary && !s.credits)) return;
+  const prev = chatgptLimits() || {};  // an update may carry one window only; keep the other's last reading
+  setSetting("chatgpt_limits", JSON.stringify({ at: Date.now(), plan: s.planType ?? prev.plan ?? null, primary: pickWindow(s.primary) ?? prev.primary ?? null, secondary: pickWindow(s.secondary) ?? prev.secondary ?? null,
+    credits: s.credits ? { has: s.credits.hasCredits, unlimited: s.credits.unlimited, balance: s.credits.balance ?? null } : prev.credits ?? null, reached: s.rateLimitReachedType ?? null }));
+}
+export function chatgptLimits() { try { return JSON.parse(getSetting("chatgpt_limits")); } catch { return null; } }
 
 // Sign in with ChatGPT by device code: `codex login --device-auth` in a throwaway computer with only /auth mounted.
 const loginState = {
