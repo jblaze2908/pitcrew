@@ -49,6 +49,9 @@ CREATE TABLE IF NOT EXISTS surfaces (
 CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, data TEXT NOT NULL);
 `);
 
+// Columns added after v1 shipped; ALTER fails harmlessly once they exist.
+for (const sql of ["ALTER TABLE turns ADD COLUMN changes TEXT"]) { try { db.exec(sql); } catch {} }
+
 export const now = () => Date.now();
 export const uid = (p) => `${p}_${randomBytes(9).toString("base64url")}`;
 export const one = (sql, ...a) => db.prepare(sql).get(...a);

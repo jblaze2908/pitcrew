@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "Pitcrew pointer",
+  "version": "1.0",
+  "description": "Shows where the crew member is pointing, clicking and typing, for the driver watching live.",
+  "permissions": ["storage"],
+  "content_scripts": [{ "matches": ["<all_urls>"], "js": ["config.js", "pointer.js"], "run_at": "document_start" }]
+}

@@ -39,7 +39,7 @@ export function ruleVerdict(call, policy = DEFAULT_POLICY) {
   }
   if (call.kind === "mcp" && call.server === "computer" && /^(screenshot|scroll)$/.test(call.tool))
     return { decision: "allow", effect: "browse", reason: "observes the screen", by: "rule" };
-  if (call.kind === "mcp" && /^browser_(navigate|snapshot|take_screenshot|wait_for|console_messages|network_requests|tabs|hover|resize)$/.test(call.tool))
+  if (call.kind === "mcp" && /^browser_(navigate|navigate_back|snapshot|take_screenshot|wait_for|console_messages|network_requests|network_request|find|tabs|hover|resize)$/.test(call.tool))
     return { decision: "allow", effect: "browse", reason: "observes the page", by: "rule" };
   return null;
 }

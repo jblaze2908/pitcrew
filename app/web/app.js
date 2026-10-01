@@ -1,5 +1,6 @@
 // Pitcrew web app: one page, hash routes, live over SSE. Built only from design-system classes and pc-* components.
 import { h, renderSurface } from "./surface.js";
+import { renderDiff } from "./diff.js";
 
 const $ = (s, el = document) => el.querySelector(s);
 const root = $("#root");
@@ -181,7 +182,7 @@ function wallView() {
     S.paused && h("div", { class: "pc-card row" }, h("b", { class: "sig", style: "flex:1" }, "The crew is stopped. Nothing runs until you resume."), h("button", { class: "pc-pill s", onclick: async () => { S = await api("POST", "/api/resume"); renderChrome(); renderView(); } }, "Resume the crew")),
     n > 0 && h("section", { class: "col" }, h("div", { class: "spread" }, h("p", { class: "pc-lab" }, "Box, box: waiting on you"), n > 1 && h("a", { class: "small faint", href: "#/pitstops" }, "Batch decide")), h("div", { class: "grid2" }, S.pitstops.slice(0, 6).map((p) => pitCard(p)))),
     h("div", { class: "grid3" },
-      h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "Today"), h("span", { class: "big num" }, usd(S.today.usd)), h("p", { class: "small muted" }, `${S.today.runs} run${S.today.runs === 1 ? "" : "s"} · estimate from list prices`)),
+      h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "Today"), h("span", { class: "big num" }, usd(S.today.usd)), h("p", { class: "small muted" }, `${S.today.runs} run${S.today.runs === 1 ? "" : "s"} · billed cost where the provider reports it`)),
       h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "This week"), h("span", { class: "big num" }, usd(S.week.usd)), h("div", { class: "meter" }, h("b", { style: `width:${Math.min(100, (S.week.usd / (S.weekCap || 1)) * 100)}%` })), h("p", { class: "small muted" }, `of ${usd(S.weekCap)} across the crew's caps`)),
       h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "Computers"), h("span", { class: "big num" }, String(S.computersUp)), h("p", { class: "small muted" }, "up now. Idle computers go back to the garage after 10 minutes."))),
     h("section", { class: "col" }, h("p", { class: "pc-lab" }, "The crew"), h("div", { class: "grid3" }, S.bots.map(crewCard), h("a", { class: "pc-card crewcard", href: "#/hire", style: "justify-content:center;align-items:center;border-style:dashed" }, h("b", { class: "pc-h3" }, "+ New crew member"), h("p", { class: "small faint" }, "Every hire is reviewed by you.")))));
@@ -197,16 +198,17 @@ function crewCard(b) {
   return el;
 }
 
-async function crewView(id, tab = "threads") {
+async function crewView(id, tab = "threads", ...rest) {
   const d = await api("GET", `/api/bots/${id}`);
   const b = d.bot;
-  const tabs = h("div", { class: "tabs" }, ["threads", "computer", "profile", "memory", "schedules", "rules"].map((t) => h("a", { href: `#/crew/${id}/${t}`, class: tab === t ? "on" : "" }, t[0].toUpperCase() + t.slice(1))));
+  const tabs = h("div", { class: "tabs" }, ["threads", "files", "computer", "profile", "memory", "schedules", "rules"].map((t) => h("a", { href: `#/crew/${id}/${t}`, class: tab === t ? "on" : "" }, t[0].toUpperCase() + t.slice(1))));
   const newThread = async () => { const r = await api("POST", "/api/threads", { botId: id, title: "New thread" }); location.hash = `#/t/${r.id}`; };
   let body;
   if (tab === "threads") body = h("div", { class: "pc-card tight" }, b.threads.length ? h("table", { class: "tbl" }, h("tbody", {}, b.threads.map((t) => {
     const tr = h("tr", { style: "cursor:pointer" }, h("td", {}, h("b", {}, t.title), t.pinned ? h("span", { class: "pc-chip", style: "margin-left:8px" }, "pinned") : null), h("td", {}, h("span", { class: `pc-chip ${t.status === "needs" ? "hot" : t.status === "failed" ? "bad" : t.status === "running" ? "blue" : ""}` }, t.status)), h("td", { class: "num faint small" }, ago(t.updated_at)));
     tr.addEventListener("click", () => (location.hash = `#/t/${t.id}`)); return tr;
   }))) : h("p", { class: "empty" }, "No threads yet."));
+  else if (tab === "files") body = await filesView(b, ...rest);
   else if (tab === "computer") body = computerCard(b);
   else if (tab === "profile") body = await profileEditor(b);
   else if (tab === "memory") body = memoryEditor(b, d.memory);
@@ -221,8 +223,9 @@ async function crewView(id, tab = "threads") {
 function computerCard(b) {
   const c = b.computer;
   return h("div", { class: "pc-card col" },
-    h("div", { class: "spread" }, h("div", { class: "col", style: "gap:4px" }, h("b", { class: "pc-h3" }, `${b.name}'s computer`), h("p", { class: "small muted" }, c.up ? `Up since ${when(c.startedAt)}. Its own desktop, browser profile and network.` : "In the garage. It starts when there's work, or when you want to look.")),
-      h("div", { class: "row" }, c.up ? h("a", { class: "pc-pill s", href: `#/live/${b.id}` }, "Live view") : h("button", { class: "pc-pill s", onclick: async (e) => { e.target.disabled = true; e.target.textContent = "Starting…"; await api("POST", `/api/bots/${b.id}/computer/start`).catch(() => {}); location.hash = `#/live/${b.id}`; } }, "Start and watch"),
+    h("div", { class: "spread" }, h("div", { class: "col", style: "gap:4px" }, h("div", { class: "row" }, h("b", { class: "pc-h3" }, `${b.name}'s computer`), h("span", { class: `pc-chip ${c.desktop ? "ok" : c.up ? "blue" : ""}` }, c.desktop ? "desktop live" : c.up ? "runtime up" : "off")),
+      h("p", { class: "small muted" }, c.desktop ? `Up since ${when(c.startedAt)} with its desktop and browser.` : c.up ? `Up since ${when(c.startedAt)} for commands; the desktop starts on the first browser action.` : "In the garage. Chat needs no computer: it starts on the first command or browser action, or when you want to look.")),
+      h("div", { class: "row" }, c.desktop ? h("a", { class: "pc-pill s", href: `#/live/${b.id}` }, "Live view") : h("button", { class: "pc-pill s", onclick: async (e) => { e.target.disabled = true; e.target.textContent = "Starting…"; await api("POST", `/api/bots/${b.id}/computer/start`).catch(() => {}); location.hash = `#/live/${b.id}`; } }, "Start and watch"),
         c.up && h("button", { class: "pc-pill o s", onclick: async () => { await api("POST", `/api/bots/${b.id}/computer/stop`); toast("Computer stopped"); renderView(); } }, "Stop"))),
     h("p", { class: "small faint" }, "Logins you make in the live view stay in this crew member's browser only. Other crew members can't see them."));
 }
@@ -284,6 +287,51 @@ function rulesList(rules, after) {
     h("td", { class: "num" }, h("button", { class: "small sig", onclick: async () => { await api("POST", `/api/rules/${r.id}/revoke`); toast("Revoked"); after(); } }, "Revoke")))))) : h("p", { class: "empty" }, "No standing approvals. Approve with \"Always\" or \"For this thread\" to create one."));
 }
 
+// ---------- files ----------
+// Workspace browser and per-run diffs. Reads the host's copy of the workspace, so it works with the computer off.
+let diffSplit = false;
+async function filesView(b, turnId, encPath) {
+  const path = encPath ? decodeURIComponent(encPath) : "";
+  const [runs] = await Promise.all([api("GET", `/api/bots/${b.id}/changes`)]);
+  const viewer = h("div", { class: "pc-card tight viewer" });
+  const go = (t, p) => (location.hash = `#/crew/${b.id}/files/${t || "-"}${p != null ? `/${encodeURIComponent(p)}` : ""}`);
+  const runList = h("div", { class: "col", style: "gap:2px" }, runs.length ? runs.map((r) => {
+    const open = r.id === turnId;
+    return h("div", { class: `run ${open ? "on" : ""}` },
+      h("button", { class: "runhead", onclick: () => go(r.id) }, h("span", { class: "small" }, r.thread_title), h("span", { class: "pc-m small faint" }, `${r.changes.length} · ${when(r.started_at)}`)),
+      open && h("div", { class: "col", style: "gap:0" }, r.changes.map((c) => h("button", { class: `cfile ${c.path === path ? "on" : ""}`, onclick: () => go(r.id, c.path) },
+        h("span", { class: `pc-chip ${c.status === "added" ? "ok" : c.status === "deleted" ? "bad" : "blue"}` }, c.status[0].toUpperCase()), h("span", { class: "pc-m small" }, c.path)))));
+  }) : h("p", { class: "small faint" }, "No changes recorded yet. Every run's file changes land here, whether made by a patch, a command or a script."));
+  const tree = h("div", { class: "tree" });
+  const loadDir = async (rel, into, depth) => {
+    const d = await api("GET", `/api/bots/${b.id}/fs?path=${encodeURIComponent(rel)}`, undefined, { quiet: true }).catch(() => null);
+    if (!d || d.type !== "dir") return;
+    into.replaceChildren(...d.entries.map((e) => {
+      const p = rel ? `${rel}/${e.name}` : e.name;
+      if (!e.dir) return h("button", { class: `tf ${turnId === undefined || turnId === "-" ? (p === path ? "on" : "") : ""}`, style: `padding-left:${8 + depth * 14}px`, onclick: () => go("-", p) }, e.name);
+      const kids = h("div", { class: "hidden" });
+      const btn = h("button", { class: "tf dir", style: `padding-left:${8 + depth * 14}px`, onclick: async () => { const opening = kids.classList.contains("hidden"); kids.classList.toggle("hidden"); btn.classList.toggle("open", opening); if (opening && !kids.childNodes.length) await loadDir(p, kids, depth + 1); } }, e.name);
+      return h("div", {}, btn, kids);
+    }));
+  };
+  loadDir("", tree, 0);
+
+  const head = (title, ...acts) => h("div", { class: "vhead" }, h("span", { class: "pc-m small" }, title), h("span", { style: "flex:1" }), ...acts);
+  if (turnId && turnId !== "-" && path) {
+    const d = await api("GET", `/api/turns/${turnId}/diff?path=${encodeURIComponent(path)}`).catch(() => null);
+    const seg = h("div", { class: "seg" }, ["unified", "split"].map((m) => h("button", { class: (m === "split") === diffSplit ? "on" : "", onclick: () => { diffSplit = m === "split"; renderView(); } }, m)));
+    viewer.replaceChildren(head(`${path} · ${d?.status || ""}`, seg, d?.status !== "deleted" ? h("a", { class: "pc-pill o s", href: `/files/${b.id}/${path.split("/").map(encodeURIComponent).join("/")}` }, "Download") : null),
+      !d ? h("p", { class: "empty" }, "Couldn't load this change.") : !d.text ? h("p", { class: "empty" }, `Binary file ${d.status}. ${d.size} bytes.`) : renderDiff(d.beforeText, d.afterText, { split: diffSplit }));
+  } else if (path) {
+    const f = await api("GET", `/api/bots/${b.id}/fs?path=${encodeURIComponent(path)}`).catch(() => null);
+    const url = `/files/${b.id}/${path.split("/").map(encodeURIComponent).join("/")}`;
+    viewer.replaceChildren(head(path, h("span", { class: "pc-m small faint" }, f ? `${f.size} bytes · ${when(f.mtime)}` : ""), h("a", { class: "pc-pill o s", href: url }, "Download")),
+      !f ? h("p", { class: "empty" }, "Not found.") : f.image ? h("div", { style: "padding:16px" }, h("img", { src: `${url}?inline=1`, style: "max-width:100%;border-radius:10px" })) : f.text != null ? h("div", { class: "code" }, f.text.split("\n").map((l, i) => h("div", { class: "dl" }, h("span", { class: "ln" }, String(i + 1)), h("code", {}, l)))) : h("p", { class: "empty" }, "Binary or large file. Download it to open."));
+  } else viewer.replaceChildren(h("p", { class: "empty" }, turnId && turnId !== "-" ? "Pick a file from this run to see its diff." : "Pick a file to view it, or a run to review what changed."));
+
+  return h("div", { class: "files" }, h("div", { class: "col" }, h("p", { class: "pc-lab" }, "Changes by run"), runList, h("p", { class: "pc-lab", style: "margin-top:12px" }, "Workspace /bot/work"), tree), viewer);
+}
+
 // ---------- thread ----------
 async function threadView(id) {
   if (!id) { location.hash = "#/"; return null; }
@@ -299,11 +347,15 @@ async function threadView(id) {
 
   const renderEvent = (e) => {
     switch (e.kind) {
-      case "user": return h("div", { class: "msg me" }, e.data.via === "schedule" ? h("span", { class: "pc-lab" }, "scheduled · ") : null, e.data.display || e.data.text, e.data.attachments?.length ? h("div", { class: "att" }, e.data.attachments.join(" · ")) : null);
+      case "user": return h("div", { class: "msg me" }, e.data.via === "schedule" ? h("span", { class: "pc-lab" }, "scheduled · ") : null, e.data.display || e.data.text, e.data.attachments?.length ? h("div", { class: "sent-atts" }, e.data.attachments.map((p) => /\.(png|jpe?g|webp|gif)$/i.test(p)
+        ? h("a", { href: `/files/${b.id}/${p}?inline=1`, target: "_blank", rel: "noopener" }, h("img", { src: `/files/${b.id}/${p}?inline=1`, alt: p.split("/").pop(), loading: "lazy" }))
+        : h("a", { class: "pc-chip", href: `/files/${b.id}/${p}` }, p.split("/").pop().replace(/^[a-z0-9]+-/, "")))) : null);
       case "agent": return h("div", { class: "msg bot" }, face(b, "sm", "idle"), md(e.data.text));
       case "tool": return h("details", { class: "tool" }, h("summary", {}, h("span", { class: `st ${e.data.status === "completed" && (e.data.exitCode == null || e.data.exitCode === 0) ? "ok" : e.data.status === "inProgress" ? "" : "bad"}` }), e.data.title), (e.data.output || e.data.error) && h("pre", {}, e.data.error || e.data.output));
       case "system": return h("p", { class: `sys ${e.data.tone === "bad" ? "bad" : ""}` }, e.data.text);
       case "error": return h("p", { class: "err" }, e.data.text);
+      case "changes": return h("div", { class: "changes" }, h("div", { class: "spread" }, h("b", { class: "small" }, `Changed ${e.data.count} file${e.data.count === 1 ? "" : "s"}`), h("a", { class: "small faint", href: `#/crew/${e.data.botId}/files/${e.data.turnId}` }, "Review changes")),
+        e.data.files.map((f) => h("a", { class: "cf", href: `#/crew/${e.data.botId}/files/${e.data.turnId}/${encodeURIComponent(f.path)}` }, h("span", { class: `pc-chip ${f.status === "added" ? "ok" : f.status === "deleted" ? "bad" : "blue"}` }, f.status[0].toUpperCase()), h("span", { class: "pc-m small" }, f.path), f.lines ? h("span", { class: `pc-m small ${f.lines > 0 ? "okc" : "badc"}` }, `${f.lines > 0 ? "+" : ""}${f.lines} lines`) : null)));
       case "pitstop": { const p = pits.get(e.data.id); return p ? h("div", { style: "margin-left:40px;max-width:760px" }, pitCard(p, { onDone: () => renderView() })) : null; }
       case "surface": {
         const s = surfaces.get(e.data.id);
@@ -318,23 +370,38 @@ async function threadView(id) {
   stream.append(liveLine);
 
   const running = () => d.thread.running;
-  const text = h("textarea", { placeholder: `Message ${b.name}…`, rows: 2 });
+  const text = h("textarea", { placeholder: `Message ${b.name}…`, rows: 1 });
   let mode = "steer";
   const modeSeg = h("div", { class: "seg hidden" }, ["steer", "queue"].map((m) => h("button", { class: m === mode ? "on" : "", onclick: (ev) => { mode = m; modeSeg.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === ev.target)); } }, m === "steer" ? "Steer now" : "Queue after")));
-  const attachments = [];
-  const attList = h("div", { class: "chips" });
+  const attachments = [];   // { path, name, url? } — url is a local preview for images
+  const attList = h("div", { class: "atts hidden" });
+  const isImg = (n) => /\.(png|jpe?g|webp|gif)$/i.test(n);
+  const paintAtts = () => {
+    attList.classList.toggle("hidden", !attachments.length);
+    attList.replaceChildren(...attachments.map((a, i) => h("div", { class: `att ${a.url ? "img" : ""}`, title: a.name },
+      a.url ? h("img", { src: a.url, alt: a.name }) : h("span", { class: "pc-m small" }, a.name),
+      h("button", { class: "x", title: "Remove", onclick: () => { if (a.url) URL.revokeObjectURL(a.url); attachments.splice(i, 1); paintAtts(); } }, "×"))));
+  };
   const file = h("input", { type: "file", class: "hidden", multiple: true });
-  file.addEventListener("change", async () => {
-    for (const f of file.files) { const r = await api("POST", `/api/threads/${id}/upload?name=${encodeURIComponent(f.name)}`, f, { raw: true }); attachments.push(r.path); attList.append(h("span", { class: "pc-chip" }, f.name)); }
-    file.value = "";
-  });
-  const sendBtn = h("button", { class: "pc-pill" }, "Send");
-  const stopBtn = h("button", { class: "pc-pill o hidden" }, "Stop");
+  const upload = async (files) => {
+    for (const f of files) {
+      const r = await api("POST", `/api/threads/${id}/upload?name=${encodeURIComponent(f.name)}`, f, { raw: true });
+      attachments.push({ path: r.path, name: f.name, url: isImg(f.name) ? URL.createObjectURL(f) : null }); paintAtts();
+    }
+  };
+  file.addEventListener("change", async () => { await upload([...file.files]); file.value = ""; });
+  const sendBtn = h("button", { class: "pc-pill s" }, "Send");
+  const stopBtn = h("button", { class: "pc-pill o s hidden" }, "Stop");
+  const grow = () => { text.style.height = "auto"; text.style.height = `${Math.min(220, text.scrollHeight)}px`; };
+  text.addEventListener("input", grow);
+  text.addEventListener("paste", (e) => { const fs = [...(e.clipboardData?.files || [])]; if (fs.length) { e.preventDefault(); upload(fs); } });
   const send = async () => {
     if (!text.value.trim() && !attachments.length) return;
     sendBtn.disabled = true;
-    try { await api("POST", `/api/threads/${id}/messages`, { text: text.value, attachments: [...attachments], mode: running() ? mode : "auto" }); text.value = ""; attachments.length = 0; attList.replaceChildren(); }
-    finally { sendBtn.disabled = false; text.focus(); }
+    try {
+      await api("POST", `/api/threads/${id}/messages`, { text: text.value, attachments: attachments.map((a) => a.path), mode: running() ? mode : "auto" });
+      text.value = ""; grow(); attachments.splice(0).forEach((a) => a.url && URL.revokeObjectURL(a.url)); paintAtts();
+    } finally { sendBtn.disabled = false; text.focus(); }
   };
   sendBtn.addEventListener("click", send);
   text.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
@@ -351,13 +418,14 @@ async function threadView(id) {
   const panel = h("aside", { class: "panel" },
     h("div", { class: "col" }, h("p", { class: "pc-lab" }, "Crew member"), h("a", { class: "row", href: `#/crew/${b.id}` }, face(b, "md"), h("div", {}, h("b", { class: "pc-h3" }, b.name), h("p", { class: "pc-m small faint" }, `${b.provider} · ${b.model}`)))),
     h("div", { class: "col" }, h("p", { class: "pc-lab" }, "Context"), ctxMeter, ctxLabel, h("div", { class: "row" }, h("button", { class: "pc-pill o s", onclick: async () => { await api("POST", `/api/threads/${id}/compact`); } }, "Compact"), h("button", { class: "pc-pill o s", onclick: async () => { const r = await api("POST", `/api/threads/${id}/fresh`); location.hash = `#/t/${r.id}`; } }, "Fresh thread from here"))),
-    h("div", { class: "col" }, h("p", { class: "pc-lab" }, "Computer"), b.computer?.up ? h("a", { class: "mini", href: `#/live/${b.id}` }, h("span", { class: "pc-pill s" }, "Watch live")) : h("div", { class: "mini" }, h("span", { class: "small faint" }, "In the garage")), h("p", { class: "small faint" }, "Starts when the crew needs it; stops after 10 idle minutes.")),
+    h("div", { class: "col" }, h("p", { class: "pc-lab" }, "Computer"), b.computer?.desktop ? h("a", { class: "mini", href: `#/live/${b.id}` }, h("span", { class: "pc-pill s" }, "Watch live")) : h("div", { class: "mini" }, h("span", { class: "small faint" }, b.computer?.up ? "Runtime up · no desktop yet" : "In the garage")), h("p", { class: "small faint" }, "Chat needs no computer. It starts on the first command or browser action and stops after 10 idle minutes."), h("a", { class: "small", href: `#/crew/${b.id}/files` }, "Browse files and changes")),
     h("div", { class: "col" }, h("p", { class: "pc-lab" }, "Other threads"), ...(bot(b.id)?.threads || []).filter((t) => t.id !== id).slice(0, 8).map((t) => h("a", { class: "small muted", href: `#/t/${t.id}` }, t.title))),
-    h("button", { class: "small faint", style: "text-align:left", onclick: async (e) => { if (!confirmInline(e.target, "Archive?")) return; await api("PATCH", `/api/threads/${id}`, { archived: true }); location.hash = `#/crew/${b.id}`; } }, "Archive thread"));
+    h("button", { class: "small faint", style: "text-align:left;padding:0", onclick: async (e) => { if (!confirmInline(e.target, "Archive?")) return; await api("PATCH", `/api/threads/${id}`, { archived: true }); location.hash = `#/crew/${b.id}`; } }, "Archive thread"));
 
   const page = h("div", { class: "threadpage" },
     h("section", { class: "convo" }, h("header", {}, face(b, "sm"), title, h("span", { class: "pc-chip" }, b.name)), stream,
-      h("div", { class: "composer" }, attList, h("div", { class: "box" }, h("button", { class: "pc-pill o s", title: "Attach files", onclick: () => file.click() }, "Attach"), file, text, sendBtn, stopBtn), h("div", { class: "spread" }, modeSeg, h("span", { class: "small faint" }, "Enter to send · Shift+Enter for a new line")))),
+      h("div", { class: "composer" }, h("div", { class: "box" }, attList, text,
+        h("div", { class: "bar" }, h("button", { class: "attach", title: "Attach files or paste an image", onclick: () => file.click() }, "+ Attach"), file, h("span", { class: "small faint hint" }, "Enter to send · Shift+Enter for a new line"), h("span", { style: "flex:1" }), modeSeg, stopBtn, sendBtn)))),
     panel);
 
   threadHook = async (type, x) => {
@@ -406,15 +474,15 @@ async function telemetryView() {
       h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "Handled this week"), h("span", { class: "big num" }, String(t.handled)), h("p", { class: "small muted" }, "runs completed")),
       h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "Asked of you"), h("span", { class: "big num" }, String(t.pitstops?.total || 0)), h("p", { class: "small muted" }, `pit stops · ${t.pitstops?.approved || 0} approved · ${t.pitstops?.denied || 0} denied · ${t.pitstops?.expired || 0} expired · crew waited ${waitMin} min on you`)),
       h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "OpenRouter says"), t.openrouter ? [h("span", { class: "big num" }, usd(t.openrouter.usage_daily ?? t.openrouter.usage ?? 0)), h("p", { class: "small muted" }, `${t.openrouter.usage_daily != null ? "today" : "total"} on this key, as reported by OpenRouter · weekly ${usd(t.openrouter.usage_weekly ?? 0)}`)] : h("p", { class: "small muted" }, "No OpenRouter key connected."))),
-    h("p", { class: "pc-lab" }, "Spend by crew member (this week, estimated from list prices)"),
+    h("p", { class: "pc-lab" }, "Spend by crew member (this week; billed by the provider, list-price estimate otherwise)"),
     h("div", { class: "pc-card col" }, t.bots.map((b) => h("div", { class: "col", style: "gap:4px" }, h("div", { class: "spread" }, h("div", { class: "row" }, h("pc-bot", { size: "xs", hue: b.hue, shape: b.shape }), h("b", {}, b.name), h("span", { class: "small faint" }, `${b.runs} runs${b.failed ? ` · ${b.failed} failed` : ""}`)), h("span", { class: "pc-m small" }, `${usd(b.spend)} / ${usd(b.cap)}`)),
       h("pc-track", { pct: Math.min(100, (b.spend / (b.cap || 1)) * 100).toFixed(0), hue: b.hue, shape: b.shape, state: "working" })))),
-    t.byModel.length > 0 && [h("p", { class: "pc-lab" }, "By model"), h("div", { class: "pc-card tight scrollx" }, h("table", { class: "tbl" }, h("thead", {}, h("tr", {}, h("th", {}, "Provider"), h("th", {}, "Model"), h("th", { class: "num" }, "Runs"), h("th", { class: "num" }, "Input"), h("th", { class: "num" }, "Output"), h("th", { class: "num" }, "Cost (est.)"))),
+    t.byModel.length > 0 && [h("p", { class: "pc-lab" }, "By model"), h("div", { class: "pc-card tight scrollx" }, h("table", { class: "tbl" }, h("thead", {}, h("tr", {}, h("th", {}, "Provider"), h("th", {}, "Model"), h("th", { class: "num" }, "Runs"), h("th", { class: "num" }, "Input"), h("th", { class: "num" }, "Output"), h("th", { class: "num" }, "Cost"))),
       h("tbody", {}, t.byModel.map((m) => h("tr", {}, h("td", {}, m.provider), h("td", { class: "pc-m" }, m.model), h("td", { class: "num" }, m.runs), h("td", { class: "num" }, (m.input || 0).toLocaleString("en-IN")), h("td", { class: "num" }, (m.output || 0).toLocaleString("en-IN")), h("td", { class: "num" }, m.provider === "openai" ? "plan" : usd(m.usd))))))),],
     h("p", { class: "pc-lab" }, "Runs"),
     h("div", { class: "pc-card tight scrollx" }, t.runs.length ? h("table", { class: "tbl" }, h("thead", {}, h("tr", {}, h("th", {}, "Started"), h("th", {}, "Crew"), h("th", {}, "Thread"), h("th", {}, "Trigger"), h("th", {}, "Outcome"), h("th", { class: "num" }, "Tokens in/out"), h("th", { class: "num" }, "Cost"))),
       h("tbody", {}, t.runs.map((r) => { const tr = h("tr", { style: "cursor:pointer" }, h("td", { class: "small faint" }, when(r.started_at)), h("td", {}, r.bot_name), h("td", {}, r.thread_title), h("td", { class: "small" }, r.trigger), h("td", {}, h("span", { class: `pc-chip ${r.status === "completed" ? "ok" : r.status === "failed" ? "bad" : ""}` }, r.status), r.error && h("p", { class: "small badc" }, r.error.slice(0, 120))),
-        h("td", { class: "num pc-m small" }, `${(r.input_tokens || 0).toLocaleString("en-IN")} / ${(r.output_tokens || 0).toLocaleString("en-IN")}`), h("td", { class: "num pc-m" }, r.cost_basis === "plan" ? "plan" : r.cost_basis === "unknown" ? "?" : usd(r.cost_usd))); tr.addEventListener("click", () => (location.hash = `#/t/${r.thread_id}`)); return tr; }))) : h("p", { class: "empty" }, "No runs yet.")));
+        h("td", { class: "num pc-m small" }, `${(r.input_tokens || 0).toLocaleString("en-IN")} / ${(r.output_tokens || 0).toLocaleString("en-IN")}`), h("td", { class: "num pc-m", title: r.cost_basis === "billed" ? "Billed by the provider" : r.cost_basis === "list" ? "Estimate from list price" : "" }, r.cost_basis === "plan" ? "plan" : r.cost_basis === "unknown" ? "?" : `${usd(r.cost_usd)}${r.cost_basis === "list" ? " est." : ""}`)); tr.addEventListener("click", () => (location.hash = `#/t/${r.thread_id}`)); return tr; }))) : h("p", { class: "empty" }, "No runs yet.")));
 }
 
 // ---------- library ----------

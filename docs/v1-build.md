@@ -28,6 +28,36 @@ Built: single-user auth (setup token → password), providers (OpenRouter key, A
 
 Not in this build (next): email/calendar integrations (need OAuth apps; any hosted MCP connector works meanwhile), incidents grouping, egress allowlist, recipes, phone PWA push.
 
+## v1.1 — brain / computer split (2026-10-01)
+
+Jai's direction: not every task needs a computer. Anything that needs a runtime (bash, code, browser) takes the computer; everything else must not boot one.
+
+| Part | What runs | When |
+|---|---|---|
+| **Brain** (`pitcrew-brain`, always up) | One Codex app-server per active crew member (own uid, own 0700 home in `/srv/pitcrew/brains/<id>`), the LLM proxy, the exec gateway. Holds the model keys and the ChatGPT token. No Docker socket, no workspace mount, own network. | Codex processes start on a turn, exit after 20 idle minutes |
+| **Computer**, stage 1 | Codex `exec-server` only. The brain's native shell and `apply_patch` execute here through Codex *environments* (`environment/add` + per-turn `environments`). | First command, or a write the gateway can't serve from disk |
+| **Computer**, stage 2 | Xvfb, Chromium (CDP on loopback), pointer extension, x11vnc socket. Browser (Playwright over CDP) and pixel tools are Pitcrew tools handled by the control plane, gated with grounded elements. | First browser or pixel tool, or "watch live" |
+
+- **Exec gateway is protocol-aware.** Codex reads context through the environment at every turn (AGENTS.md, `.git` probes, skills: ~30 `fs/*` reads, no processes, measured with a WebSocket sniffer). The control plane answers those reads, plus `fs/writeFile`, straight from `/srv/pitcrew/bots/<id>` on the host's disk (no `..`, no symlinks, nothing outside the bot's dir). Only `process/*` or an unsafe path boots the computer; then the gateway replays `initialize` to the real exec-server and becomes a byte pipe.
+- **Prompt caching:** the brain's LLM proxy adds top-level `cache_control` for Anthropic models on OpenRouter and logs OpenRouter's billed `usage.cost` per turn (`/srv/pitcrew/brains/_usage/<id>.jsonl`), so telemetry shows billed cost, not list-price estimates.
+- **Codex features off per brain:** ChatGPT apps/plugins (they pulled Gmail/Drive/Canva tools into every request: ~124k input tokens per request, and authority nobody granted), Codex's own browser/computer use, image generation, multi-agent, realtime.
+- **No page JavaScript:** `browser_evaluate` and `browser_run_code_unsafe` are not offered.
+- **Pointer:** a content-script extension draws the crew member's creature cursor (hue + name tag) from real input events, with click ripples and a typing indicator; it persists across page loads.
+- **Files view:** workspace snapshots at turn start and end (re-hash only changed files; contents deduped in root-only `/srv/pitcrew/data/shadow/<id>`), per-run changes however they were made, Myers line diff in the browser (unified / split), file browser that works with the computer off.
+- Live view scales to fit; Chrome's "Restore pages?" bubble and the Chrome for Testing infobar are suppressed.
+
+Measured on the live instance (`deploy/e2e.mjs --only=browser --probe`, temporary OpenRouter Claude Sonnet 5.5 crew member), 10/10:
+
+| Check | Result |
+|---|---|
+| Chat-only turn | no computer started, 6 s |
+| Shell turn | computer up, desktop not; 21 s including cold boot |
+| Shell write shows in Files with a diff | yes |
+| Browser chore (navigate, fill, submit, read) | desktop booted on first browser tool; pit stop on `click button "Submit order" on httpbin.org` [send]; no page JS |
+| Cost of that chore | **$0.0315–0.0366 billed** (v1: $0.27 list-price estimate); ~22k input tokens per request with ~97% read from cache |
+
+Known: Codex's `aggregatedOutput` on remote commands can miss the first lines (the model's own copy is complete; UI cosmetic). `fill_form` sometimes escalates to a pit stop on jev's "leaves machine" signal (over-ask, not unsafe).
+
 ## Status — deployed 2026-10-01
 
 Live at https://pitcrew.example.com (Traefik file-provider router → `172.17.0.1:8330`, Let's Encrypt cert issued on first request). First-run setup (setup token → password) is left for Jai.

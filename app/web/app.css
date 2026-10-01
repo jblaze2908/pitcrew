@@ -101,9 +101,22 @@ main{overflow:auto;min-width:0}
 .sys.bad,.err{color:var(--bad)}
 .err{margin-left:40px;font-size:13px}
 .live{margin-left:40px;display:flex;align-items:center;gap:10px;font:12px var(--font-data);color:var(--ink-3)}
-.composer{border-top:1px solid var(--line);padding:14px 24px 18px;display:flex;flex-direction:column;gap:8px}
-.composer .box{display:flex;gap:10px;align-items:flex-end}
-.composer textarea{min-height:48px;max-height:220px;border-radius:14px;background:var(--surface)}
+.composer{border-top:1px solid var(--line);padding:12px 24px 16px}
+.composer .box{display:flex;flex-direction:column;gap:6px;background:var(--surface);border:1px solid var(--line-2);border-radius:16px;padding:10px 12px 8px}
+.composer .box:focus-within{border-color:var(--ink-3)}
+.composer textarea{border:0;background:none;padding:4px 2px;min-height:26px;max-height:220px;resize:none;line-height:1.5;border-radius:0}
+.composer .bar{display:flex;align-items:center;gap:8px}
+.composer .attach{height:28px;padding:0 10px;border-radius:99px;font:500 12.5px/1 var(--font-body);color:var(--ink-2);box-shadow:inset 0 0 0 1px var(--line-2)}
+.composer .attach:hover{color:var(--ink)}
+.atts{display:flex;gap:8px;flex-wrap:wrap}
+.att{position:relative;display:flex;align-items:center;height:56px;max-width:220px;padding:0 26px 0 10px;border-radius:10px;background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--line)}
+.att span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.att.img{width:56px;padding:0;overflow:hidden}
+.att img{width:100%;height:100%;object-fit:cover}
+.att .x{position:absolute;top:3px;right:3px;width:18px;height:18px;border-radius:50%;background:var(--ground);color:var(--ink);font:600 12px/18px var(--font-body);text-align:center;opacity:.85}
+.sent-atts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.sent-atts img{display:block;max-width:240px;max-height:180px;border-radius:10px}
+.sent-atts .pc-chip{color:var(--ink)}
 .chips{display:flex;gap:6px;flex-wrap:wrap}
 .panel{overflow:auto;padding:20px;display:flex;flex-direction:column;gap:18px;background:var(--ground-deep)}
 .meter{height:6px;border-radius:9px;background:var(--surface-3);overflow:hidden}
@@ -112,6 +125,36 @@ main{overflow:auto;min-width:0}
 .seg{display:inline-flex;border-radius:99px;box-shadow:inset 0 0 0 1px var(--line-2);padding:3px;gap:2px}
 .seg button{height:26px;padding:0 12px;border-radius:99px;font:500 12px/1 var(--font-body);color:var(--ink-2)}
 .seg button.on{background:var(--btn);color:var(--on-btn)}
+
+/* Files and diffs */
+.files{display:grid;grid-template-columns:300px minmax(0,1fr);gap:16px;align-items:start}
+.run{border-radius:10px}
+.run.on{background:var(--surface)}
+.runhead{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;padding:8px 10px;text-align:left;border-radius:10px}
+.runhead:hover,.tf:hover,.cfile:hover{background:var(--surface-2)}
+.cfile,.tf{display:flex;align-items:center;gap:8px;width:100%;padding:6px 10px;text-align:left;border-radius:8px;font:12.5px/1.3 var(--font-data);color:var(--ink-2);overflow:hidden;white-space:nowrap}
+.cfile.on,.tf.on{background:var(--surface-3);color:var(--ink)}
+.tf.dir::before{content:"";flex:none;border-left:5px solid var(--ink-3);border-top:4px solid transparent;border-bottom:4px solid transparent;transition:transform .15s}
+.tf.dir.open::before{transform:rotate(90deg)}
+.tree{display:flex;flex-direction:column;max-height:60vh;overflow:auto}
+.viewer{min-height:420px}
+.vhead{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.code,.diff{font:12px/1.55 var(--font-data);overflow:auto;max-height:70vh}
+.dl{display:grid;grid-template-columns:44px 44px 16px 1fr;white-space:pre}
+.code .dl{grid-template-columns:48px 1fr}
+.dl code,.cell code{white-space:pre;padding-right:12px}
+.ln{color:var(--ink-3);text-align:right;padding-right:10px;user-select:none}
+.sg{color:var(--ink-3)}
+.dl.add,.cell.add{background:color-mix(in srgb,var(--in) 13%,transparent)}
+.dl.del,.cell.del{background:color-mix(in srgb,var(--bad) 13%,transparent)}
+.dl.add .sg{color:var(--in)}.dl.del .sg{color:var(--bad)}
+.cell.pad{background:var(--surface-2)}
+.hunk{border-top:1px solid var(--line);padding:4px 0}
+.row2{display:grid;grid-template-columns:1fr 1fr}
+.cell{display:grid;grid-template-columns:44px 1fr;white-space:pre;overflow:hidden}
+.changes{margin-left:40px;max-width:760px;display:flex;flex-direction:column;gap:6px;padding:12px 14px;border-radius:var(--radius-sm);background:var(--surface);border:1px solid var(--line)}
+.changes .cf{display:flex;align-items:center;gap:8px}
+.changes .cf:hover .pc-m{color:var(--ink)}
 
 /* Tables */
 .tbl{width:100%;border-collapse:collapse;font-size:13px}
@@ -143,10 +186,11 @@ main{overflow:auto;min-width:0}
 .auth .pc-card{width:min(420px,100%);padding:28px;display:flex;flex-direction:column;gap:16px}
 
 /* Live view */
-.liveview{display:grid;grid-template-rows:auto 1fr;height:100%}
+.liveview{display:grid;grid-template-rows:auto minmax(0,1fr);height:100%;min-height:0}
 .liveview header{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-.screen{display:grid;place-items:center;background:var(--ground-deep);min-height:0;overflow:hidden;padding:12px}
-.screen .vnc{width:100%;height:100%}
+/* noVNC scales to its container, so the container needs a real size (not shrink-to-canvas centering). */
+.screen{position:relative;background:var(--ground-deep);min-height:0;overflow:hidden}
+.screen .vnc{position:absolute;inset:12px}
 .mini{border-radius:var(--radius-sm);overflow:hidden;background:var(--ground-deep);aspect-ratio:16/10;display:grid;place-items:center;border:1px solid var(--line)}
 
 /* Surfaces (generative UI) */
@@ -190,6 +234,9 @@ svg text{fill:var(--ink-3);font:10px var(--font-data)}
   .convo{border-right:0}
   .stream{max-height:none}
   .panel{border-top:1px solid var(--line)}
+  .composer .hint{display:none}
+  .files{grid-template-columns:1fr}
+  .changes{margin-left:0}
   .surface,.tool,.err,.live{margin-left:0}
   .sf-bar{grid-template-columns:90px 1fr 70px}
 }
