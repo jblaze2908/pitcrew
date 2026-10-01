@@ -12,7 +12,7 @@ export const SHAPES = ["square", "round", "blob"];
 // New crew members start with read/draft allowed; sign-in, pay and send ask first; delete and share always ask.
 export const STARTING_POLICY = { ...DEFAULT_POLICY };
 
-const row = (b) => b && { ...b, personality: json(b.personality, {}), policy: { ...STARTING_POLICY, ...json(b.policy, {}) }, mcp: json(b.mcp, []), archived: !!b.archived };
+const row = (b) => b && { ...b, personality: json(b.personality, {}), policy: { ...STARTING_POLICY, ...json(b.policy, {}) }, mcp: json(b.mcp, []), archived: !!b.archived, private: !!b.private };
 export const getBot = (id) => row(one("SELECT * FROM bots WHERE id=?", id));
 export const listBots = () => all("SELECT * FROM bots WHERE archived=0 ORDER BY kind='chief' DESC, created_at").map(row);
 
@@ -71,6 +71,7 @@ export function updateBot(id, patch) {
   const mcp = Array.isArray(patch.mcp) ? patch.mcp.filter((m) => /^[a-z][a-z0-9_-]{0,31}$/.test(m.name) && /^https:\/\//.test(m.url)).slice(0, 10).map((m) => ({ name: m.name, url: m.url.slice(0, 500), tokenSecret: m.tokenSecret || null })) : b.mcp;
   run("UPDATE bots SET name=?,job=?,hue=?,shape=?,personality=?,provider=?,model=?,weekly_cap_usd=?,policy=?,mcp=? WHERE id=?",
     b.kind === "chief" ? b.name : n.name, n.job, n.hue, n.shape, JSON.stringify(n.personality), n.provider, n.model, n.weekly_cap_usd, JSON.stringify(policy), JSON.stringify(mcp), id);
+  if (patch.private !== undefined && b.kind !== "chief") run("UPDATE bots SET private=? WHERE id=?", patch.private ? 1 : 0, id);
   audit("driver", "crew.updated", { id, fields: Object.keys(patch) });
   return getBot(id);
 }
@@ -114,7 +115,16 @@ export function instructions(b, memories) {
     `When ${driver} tells you a durable fact or preference worth keeping, call remember. Recurring work can be put on a schedule with schedule_task.`,
     memories.length ? `What you remember (edit with remember/forget):\n${memories.map((m) => `- [${m.id}] ${m.text}`).join("\n")}` : "",
     b.kind === "chief" ? `You are the Crew Chief, the only built-in crew member. When you notice recurring work that deserves its own crew member (the same kind of task 3+ times), call propose_crew_member. ${driver} always reviews and approves a hire; you can't create one yourself.` : "",
+    b.kind === "chief" ? crewRoster(b, driver) : `The Crew Chief may ask you something on ${driver}'s behalf. Answer it fully in one reply; that reply goes back to the Chief.`,
   ].filter(Boolean).join("\n\n");
+}
+
+// Sent at thread start/resume only, so a hire or retire reaches the Chief at its next brain start.
+function crewRoster(b, driver) {
+  const crew = listBots().filter((x) => x.id !== b.id);
+  if (!crew.length) return "";
+  return [`Your crew. When a question or task falls in a member's job, call ask_crew_member and build on their answer: they work from their own memory, logins and computer. Private members talk only to ${driver}; don't ask them.`,
+    ...crew.map((x) => `- ${x.name}${x.private ? " (private)" : ""}: ${x.job || "no job set"}`)].join("\n");
 }
 
 // Browser (Playwright over CDP) and pixel tools come from the computer image's own manifest, under their usual names.
@@ -164,6 +174,9 @@ export function dynamicTools(b, manifest = { browser: [], computer: [] }) {
     { type: "function", name: "schedule_task", description: 'Run a prompt on a schedule in this thread. when: "daily HH:MM", "weekly mon HH:MM", "every N minutes|hours" (min 15 minutes). Times are Asia/Kolkata.',
       inputSchema: { type: "object", properties: { when: { type: "string" }, prompt: { type: "string" } }, required: ["when", "prompt"] } },
   ];
+  if (b.kind === "chief") tools.push({ type: "function", name: "ask_crew_member",
+    description: "Ask another crew member a question, or give them a task in their job, and wait up to 10 minutes for their answer. They work in their own thread with their own memory, logins, computer, cap and permissions; any pit stop they hit still goes to the driver.",
+    inputSchema: { type: "object", properties: { member: { type: "string", description: "The member's name" }, question: { type: "string", description: "Self-contained: they can't see this thread. Say what you need back." } }, required: ["member", "question"] } });
   if (b.kind === "chief") tools.push({ type: "function", name: "propose_crew_member",
     description: "Propose a new crew member for recurring work. The driver reviews it as a HIRE pit stop. Authority always starts at the default policy.",
     inputSchema: { type: "object", properties: {

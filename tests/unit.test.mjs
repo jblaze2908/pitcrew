@@ -473,3 +473,11 @@ test("ChatGPT plan limits keep the codex bucket and the other window's last read
   assert.deepEqual(l.primary, { usedPercent: 55, windowMins: 300, resetsAt: 1900001000000 });
   assert.equal(l.secondary.usedPercent, 12);
 });
+
+test("front-door router falls back to the Crew Chief and describes each member by job", async () => {
+  const { routeMessage, routeCriteria } = await import("../app/src/router.mjs");
+  const crew = [{ id: "c", kind: "chief", name: "Crew Chief", job: "" }, { id: "h", kind: "specialist", name: "Health", job: "Reads Apple Watch data and advises on sleep" }];
+  assert.deepEqual(routeCriteria(crew).h, { what: "Health: Reads Apple Watch data and advises on sleep" });
+  assert.equal((await routeMessage("how did I sleep", crew, { apiKey: null })).botId, "c");
+  assert.equal((await routeMessage("anything", crew.slice(0, 1), { apiKey: "x" })).by, "only member");
+});

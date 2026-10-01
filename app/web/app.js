@@ -111,7 +111,7 @@ const LIVE = {
 let viewTimer = null;
 function refresh(t, x) {
   clearTimeout(rerenderTimer);
-  rerenderTimer = setTimeout(async () => { S = await api("GET", "/api/state", undefined, { quiet: true }).catch(() => S); renderChrome(); if (current.name === "wall") renderView({ keepScroll: true }); }, 250);
+  rerenderTimer = setTimeout(async () => { S = await api("GET", "/api/state", undefined, { quiet: true }).catch(() => S); renderChrome(); if (current.name === "wall" && !$(".askbox textarea")?.value) renderView({ keepScroll: true }); }, 250);
   if (!LIVE[current.name]?.(t, x, current.args) || $(".threadq")?.value) return;
   const at = here; clearTimeout(viewTimer);
   viewTimer = setTimeout(() => { if (here === at && !$(".threadq")?.value) renderView({ keepScroll: true }); }, current.name === "telemetry" || current.name === "library" ? 2000 : 600);
@@ -226,7 +226,8 @@ function wallView() {
   const connected = Object.values(S.providers).some((p) => p.connected);
   return h("div", { class: "page" },
     h("div", { class: "spread" }, h("h1", { class: "pc-hello" }, `${greet}, ${S.driverName}. `, n ? h("em", {}, `${n} pit stop${n > 1 ? "s" : ""} need${n > 1 ? "" : "s"} you.`) : "All quiet."),
-      h("a", { class: "pc-pill", href: `#/t/${S.bots[0]?.threads[0]?.id || ""}` }, "Ask the Crew Chief")),
+    ),
+    askBox(),
     !connected && h("div", { class: "pc-card row" }, h("pc-bot", { size: "md", hue: "c1", mood: "sleep" }), h("div", { class: "col", style: "flex:1;gap:2px" }, h("b", { class: "pc-h3" }, "Connect a model provider to start"), h("p", { class: "muted small" }, "Add an OpenRouter or AI Gateway key, or sign in with ChatGPT. The crew runs on whichever you pick.")), h("a", { class: "pc-pill s", href: "#/settings" }, "Providers")),
     S.paused && h("div", { class: "pc-card row" }, h("b", { class: "sig", style: "flex:1" }, "The crew is stopped. Nothing runs until you resume."), h("button", { class: "pc-pill s", onclick: async () => { S = await api("POST", "/api/resume"); renderChrome(); renderView(); } }, "Resume the crew")),
     n > 0 && h("section", { class: "col" }, h("div", { class: "spread" }, h("p", { class: "pc-lab" }, "Box, box: waiting on you"), n > 1 && h("a", { class: "small faint", href: "#/pitstops" }, "Batch decide")), h("div", { class: "grid2" }, S.pitstops.slice(0, 6).map((p) => pitCard(p)))),
@@ -236,6 +237,41 @@ function wallView() {
       h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "Computers"), h("span", { class: "big num" }, String(S.computersUp)), h("p", { class: "small muted" }, "up now. Idle computers go back to the garage after 10 minutes."))),
     h("section", { class: "col" }, h("p", { class: "pc-lab" }, "The crew"), h("div", { class: "grid3" }, S.bots.map(crewCard), h("a", { class: "pc-card crewcard", href: "#/hire", style: "justify-content:center;align-items:center;border-style:dashed" }, h("b", { class: "pc-h3" }, "+ New crew member"), h("p", { class: "small faint" }, "Every hire is reviewed by you.")))));
 }
+// One way in: Pitcrew picks the member whose job covers the message (or asks when unsure); "to" overrides it.
+function askBox() {
+  const text = h("textarea", { placeholder: "Ask your crew anything. Pitcrew picks who takes it.", rows: 1 });
+  const to = h("select", { class: "to", title: "Who takes it" }, h("option", { value: "" }, "Auto"), S.bots.map((b) => h("option", { value: b.id }, b.name)));
+  const sendBtn = h("button", { class: "pc-pill s" }, "Send");
+  const choose = h("div", { class: "row choose hidden" });
+  const grow = () => { text.style.height = "auto"; text.style.height = `${Math.min(220, text.scrollHeight)}px`; };
+  const go = async (botId = to.value) => {
+    if (!text.value.trim() || sendBtn.disabled) return;
+    sendBtn.disabled = true; sendBtn.textContent = botId ? "Sending…" : "Routing…";
+    try {
+      const r = await api("POST", "/api/ask", { text: text.value, ...(botId ? { botId } : {}) });
+      if (r.choose) {
+        choose.replaceChildren(h("span", { class: "small muted" }, "Who's this for?"), ...r.choose.map(bot).filter(Boolean).map((b) => h("button", { class: "pc-pill o s", onclick: () => go(b.id) }, face(b, "xs"), b.name)));
+        choose.classList.remove("hidden"); return;
+      }
+      text.value = ""; location.hash = `#/t/${r.threadId}`;
+    } finally { sendBtn.disabled = false; sendBtn.textContent = "Send"; }
+  };
+  sendBtn.addEventListener("click", () => go());
+  text.addEventListener("input", () => { grow(); choose.classList.add("hidden"); });
+  text.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); go(); } });
+  return h("div", { class: "composer askbox" }, h("div", { class: "box" }, text, h("div", { class: "bar" }, h("span", { class: "small faint hint" }, "Enter to send"), h("span", { style: "flex:1" }), to, sendBtn)), choose);
+}
+// Where a thread came from: routed by the front door (with "change") or asked by another member.
+function originChip(d, b) {
+  const o = d.thread.origin ? JSON.parse(d.thread.origin) : null;
+  if (o?.kind === "delegated") { const f = bot(o.fromBot); return h("a", { class: "pc-chip blue", href: `#/t/${o.fromThread}`, title: "Open the thread that asked" }, `Asked by ${f?.name || "another member"}`); }
+  if (o?.kind !== "routed") return null;
+  const others = S.bots.filter((x) => x.id !== b.id);
+  const sel = h("select", { class: "to", title: "Move this message to another member" }, h("option", { value: "" }, o.by === "driver" ? "Change" : "Not right? Change"), others.map((x) => h("option", { value: x.id }, x.name)));
+  sel.addEventListener("change", async () => { if (!sel.value) return; const r = await api("POST", `/api/threads/${d.thread.id}/reroute`, { botId: sel.value }); toast(`Moved to ${bot(r.botId)?.name}`); location.hash = `#/t/${r.threadId}`; });
+  return h("span", { class: "row", style: "gap:6px;flex:none" }, h("span", { class: "pc-chip", title: o.confidence != null ? `Routed with ${(o.confidence * 100).toFixed(0)}% confidence` : "" }, o.by === "driver" ? `→ ${b.name}` : `Routed → ${b.name}`), sel);
+}
+
 function crewCard(b) {
   const running = b.threads.find((t) => t.status === "running");
   const pct = Math.min(100, (b.spend / (b.weekly_cap_usd || 1)) * 100);
@@ -300,16 +336,17 @@ async function profileEditor(b) {
   const p = b.personality || {};
   const f = { name: h("input", { value: b.name, disabled: b.kind === "chief" }), job: h("textarea", {}, b.job), role: h("input", { value: p.role || "", placeholder: "e.g. Calm race engineer. Facts first." }),
     quirks: h("input", { value: (p.quirks || []).join("; "), placeholder: "Up to 3, separated by ;" }), signoff: h("input", { value: p.signoff || "" }), callMe: h("input", { value: p.callMe || "" }),
-    cap: h("input", { type: "number", min: 0, step: "0.5", value: b.weekly_cap_usd }), plain: h("input", { type: "checkbox", checked: !!p.plain }) };
+    cap: h("input", { type: "number", min: 0, step: "0.5", value: b.weekly_cap_usd }), plain: h("input", { type: "checkbox", checked: !!p.plain }), priv: h("input", { type: "checkbox", checked: !!b.private }) };
   const dials = {}; for (const k of ["warmth", "talk", "humour"]) dials[k] = h("input", { type: "range", min: 1, max: 5, value: p[k] || 3 });
   const pm = await providerModelPicker(b.provider, b.model);
   const save = async () => {
-    await api("PATCH", `/api/bots/${b.id}`, { name: f.name.value, job: f.job.value, weekly_cap_usd: +f.cap.value, provider: pm.provider(), model: pm.model(),
+    await api("PATCH", `/api/bots/${b.id}`, { name: f.name.value, job: f.job.value, weekly_cap_usd: +f.cap.value, provider: pm.provider(), model: pm.model(), private: f.priv.checked,
       personality: { role: f.role.value, quirks: f.quirks.value.split(";").map((s) => s.trim()).filter(Boolean), signoff: f.signoff.value, callMe: f.callMe.value, plain: f.plain.checked, warmth: +dials.warmth.value, talk: +dials.talk.value, humour: +dials.humour.value } });
     toast("Saved. New threads use it; running computers pick it up at next start."); S = await api("GET", "/api/state"); renderChrome();
   };
   return h("div", { class: "grid2" },
     h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "Who"), lab("Name", f.name), lab("Job", f.job), lab("Weekly cap (USD)", f.cap, "The runtime refuses new runs once this week's estimate reaches the cap."), pm.el,
+      b.kind !== "chief" && h("label", { class: "row", style: "gap:8px;align-items:flex-start" }, f.priv, h("span", { class: "col", style: "gap:2px" }, h("b", { class: "small" }, "Private"), h("span", { class: "small faint" }, "Only you talk to it. The Crew Chief can't ask it anything, so nothing it knows reaches other members."))),
       b.kind !== "chief" && h("button", { class: "pc-pill o s", onclick: async (e) => { if (!confirmInline(e.target, "Retire?")) return; await api("POST", `/api/bots/${b.id}/archive`); toast(`${b.name} retired`); S = await api("GET", "/api/state"); renderChrome(); location.hash = "#/"; } }, "Retire crew member")),
     h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "Personality (voice only)"), lab("Role line", f.role),
       ...Object.entries(dials).map(([k, el]) => h("div", { class: "dial" }, h("span", { class: "muted" }, k[0].toUpperCase() + k.slice(1)), el, h("span", { class: "pc-m faint" }, el.value))),
@@ -476,6 +513,7 @@ async function filesView(b, turnId, encPath) {
 }
 
 // ---------- thread ----------
+const originFrom = (d) => { const o = d.thread.origin ? JSON.parse(d.thread.origin) : null; return bot(o?.fromBot)?.name || "Another member"; };
 async function threadView(id) {
   if (!id) { location.hash = "#/"; return null; }
   const d = await api("GET", `/api/threads/${id}`);
@@ -484,6 +522,7 @@ async function threadView(id) {
   const pits = new Map(d.pitstops.map((p) => [p.id, p]));
   const cards = new Map(); // pit stop id → its slot in the stream, patched in place when it's decided
   const surfaces = new Map(d.surfaces.map((s) => [s.id, s]));
+  const delegs = new Map(); // delegation id → its card, replaced when the answer lands
   const stream = h("div", { class: "stream" });
   const nearBottom = () => stream.scrollHeight - stream.scrollTop - stream.clientHeight < 160;
   const scroll = (force) => { if (force || nearBottom()) requestAnimationFrame(() => (stream.scrollTop = stream.scrollHeight)); };
@@ -492,7 +531,7 @@ async function threadView(id) {
 
   const renderEvent = (e) => {
     switch (e.kind) {
-      case "user": return h("div", { class: "msg me" }, e.data.via === "schedule" ? h("span", { class: "pc-lab" }, "scheduled · ") : null, e.data.display || e.data.text, e.data.attachments?.length ? h("div", { class: "sent-atts" }, e.data.attachments.map((p) => /\.(png|jpe?g|webp|gif)$/i.test(p)
+      case "user": return h("div", { class: "msg me" }, e.data.via === "schedule" ? h("span", { class: "pc-lab" }, "scheduled · ") : e.data.via === "delegation" ? h("span", { class: "pc-lab" }, `${originFrom(d)} asks · `) : null, e.data.display || e.data.text, e.data.attachments?.length ? h("div", { class: "sent-atts" }, e.data.attachments.map((p) => /\.(png|jpe?g|webp|gif)$/i.test(p)
         ? h("a", { href: `/files/${b.id}/${p}?inline=1`, target: "_blank", rel: "noopener" }, h("img", { src: `/files/${b.id}/${p}?inline=1`, alt: p.split("/").pop(), loading: "lazy" }))
         : h("a", { class: "pc-chip", href: `/files/${b.id}/${p}` }, p.split("/").pop().replace(/^[a-z0-9]+-/, "")))) : null);
       case "agent": return h("div", { class: "msg bot" }, face(b, "sm", "idle"), md(e.data.text));
@@ -508,6 +547,15 @@ async function threadView(id) {
       case "error": return h("p", { class: "err" }, e.data.text);
       case "changes": return h("div", { class: "changes" }, h("div", { class: "spread" }, h("b", { class: "small" }, `Changed ${e.data.count} file${e.data.count === 1 ? "" : "s"}`), h("a", { class: "small faint", href: `#/crew/${e.data.botId}/files/${e.data.turnId}` }, "Review changes")),
         e.data.files.map((f) => h("a", { class: "cf", href: `#/crew/${e.data.botId}/files/${e.data.turnId}/${encodeURIComponent(f.path)}` }, h("span", { class: `pc-chip ${f.status === "added" ? "ok" : f.status === "deleted" ? "bad" : "blue"}` }, f.status[0].toUpperCase()), h("span", { class: "pc-m small" }, f.path), f.lines ? h("span", { class: `pc-m small ${f.lines > 0 ? "okc" : "badc"}` }, `${f.lines > 0 ? "+" : ""}${f.lines} lines`) : null)));
+      case "delegation": {
+        const old = delegs.get(e.data.id), to = bot(e.data.toBot) || { name: e.data.toName };
+        const st = { asking: ["working…", ""], answered: ["answered", "ok"], failed: ["didn't finish", "bad"] }[e.data.status] || [e.data.status, ""];
+        const el = h("div", { class: "deleg pc-card col" }, h("div", { class: "spread" }, h("div", { class: "row" }, face(to, "xs", e.data.status === "asking" ? "working" : "idle"), h("b", {}, `Asked ${to.name}`), h("span", { class: `pc-chip ${st[1]}` }, st[0])),
+          h("a", { class: "small faint", href: `#/t/${e.data.toThread}` }, "Open their thread")), h("p", { class: "small muted" }, e.data.question),
+          e.data.answer && h("details", {}, h("summary", { class: "small" }, `Their answer${e.data.cost ? ` · ${usd(e.data.cost)} on ${to.name}'s cap` : ""}`), md(e.data.answer)));
+        if (old) { old.replaceWith(el); delegs.set(e.data.id, el); return null; }
+        delegs.set(e.data.id, el); return el;
+      }
       case "pitstop": { const p = pits.get(e.data.id); if (!p) return null; const slot = h("div", { style: "margin-left:40px;max-width:760px" }, pitCard(p)); cards.set(p.id, slot); return slot; }
       case "surface": {
         const s = surfaces.get(e.data.id);
@@ -595,7 +643,7 @@ async function threadView(id) {
     h("button", { class: "small faint", style: "text-align:left;padding:0", onclick: async (e) => { if (!confirmInline(e.target, "Archive?")) return; await api("PATCH", `/api/threads/${id}`, { archived: true }); location.hash = `#/crew/${b.id}`; } }, "Archive thread"));
 
   const page = h("div", { class: "threadpage" },
-    h("section", { class: "convo" }, h("header", {}, face(b, "sm"), title, h("span", { class: "pc-chip" }, b.name)), stream,
+    h("section", { class: "convo" }, h("header", {}, face(b, "sm"), title, originChip(d, b) || h("span", { class: "pc-chip" }, b.name)), stream,
       h("div", { class: "composer" }, h("div", { class: "box" }, attList, text,
         h("div", { class: "bar" }, h("button", { class: "attach", title: "Attach files or paste an image", onclick: () => file.click() }, "+ Attach"), file, h("span", { class: "small faint hint" }, "Enter to send · Shift+Enter for a new line"), h("span", { style: "flex:1" }), modeSeg, stopBtn, sendBtn)))),
     panel);

@@ -8,6 +8,7 @@ import { one, all, run, now, uid, json, getSetting, setSetting, audit } from "./
 import * as A from "./auth.mjs";
 import * as P from "./providers.mjs";
 import * as R from "./runtime.mjs";
+import { routeMessage, SURE } from "./router.mjs";
 import { getBot, listBots, ensureChief, updateBot, normaliseSpec, createBot } from "./crew.mjs";
 import { objectText } from "./snapshot.mjs";
 import { serveShot, SHOT_NAME } from "./shots.mjs";
@@ -152,6 +153,39 @@ route("POST", "/api/threads", async (req) => {
   const b = await jbody(req); if (!getBot(b.botId)) throw A.httpErr(404, "No such crew member");
   const id = uid("th"); run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES(?,?,?,?,?)", id, b.botId, String(b.title || "New thread").slice(0, 120), now(), now());
   return { id };
+});
+// Front door: one message, routed to the member whose job covers it. Unsure → the driver picks from the top candidates.
+function openRouted(botId, text, origin) {
+  const id = uid("th");
+  run("INSERT INTO threads(id,bot_id,title,origin,created_at,updated_at) VALUES(?,?,?,?,?,?)", id, botId, "New thread", JSON.stringify(origin), now(), now());
+  return R.sendMessage(id, { text }).then(() => ({ threadId: id, botId }));
+}
+route("POST", "/api/ask", async (req) => {
+  const b = await jbody(req), text = String(b.text || "").trim().slice(0, 20000);
+  if (!text) throw A.httpErr(400, "Say something");
+  if (b.botId) {
+    const to = getBot(b.botId); if (!to || to.archived) throw A.httpErr(404, "No such crew member");
+    audit("driver", "ask.routed", { botId: to.id, by: "driver" });
+    return openRouted(to.id, text, { kind: "routed", by: "driver" });
+  }
+  const pick = await routeMessage(text, listBots());
+  if (b.dry) return pick;  // routing only, no thread: for checking the router against real wording
+  const sure = pick.confidence == null || pick.confidence >= SURE || !pick.alternatives.length;
+  audit("driver", "ask.routed", { botId: pick.botId, by: pick.by, confidence: pick.confidence, ms: pick.ms, asked: !sure });
+  if (!sure) return { choose: [pick.botId, ...pick.alternatives.map((a) => a.botId)] };
+  return openRouted(pick.botId, text, { kind: "routed", by: pick.by, confidence: pick.confidence });
+});
+// "Change": the message moves to another member; the first thread stops and is archived. Audited, so routing accuracy can be measured.
+route("POST", "/api/threads/:id/reroute", async (req, res, { id }) => {
+  const b = await jbody(req), t = R.getThread(id), to = getBot(b.botId);
+  if (!t) throw A.httpErr(404, "No such thread");
+  if (!to || to.archived) throw A.httpErr(404, "No such crew member");
+  const first = json(one("SELECT data FROM events WHERE thread_id=? AND kind='user' ORDER BY id LIMIT 1", id)?.data, {});
+  if (!first.text) throw A.httpErr(400, "Nothing to move");
+  await R.interrupt(id).catch(() => {});
+  run("UPDATE threads SET archived=1 WHERE id=?", id);
+  audit("driver", "ask.rerouted", { threadId: id, from: t.bot_id, to: to.id });
+  return openRouted(to.id, first.text, { kind: "routed", by: "driver", from: t.bot_id });
 });
 route("GET", "/api/threads/:id", (req, res, { id }) => { const v = threadView(id); R.prewarmBrain(id); return v; });
 route("GET", "/api/bots/:id/projects", (req, res, { id }) => { if (!getBot(id)) throw A.httpErr(404, "No such crew member"); return listProjects(id); });
