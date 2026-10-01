@@ -9,7 +9,7 @@ import { jev, redact, jevSystemOne, secretKind } from "./jev.mjs";
 import { checkoutWhy, confirmationOf } from "./sites.mjs";
 import { siteVerdict, siteTag, applySiteChoice, recordVisit } from "./domains.mjs";
 import { getBot, listBots, instructions, dynamicTools, normaliseSpec, createBot } from "./crew.mjs";
-import { brainFor, computerFor, allComputers, allBrains, botDir, ensureDirs, usageLog, toolManifest, PW_OUT, PW_SETTLE_MS } from "./computer.mjs";
+import { brainFor, computerFor, allComputers, allBrains, readPlanLimits, botDir, ensureDirs, usageLog, toolManifest, PW_OUT, PW_SETTLE_MS } from "./computer.mjs";
 import { providerReady, estimateCost, recordChatgptLimits, chatgptLimits } from "./providers.mjs";
 import { validateSurface } from "./surfaces.mjs";
 import { snapshot, changes } from "./snapshot.mjs";
@@ -349,15 +349,13 @@ function onNotify(c, method, p) {
     case "thread/compacted": addEvent(threadId, null, "system", { text: "Thread compacted." }); break;
   }
 }
-// Telemetry page: asks a running brain at most once a minute, never starts one. Goes through rpc directly so the read
-// doesn't count as activity and keep an idle brain alive.
-let limitsAskedAt = 0;
+// Telemetry page: reads the plan's usage from OpenAI at most once a minute (single flight), else the last reading.
+let limitsRead = { at: 0, p: null };
 export async function planLimits() {
-  const br = providerReady("openai") && allBrains().find((x) => x.up);
-  if (br && Date.now() - limitsAskedAt > 60000) {
-    limitsAskedAt = Date.now();
-    try { const r = await br.rpc.request("account/rateLimits/read", { excludeResetCreditDetails: true }, 10000); recordChatgptLimits(r.rateLimitsByLimitId?.codex ?? r.rateLimits); } catch {}
+  if (providerReady("openai") && Date.now() - limitsRead.at > 60000) {
+    limitsRead = { at: Date.now(), p: readPlanLimits().then(recordChatgptLimits, (e) => console.error("plan limits:", e.message)) };
   }
+  await limitsRead.p;
   return { connected: providerReady("openai"), ...chatgptLimits() };
 }
 const subtract = (x, y) => Object.fromEntries(Object.keys(x).map((k) => [k, (x[k] || 0) - (y?.[k] || 0)]));

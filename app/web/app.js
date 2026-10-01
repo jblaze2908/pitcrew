@@ -678,7 +678,7 @@ function openrouterLeft(o) {
 
 function planLeft(c) {
   const card = (...kids) => h("div", { class: "pc-card col" }, h("div", { class: "spread" }, h("p", { class: "pc-lab" }, "ChatGPT plan"), c?.plan && h("span", { class: "pc-chip" }, c.plan)), ...kids);
-  if (!c?.primary && !c?.secondary) return card(h("p", { class: "small muted" }, c?.connected ? "No reading yet. Codex reports it after the first run on the plan." : "ChatGPT plan not connected."));
+  if (!c?.primary && !c?.secondary) return card(h("p", { class: "small muted" }, c?.connected ? "Couldn't read usage from OpenAI yet. Try again in a minute." : "ChatGPT plan not connected."));
   const name = (w, d) => (w.windowMins === 300 ? "5-hour window" : w.windowMins === 10080 ? "Weekly" : w.windowMins ? `${Math.round(w.windowMins / 60)}-hour window` : d);
   const row = (w, d) => {
     const reset = w.resetsAt && w.resetsAt <= Date.now(), used = reset ? 0 : w.usedPercent;
@@ -688,7 +688,7 @@ function planLeft(c) {
   const cr = c.credits;
   return card(c.reached && h("span", { class: "pc-chip bad" }, "Limit reached"), c.primary && row(c.primary, "Short window"), c.secondary && row(c.secondary, "Long window"),
     cr?.has && h("p", { class: "small muted" }, cr.unlimited ? "Credits: unlimited" : `Credits: ${cr.balance ?? "available"}`),
-    h("p", { class: "small faint" }, `As of ${ago(c.at)}. Refreshes after each run on the plan.`));
+    h("p", { class: "small faint" }, `As of ${ago(c.at)}, from OpenAI. Counts Codex use anywhere on this account.`));
 }
 
 // ---------- library ----------
