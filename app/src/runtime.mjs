@@ -1,12 +1,14 @@
-// The runtime: turns on each crew member's computer, the jev gate and pit stops, dynamic tools, schedules, kill switch.
-import { writeFileSync, chownSync, mkdirSync } from "node:fs";
+// The runtime: turns on each crew member's brain, its computer on demand, the jev gate and pit stops, Pitcrew tools,
+// schedules, kill switch.
+import { writeFileSync, chownSync, readFileSync } from "node:fs";
 import { one, all, run, now, uid, json, getSetting, setSetting, audit } from "./db.mjs";
 import { getSecret } from "./auth.mjs";
 import { jev } from "./jev.mjs";
 import { getBot, listBots, instructions, dynamicTools, normaliseSpec, createBot } from "./crew.mjs";
-import { computerFor, allComputers, botDir, ensureDirs } from "./computer.mjs";
+import { brainFor, computerFor, allComputers, allBrains, botDir, ensureDirs, usageLog, toolManifest } from "./computer.mjs";
 import { providerReady, estimateCost } from "./providers.mjs";
 import { validateSurface } from "./surfaces.mjs";
+import { snapshot, changes } from "./snapshot.mjs";
 
 // ---------- live bus (SSE) ----------
 const clients = new Set();
@@ -49,25 +51,28 @@ export function weekStart(t = now()) {
 }
 export const weekSpend = (botId) => one("SELECT COALESCE(SUM(cost_usd),0) s FROM turns WHERE bot_id=? AND started_at>=?", botId, weekStart()).s;
 
-// ---------- computer hooks ----------
-const hooks = {
-  isBusy,
-  onState: (c) => bus.emit("computer", { botId: c.bot.id, up: c.up, startedAt: c.startedAt }),
-  onExit: (c, code, errTail) => {
-    for (const [tid, a] of active) {
-      if (getThread(tid)?.bot_id !== c.bot.id) continue;
-      finishTurn(tid, "failed", `The computer stopped (exit ${code}).`);
-    }
-    if (code && code !== 143 && code !== 137) addSystemForBot(c.bot.id, `Computer stopped unexpectedly (exit ${code}). ${errTail.split("\n").filter(Boolean).slice(-1)[0] || ""}`.trim());
+// ---------- brain and computer hooks ----------
+const brainHooks = {
+  onNotify: (br, method, p) => onNotify(br, method, p),
+  onRequest: (br, method, p) => onRequest(br, method, p),
+  onBrainExit: (br, code, errTail) => {
+    for (const [tid] of active) if (getThread(tid)?.bot_id === br.bot.id) finishTurn(tid, "failed", `The crew member's brain stopped (exit ${code}).`);
+    if (code && code !== 143 && code !== 137 && code !== null) addSystemForBot(br.bot.id, `Brain stopped unexpectedly (exit ${code}). ${errTail.split("\n").filter(Boolean).slice(-1)[0] || ""}`.trim());
   },
-  onNotify: (c, method, p) => onNotify(c, method, p),
-  onRequest: (c, method, p) => onRequest(c, method, p),
+};
+export const computerHooks = {
+  isBusy,
+  getBot,
+  onState: (c) => bus.emit("computer", { botId: c.bot.id, up: c.up, desktop: c.desktopUp, startedAt: c.startedAt }),
+  onComputerBoot: (botId) => { for (const [tid, a] of active) if (getThread(tid)?.bot_id === botId) bus.emit("activity", { threadId: tid, botId, text: "Computer up" }); },
 };
 function addSystemForBot(botId, text) {
   const t = one("SELECT id FROM threads WHERE bot_id=? ORDER BY updated_at DESC LIMIT 1", botId);
   if (t) addEvent(t.id, null, "system", { text, tone: "bad" });
 }
-export const computer = (bot) => computerFor(bot, hooks);
+export const computer = (bot) => computerFor(bot, computerHooks);
+export const brain = (bot) => brainFor(bot, brainHooks);
+const isThinking = (botId) => [...active.keys()].some((t) => getThread(t)?.bot_id === botId);
 
 // ---------- turns ----------
 export async function sendMessage(threadId, { text, attachments = [], mode = "auto", trigger = "driver", display = null }) {
@@ -79,8 +84,7 @@ export async function sendMessage(threadId, { text, attachments = [], mode = "au
   const a = active.get(threadId);
   if (a) {
     if (mode === "queue") { (queues.get(threadId) || queues.set(threadId, []).get(threadId)).push({ text, attachments, trigger }); addEvent(threadId, null, "system", { text: "Queued for after this run." }); return { queued: true }; }
-    const c = computer(getBot(t.bot_id));
-    await c.request("turn/steer", { threadId: t.codex_id, expectedTurnId: a.codexTurnId, input: toInput(text, attachments) });
+    await brain(getBot(t.bot_id)).request("turn/steer", { threadId: t.codex_id, expectedTurnId: a.codexTurnId, input: toInput(t.bot_id, text, attachments) });
     return { steered: true };
   }
   startTurn(threadId, text, attachments, trigger).catch((e) => {
@@ -91,15 +95,22 @@ export async function sendMessage(threadId, { text, attachments = [], mode = "au
   return { started: true };
 }
 
-function toInput(text, attachments) {
+// Images are read here and sent inline: the brain can't see the computer's disk.
+function toInput(botId, text, attachments) {
   const input = [];
-  const files = attachments.filter((f) => !/\.(png|jpe?g|webp|gif)$/i.test(f));
-  const body = files.length ? `${text}\n\nAttached files (in /bot/work): ${files.join(", ")}` : text;
+  const isImg = (f) => /\.(png|jpe?g|webp|gif)$/i.test(f);
+  const body = attachments.length ? `${text}\n\nAttached files (in /bot/work on your computer): ${attachments.join(", ")}` : text;
   if (body.trim()) input.push({ type: "text", text: body, text_elements: [] });
-  for (const f of attachments.filter((f) => /\.(png|jpe?g|webp|gif)$/i.test(f))) input.push({ type: "localImage", path: `/bot/work/${f}` });
+  for (const f of attachments.filter(isImg)) {
+    try {
+      const buf = readFileSync(`${botDir(botId)}/work/${f}`);
+      if (buf.length < 8 << 20) input.push({ type: "image", url: `data:image/${f.split(".").pop().toLowerCase().replace("jpg", "jpeg")};base64,${buf.toString("base64")}` });
+    } catch {}
+  }
   return input;
 }
 
+const ENVS = [{ environmentId: "computer", cwd: "/bot/work" }];
 async function startTurn(threadId, text, attachments, trigger) {
   const t = getThread(threadId), b = getBot(t.bot_id);
   if (getSetting("paused") === "1") throw new Error("The crew is stopped (kill switch). Resume the crew in Settings first.");
@@ -110,14 +121,13 @@ async function startTurn(threadId, text, attachments, trigger) {
   run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,provider,model,started_at) VALUES(?,?,?,?,?,?,?,?)", turnId, threadId, b.id, "starting", trigger, b.provider, b.model, now());
   setThreadStatus(threadId, "running");
   try {
-    const c = computer(b);
-    if (!c.up) addEvent(threadId, turnId, "system", { text: "Starting the computer…" });
+    const c = brain(b);
     await c.ensure();
     const mems = all("SELECT id,text FROM memory WHERE bot_id=? AND forgotten_at IS NULL ORDER BY created_at LIMIT 60", b.id);
     const common = { model: b.model, modelProvider: b.provider, cwd: "/bot/work", developerInstructions: instructions(b, mems) };
     let codexId = t.codex_id;
     if (!codexId) {
-      const st = await c.request("thread/start", { ...common, sandbox: "danger-full-access", approvalPolicy: "untrusted", dynamicTools: dynamicTools(b) }, 120000);
+      const st = await c.request("thread/start", { ...common, sandbox: "danger-full-access", approvalPolicy: "untrusted", environments: ENVS, dynamicTools: dynamicTools(b, await toolManifest()) }, 120000);
       codexId = st.thread.id;
       run("UPDATE threads SET codex_id=? WHERE id=?", codexId, threadId);
       c.loaded.add(codexId);
@@ -126,9 +136,12 @@ async function startTurn(threadId, text, attachments, trigger) {
       c.loaded.add(codexId);
     }
     byCodex.set(codexId, threadId);
+    const a0 = active.get(threadId);
+    if (a0) try { a0.snap = snapshot(b.id); } catch {}
     const carry = getThread(threadId).carry;
     if (carry) run("UPDATE threads SET carry=NULL WHERE id=?", threadId);
-    const r = await c.request("turn/start", { threadId: codexId, input: toInput(carry ? `${carry}\n\n---\n\n${text}` : text, attachments) }, 120000);
+    // Every turn names the computer environment, so commands never run in the brain itself.
+    const r = await c.request("turn/start", { threadId: codexId, environments: ENVS, input: toInput(b.id, carry ? `${carry}\n\n---\n\n${text}` : text, attachments), responsesapiClientMetadata: { pitcrew_turn: turnId } }, 120000);
     const a = active.get(threadId);
     if (a) a.codexTurnId = r.turn.id;
     run("UPDATE turns SET codex_turn_id=?, status='running' WHERE id=?", r.turn.id, turnId);
@@ -144,20 +157,40 @@ async function finishTurn(threadId, status, error) {
   active.delete(threadId);
   const t = getThread(threadId), b = getBot(t.bot_id);
   const u = a.total && a.base ? { input: a.total.inputTokens - a.base.inputTokens, cached: a.total.cachedInputTokens - a.base.cachedInputTokens, output: a.total.outputTokens - a.base.outputTokens } : { input: 0, cached: 0, output: 0 };
-  const cost = await estimateCost(b.provider, b.model, u).catch(() => ({ usd: 0, basis: "unknown" }));
+  const billed = billedUsage(b.id, a.turnId);
+  if (billed) Object.assign(u, { input: billed.input, cached: billed.cached, output: billed.output });
+  const cost = billed?.cost != null ? { usd: billed.cost, basis: "billed" } : await estimateCost(b.provider, b.model, u).catch(() => ({ usd: 0, basis: "unknown" }));
   run("UPDATE turns SET status=?, error=?, ended_at=?, input_tokens=?, cached_tokens=?, output_tokens=?, cost_usd=?, cost_basis=? WHERE id=?",
     status, error || null, now(), u.input, u.cached, u.output, cost.usd, cost.basis, a.turnId);
   if (error) addEvent(threadId, a.turnId, "error", { text: error });
+  // What changed on disk during this turn, however it was changed.
+  if (a.snap) try {
+    const ch = changes(b.id, a.snap, snapshot(b.id));
+    if (ch.length) {
+      run("UPDATE turns SET changes=? WHERE id=?", JSON.stringify(ch), a.turnId);
+      addEvent(threadId, a.turnId, "changes", { turnId: a.turnId, botId: b.id, count: ch.length, files: ch.slice(0, 12).map((c) => ({ path: c.path, status: c.status, lines: c.lines })) });
+    }
+  } catch {}
   setThreadStatus(threadId, status === "completed" ? "done" : status === "interrupted" ? "idle" : "failed");
   bus.emit("turn", { threadId, turnId: a.turnId, status, cost: cost.usd, botId: b.id });
   const next = queues.get(threadId)?.shift();
   if (next) startTurn(threadId, next.text, next.attachments, next.trigger).catch((e) => { if (!e.silent) addEvent(threadId, null, "error", { text: e.message }); });
 }
 
+// The brain's LLM proxy logs each model request's provider-reported usage and cost, keyed by turn.
+// Read once per finished turn; the file is append-only and small (one line per model request).
+function billedUsage(botId, turnId) {
+  let lines = [];
+  try { lines = readFileSync(usageLog(botId), "utf8").split("\n").filter((l) => l.includes(turnId)).map((l) => JSON.parse(l)); } catch { return null; }
+  if (!lines.length) return null;
+  const sum = (k) => lines.reduce((s, x) => s + (x[k] || 0), 0);
+  return { input: sum("input"), cached: sum("cached"), output: sum("output"), cost: lines.every((x) => typeof x.cost === "number") ? sum("cost") : null, requests: lines.length };
+}
+
 export async function interrupt(threadId) {
   const t = getThread(threadId), a = active.get(threadId);
   if (!t || !a) return false;
-  const c = computer(getBot(t.bot_id));
+  const c = brain(getBot(t.bot_id));
   if (a.codexTurnId && c.up) await c.request("turn/interrupt", { threadId: t.codex_id, turnId: a.codexTurnId }).catch(() => {});
   else finishTurn(threadId, "interrupted");
   return true;
@@ -166,7 +199,7 @@ export async function compact(threadId) {
   const t = getThread(threadId);
   if (!t?.codex_id) throw Object.assign(new Error("Nothing to compact yet"), { status: 400 });
   if (active.has(threadId)) throw Object.assign(new Error("Wait for the run to finish"), { status: 409 });
-  const b = getBot(t.bot_id), c = computer(b);
+  const b = getBot(t.bot_id), c = brain(b);
   await c.ensure();
   if (!c.loaded.has(t.codex_id)) { await c.request("thread/resume", { threadId: t.codex_id, model: b.model, modelProvider: b.provider, excludeTurns: true }); c.loaded.add(t.codex_id); }
   byCodex.set(t.codex_id, threadId);
@@ -204,21 +237,16 @@ function onNotify(c, method, p) {
     case "item/agentMessage/delta": bus.emit("delta", { threadId, itemId: p.itemId, text: p.delta }); break;
     case "item/started": {
       const it = p.item; items.set(it.id, it);
-      if (["commandExecution", "mcpToolCall", "dynamicToolCall", "fileChange", "webSearch"].includes(it.type)) {
-        const label = it.type === "mcpToolCall" && it.server === "browser" ? ground(p.threadId, it.tool, it.arguments || {}).label : "";
-        bus.emit("activity", { threadId, botId: c.bot.id, text: label ? `${it.tool.replace(/^browser_/, "")} ${short(label, 100)}` : toolTitle(it) });
-      }
+      // Browser and pixel tools announce themselves from their own handler, with the grounded element.
+      if (["commandExecution", "mcpToolCall", "fileChange", "webSearch"].includes(it.type) || (it.type === "dynamicToolCall" && !/^(browser|computer)_/.test(it.tool)))
+        bus.emit("activity", { threadId, botId: c.bot.id, text: toolTitle(it) });
       break;
     }
     case "item/completed": {
       const it = p.item; items.delete(it.id);
       if (it.type === "agentMessage" && it.text?.trim()) addEvent(threadId, a?.turnId, "agent", { text: it.text, itemId: it.id });
       else if (it.type === "commandExecution") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: it.status, exitCode: it.exitCode ?? null, output: String(it.aggregatedOutput || "").slice(-1500) });
-      else if (it.type === "mcpToolCall") {
-        const label = it.server === "browser" ? ground(p.threadId, it.tool, it.arguments || {}).label : "";
-        if (it.server === "browser") keepSnapshot(p.threadId, it);
-        addEvent(threadId, a?.turnId, "tool", { type: it.type, title: label ? `${it.tool.replace(/^browser_/, "")} ${short(label, 140)}` : toolTitle(it), status: it.status, output: mcpResultText(it), error: it.error?.message || null });
-      }
+      else if (it.type === "mcpToolCall") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: it.status, output: mcpResultText(it), error: it.error?.message || null });
       else if (it.type === "fileChange") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: it.status });
       else if (it.type === "webSearch") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: "completed" });
       else if (it.type === "contextCompaction") addEvent(threadId, a?.turnId, "system", { text: "Thread compacted." });
@@ -242,8 +270,7 @@ const subtract = (x, y) => Object.fromEntries(Object.keys(x).map((k) => [k, (x[k
 // ---------- grounding ----------
 // Playwright MCP acts on bare refs ("e44"). Resolve them against the snapshot the agent itself read, so jev judges
 // 'button "Submit order"' on httpbin.org, not "e44". Runs once per browser action; the lookup is a line scan.
-function keepSnapshot(codexId, it) {
-  const text = (it.result?.content || []).filter((x) => x.type === "text").map((x) => x.text).join("\n");
+function keepSnapshot(codexId, text) {
   if (!text.includes("[ref=")) return;
   snapshots.set(codexId, { url: /Page URL: (\S+)/.exec(text)?.[1] || snapshots.get(codexId)?.url || null, lines: text.split("\n").filter((l) => l.includes("[ref=")) });
 }
@@ -360,11 +387,8 @@ async function onRequest(c, method, p) {
         const ok = await pitStop({ botId: c.bot.id, threadId, kind: "mcp", effect: "ask", title: `${p.serverName} asks: ${short(p.message, 160)}`, detail: { server: p.serverName, message: p.message } });
         return ok === "approved" ? { action: "accept", content: {}, _meta: null } : { action: "decline", content: null, _meta: null };
       }
-      const g = p.serverName === "browser" ? ground(p.threadId, tool, args) : { grounded: args, effect: null, label: "" };
-      const call = { kind: "mcp", server: p.serverName, tool, arguments: g.grounded, ...(g.effect ? { effect: g.effect } : {}) };
-      const what = g.label || summariseArgs(args);
-      const where = g.grounded.page_url ? ` on ${(() => { try { return new URL(g.grounded.page_url).hostname; } catch { return g.grounded.page_url; } })()}` : "";
-      const ok = await gate(c, threadId, call, { kind: "mcp", title: `${tool.replace(/^browser_/, "").replace(/_/g, " ")} ${short(what, 140)}${where}`, detail: { server: p.serverName, tool, args: g.grounded } });
+      // Only the driver's own MCP connectors reach here now; browser and pixel tools are Pitcrew tools (runtimeTool).
+      const ok = await gate(c, threadId, { kind: "mcp", server: p.serverName, tool, arguments: args }, { kind: "mcp", title: `${p.serverName}: ${tool.replace(/_/g, " ")} ${short(summariseArgs(args), 140)}`, detail: { server: p.serverName, tool, args } });
       return ok ? { action: "accept", content: {}, _meta: null } : { action: "decline", content: null, _meta: null };
     }
     case "item/tool/call": return dynamicTool(c, threadId, p);
@@ -411,7 +435,39 @@ async function dynamicTool(c, threadId, p) {
       pitStop({ botId: b.id, threadId, kind: "hire", effect: "hire", title: `Hire ${spec.name}: ${spec.job.slice(0, 120)}`, detail: { spec }, expiresMin: 7 * 24 * 60 });
       return say(`Proposal sent. ${getSetting("driver_name", "The driver")} reviews it as a HIRE pit stop; don't create anything else for it.`);
     }
-    default: return say(`Unknown tool ${p.tool}`, false);
+    default:
+      if (/^(browser|computer)_/.test(p.tool)) return runtimeTool(c, threadId, p);
+      return say(`Unknown tool ${p.tool}`, false);
+  }
+}
+
+// Browser and pixel tools run on the crew member's computer, booting it (and its desktop) on first use.
+// The gate sees the grounded element; the computer's MCP server sees only the model's own arguments.
+async function runtimeTool(br, threadId, p) {
+  const b = getBot(br.bot.id), args = p.arguments || {}, turnId = active.get(threadId)?.turnId;
+  const kind = p.tool.startsWith("browser_") ? "browser" : "computer";
+  const tool = kind === "browser" ? p.tool : p.tool.replace(/^computer_/, "");
+  if (/^browser_(evaluate|run_code)/.test(p.tool)) return say("Page JavaScript isn't available. Use the element tools (click, type, fill_form, snapshot).", false);
+  const g = kind === "browser" ? ground(p.threadId, p.tool, args) : { grounded: args, effect: null, label: "" };
+  const host = (() => { try { return g.grounded.page_url ? new URL(g.grounded.page_url).hostname : ""; } catch { return ""; } })();
+  const title = `${tool.replace(/^browser_/, "").replace(/_/g, " ")} ${short(g.label || summariseArgs(args), 140)}${host ? ` on ${host}` : ""}`.trim();
+  bus.emit("activity", { threadId, botId: b.id, text: title });
+  const ok = await gate(br, threadId, { kind: "mcp", server: kind, tool, arguments: g.grounded, ...(g.effect ? { effect: g.effect } : {}) }, { kind: "mcp", title, detail: { server: kind, tool, args: g.grounded } });
+  if (!ok) { addEvent(threadId, turnId, "tool", { type: kind, title, status: "declined" }); return say("Not done: this action was declined at a pit stop. Don't retry it another way; tell the driver what didn't happen.", false); }
+  const comp = computer(b);
+  try {
+    if (!comp.desktopUp) bus.emit("activity", { threadId, botId: b.id, text: comp.up ? "Starting the desktop…" : "Starting the computer…" });
+    const mcp = await comp.mcp(kind);
+    comp.touch();
+    const r = await mcp.request("tools/call", { name: tool, arguments: args }, 120000);
+    const content = Array.isArray(r.content) ? r.content : [];
+    const text = content.filter((x) => x.type === "text").map((x) => x.text).join("\n");
+    if (kind === "browser") keepSnapshot(p.threadId, text);
+    addEvent(threadId, turnId, "tool", { type: kind, title, status: r.isError ? "failed" : "completed", output: text.slice(0, 1500) });
+    return { success: !r.isError, contentItems: content.map((x) => x.type === "image" ? { type: "inputImage", imageUrl: `data:${x.mimeType || "image/png"};base64,${x.data}` } : { type: "inputText", text: x.type === "text" ? x.text : JSON.stringify(x).slice(0, 4000) }) };
+  } catch (e) {
+    addEvent(threadId, turnId, "tool", { type: kind, title, status: "failed", error: e.message });
+    return say(`The computer couldn't run ${tool}: ${e.message}`, false);
   }
 }
 
@@ -474,7 +530,7 @@ export async function killSwitch() {
   const inFlight = [...active.keys()].map((t) => ({ threadId: t, title: getThread(t)?.title }));
   for (const ps of all("SELECT id FROM pitstops WHERE status='pending' AND kind!='hire'")) await decide(ps.id, "deny", { note: "Kill switch" });
   await Promise.all([...active.keys()].map((t) => interrupt(t)));
-  await Promise.all(allComputers().map((c) => c.stop()));
+  await Promise.all([...allComputers().map((c) => c.stop()), ...allBrains().map((x) => x.stop())]);
   audit("driver", "killswitch", { inFlight });
   bus.emit("paused", { paused: true });
   return { inFlight };
@@ -489,7 +545,7 @@ export function bootRuntime() {
   run("UPDATE threads SET status='idle' WHERE status IN ('running','needs')");
   setInterval(tickSchedules, 30000).unref();
 }
-export { isBusy };
+export { isBusy, isThinking };
 
 export function saveUpload(threadId, name, buf) {
   const t = getThread(threadId);

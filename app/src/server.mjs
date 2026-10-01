@@ -2,14 +2,15 @@
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
 import { connect } from "node:net";
-import { readFileSync, existsSync, statSync, createReadStream, realpathSync } from "node:fs";
+import { readFileSync, existsSync, statSync, createReadStream, realpathSync, readdirSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { one, all, run, now, uid, json, getSetting, setSetting, audit } from "./db.mjs";
 import * as A from "./auth.mjs";
 import * as P from "./providers.mjs";
 import * as R from "./runtime.mjs";
 import { getBot, listBots, ensureChief, updateBot, normaliseSpec, createBot } from "./crew.mjs";
-import { botDir, listFiles, reapOrphans, startIdleSweeper, allComputers } from "./computer.mjs";
+import { objectText } from "./snapshot.mjs";
+import { botDir, listFiles, reapOrphans, startIdleSweeper, allComputers, allBrains, startBootSocket, toolManifest } from "./computer.mjs";
 
 const PORT = Number(process.env.PORT || 8330);
 const WEB = new URL("../web/", import.meta.url).pathname;
@@ -44,8 +45,8 @@ function mood(b, threads, pending, up) {
 }
 function botCard(b, pending) {
   const threads = all("SELECT id,title,status,updated_at,pinned FROM threads WHERE bot_id=? AND archived=0 ORDER BY pinned DESC, updated_at DESC", b.id);
-  const c = allComputers().find((x) => x.bot.id === b.id);
-  return { ...b, threads, mood: mood(b, threads, pending, !!c?.up), spend: R.weekSpend(b.id), computer: { up: !!c?.up, startedAt: c?.startedAt ?? null, lease: R.leaseHeld(b.id) } };
+  const c = allComputers().find((x) => x.bot.id === b.id), br = allBrains().find((x) => x.bot.id === b.id);
+  return { ...b, threads, mood: mood(b, threads, pending, !!c?.up || !!br?.up), spend: R.weekSpend(b.id), computer: { up: !!c?.up, desktop: !!c?.desktopUp, startedAt: c?.startedAt ?? null, lease: R.leaseHeld(b.id) } };
 }
 const pitRow = (p) => p && { ...p, detail: json(p.detail, {}), jev: json(p.jev, {}) };
 function state() {
@@ -212,7 +213,8 @@ route("POST", "/api/bots/:id/schedules", async (req, res, { id }) => { const b =
 route("PATCH", "/api/schedules/:id", async (req, res, { id }) => { const b = await jbody(req); run("UPDATE schedules SET enabled=? WHERE id=?", b.enabled ? 1 : 0, id); audit("driver", "schedule.toggled", { id, enabled: !!b.enabled }); return { ok: true }; });
 
 // Computers
-route("POST", "/api/bots/:id/computer/start", async (req, res, { id }) => { const b = getBot(id); if (!b) throw A.httpErr(404, "No such crew member"); await R.computer(b).ensure(); return { ok: true }; });
+// Watching needs the desktop, so "start" from the UI boots both stages.
+route("POST", "/api/bots/:id/computer/start", async (req, res, { id }) => { const b = getBot(id); if (!b) throw A.httpErr(404, "No such crew member"); await R.computer(b).desktop(); return { ok: true }; });
 route("POST", "/api/bots/:id/computer/stop", async (req, res, { id }) => { const b = getBot(id); if (b) await R.computer(b).stop(); return { ok: true }; });
 route("POST", "/api/bots/:id/computer/take", (req, res, { id }) => { R.takeControl(id); return { ok: true }; });
 route("POST", "/api/bots/:id/computer/handback", async (req, res, { id }) => { const b = await jbody(req); R.handBack(id, String(b.note || "")); return { ok: true }; });
@@ -235,13 +237,46 @@ route("GET", "/api/export", (req, res) => {
 });
 route("GET", "/api/audit", () => all("SELECT * FROM audit ORDER BY id DESC LIMIT 300"));
 
+// Files view: browse a crew member's workspace on the host's disk (works with the computer off) and diff each turn.
+function workPath(botId, rel) {
+  let base, full;
+  try { base = realpathSync(`${botDir(botId)}/work`); full = realpathSync(join(base, normalize(String(rel || "").replace(/^\/+/, "")))); } catch { return null; }
+  return full === base || full.startsWith(base + "/") ? { base, full } : null;
+}
+route("GET", "/api/bots/:id/fs", (req, res, { id }) => {
+  if (!getBot(id)) throw A.httpErr(404, "No such crew member");
+  const rel = new URL(req.url, "http://x").searchParams.get("path") || "";
+  const w = workPath(id, rel); if (!w) throw A.httpErr(404, "Not found");
+  const st = statSync(w.full);
+  if (st.isDirectory()) {
+    const entries = readdirSync(w.full, { withFileTypes: true }).filter((e) => e.isDirectory() || e.isFile()).map((e) => { let s = null; try { s = statSync(join(w.full, e.name)); } catch {} return { name: e.name, dir: e.isDirectory(), size: s?.size ?? 0, mtime: s?.mtimeMs ?? 0 }; })
+      .sort((a, b) => (b.dir - a.dir) || a.name.localeCompare(b.name)).slice(0, 1000);
+    return { type: "dir", path: w.full.slice(w.base.length + 1), entries };
+  }
+  const out = { type: "file", path: w.full.slice(w.base.length + 1), size: st.size, mtime: st.mtimeMs, image: /\.(png|jpe?g|webp|gif)$/i.test(w.full) };
+  if (!out.image && st.size <= 1 << 20) { const buf = readFileSync(w.full); if (!buf.subarray(0, 8000).includes(0)) out.text = buf.toString("utf8"); }
+  return out;
+});
+route("GET", "/api/bots/:id/changes", (req, res, { id }) => all("SELECT t.id, t.thread_id, t.started_at, t.changes, th.title thread_title FROM turns t JOIN threads th ON th.id=t.thread_id WHERE t.bot_id=? AND t.changes IS NOT NULL ORDER BY t.started_at DESC LIMIT 40", id).map((r) => ({ ...r, changes: json(r.changes, []) })));
+route("GET", "/api/turns/:id/diff", (req, res, { id }) => {
+  const t = one("SELECT bot_id, changes FROM turns WHERE id=?", id); if (!t) throw A.httpErr(404, "No such run");
+  const path = new URL(req.url, "http://x").searchParams.get("path");
+  const c = json(t.changes, []).find((x) => x.path === path); if (!c) throw A.httpErr(404, "Not changed in this run");
+  return { ...c, beforeText: c.before ? objectText(t.bot_id, c.before) : "", afterText: c.after ? objectText(t.bot_id, c.after) : "" };
+});
+
 // Files from a crew member's workspace, served as downloads only (never rendered inline).
 function serveFile(req, res, botId, rel) {
   if (!getBot(botId)) return send(res, 404, "Not found");
   let base, full;
   try { base = realpathSync(`${botDir(botId)}/work`); full = realpathSync(join(base, normalize(decodeURIComponent(rel)))); } catch { return send(res, 404, "Not found"); }
   if (!full.startsWith(base + "/") || !statSync(full).isFile()) return send(res, 404, "Not found");
-  res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Disposition": `attachment; filename="${full.split("/").pop().replace(/[^\w.-]/g, "_")}"`, "X-Content-Type-Options": "nosniff", "Content-Length": statSync(full).size });
+  // Images may render inline (thumbnails); everything else is a download. Inline responses are sandboxed.
+  const IMG = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif" };
+  const inline = new URL(req.url, "http://x").searchParams.get("inline") === "1" && IMG[extname(full).toLowerCase()];
+  res.writeHead(200, inline
+    ? { "Content-Type": inline, "Content-Security-Policy": "sandbox; default-src 'none'", "X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600", "Content-Length": statSync(full).size }
+    : { "Content-Type": "application/octet-stream", "Content-Disposition": `attachment; filename="${full.split("/").pop().replace(/[^\w.-]/g, "_")}"`, "X-Content-Type-Options": "nosniff", "Content-Length": statSync(full).size });
   createReadStream(full).pipe(res);
 }
 
@@ -330,5 +365,7 @@ ensureChief();
 A.ensureSetupToken();
 R.bootRuntime();
 await reapOrphans();
-startIdleSweeper(R.isBusy);
+startIdleSweeper(R.isBusy, R.isThinking);
+startBootSocket(R.computerHooks);
+toolManifest().then((m) => console.log(`tool manifest: ${m.browser.length} browser, ${m.computer.length} pixel`)).catch((e) => console.error("tool manifest failed:", e.message));
 server.listen(PORT, () => console.log(`pitcrew control plane on :${PORT} (${HOST})`));

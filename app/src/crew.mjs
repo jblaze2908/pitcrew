@@ -94,8 +94,8 @@ export function instructions(b, memories) {
     `You are ${b.name}, a member of ${driver}'s Pitcrew: a personal crew of AI agents that get real-life admin and computer work done for ${driver}.`,
     b.job ? `Your job: ${b.job}` : "",
     voiceBlock(b),
-    `You have your own computer: a Linux desktop (1280x800) with Chromium, where ${driver} can watch live. Prefer the "browser" tools (they act on page elements by ref); use the "computer" pixel tools only when a page can't be driven otherwise. The browser keeps its logins between runs.`,
-    `Workspace: /bot/work. Downloads land in /bot/work/downloads. Put files meant for ${driver} in /bot/work/out; they appear in the Library.`,
+    `You have your own computer, started on demand: shell commands and file edits run there, and the browser_* tools drive its Chromium (a 1280x800 desktop ${driver} can watch live). Answer from what you know when no tool is needed; the computer only starts when you run a command or use the browser. Prefer browser_* tools (they act on page elements by ref from browser_snapshot); use computer_* pixel tools only when a page can't be driven otherwise. The browser keeps its logins between runs.`,
+    `Workspace on the computer: /bot/work. Downloads land in /bot/work/downloads. Put files meant for ${driver} in /bot/work/out; they appear in the Library.`,
     `Pit stops: the runtime decides which actions need ${driver}'s approval (sending, paying, signing in, installing, deleting, sharing). You don't ask for approval yourself; just act and the runtime pauses when needed. If an action is declined, do not retry it another way; say what didn't happen.`,
     `When a comparison, table, chart, dashboard or form would help, call render_surface instead of writing a long text table. Forms come back to you as a message with the submitted values.`,
     `When ${driver} tells you a durable fact or preference worth keeping, call remember. Recurring work can be put on a schedule with schedule_task.`,
@@ -104,8 +104,14 @@ export function instructions(b, memories) {
   ].filter(Boolean).join("\n\n");
 }
 
-export function dynamicTools(b) {
-  const tools = [
+// Browser (Playwright over CDP) and pixel tools come from the computer image's own manifest, under their usual names.
+const NO_PAGE_JS = new Set(["browser_evaluate", "browser_run_code_unsafe"]);
+export function dynamicTools(b, manifest = { browser: [], computer: [] }) {
+  const runtime = [
+    ...manifest.browser.filter((x) => !NO_PAGE_JS.has(x.name)).map((x) => ({ type: "function", name: x.name, description: x.description || x.name, inputSchema: x.inputSchema || { type: "object", properties: {} } })),
+    ...manifest.computer.map((x) => ({ type: "function", name: `computer_${x.name}`, description: `${x.description || x.name} (pixel control of the computer's screen)`, inputSchema: x.inputSchema || { type: "object", properties: {} } })),
+  ];
+  const tools = [...runtime,
     { type: "function", name: "render_surface", description: `Show the driver a visual surface in the Pitcrew design system: tables, charts, comparisons, dashboards or forms. Pass {title, root} where root is a component tree ({type, ...props, children?}). Colours are hue tokens only. Components:\n${catalogueDoc()}`,
       inputSchema: { type: "object", properties: { title: { type: "string" }, root: { type: "object" } }, required: ["title", "root"] } },
     { type: "function", name: "remember", description: "Save one durable fact or preference the driver told you (one sentence). Pass id to rewrite an existing memory.",

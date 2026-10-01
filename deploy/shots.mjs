@@ -24,7 +24,7 @@ try {
     for (const p of pages) {
       if (tag === "phone" && !["#/", "#/pitstops"].includes(p) && !p.startsWith("#/t/")) continue;
       await page.goto(`${BASE}/${p}`, { waitUntil: "networkidle" });
-      await page.waitForTimeout(900);
+      await page.waitForTimeout(p.startsWith("#/live") ? 14000 : 900);
       const name = `${tag}-${p.replace(/[^a-z0-9]+/gi, "_").replace(/^_|_$/g, "") || "wall"}.png`;
       await page.screenshot({ path: `/out/${name}`, fullPage: false });
       console.log("shot", name);

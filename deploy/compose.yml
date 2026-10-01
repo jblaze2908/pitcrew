@@ -1,4 +1,4 @@
-# Pitcrew on the host. Only the control plane runs persistently; crew computers are started on demand by it.
+# Pitcrew on the host. Persistent: the control plane and the brain. Crew computers are started on demand by the app.
 name: pitcrew
 services:
   app:
@@ -17,3 +17,32 @@ services:
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
+
+  # Codex app-servers (one per active crew member), the LLM proxy and the exec gateway. No Docker socket,
+  # no workspace mounts, its own network (it can't reach the app's API); it joins a bot's network only while that bot's computer is up.
+  brain:
+    image: pitcrew-brain:1
+    container_name: pitcrew-brain
+    restart: unless-stopped
+    user: "1500:1500"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges]
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+      - /home/crew:size=64m,uid=1500,gid=1500,mode=700
+    mem_limit: 2g
+    pids_limit: 1024
+    networks: [brainnet]
+    volumes:
+      - /srv/pitcrew/brains:/brains
+      - /srv/pitcrew/chatgpt:/auth
+      - /srv/pitcrew/run:/run/pitcrew
+    environment:
+      TZ: Asia/Kolkata
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+networks:
+  brainnet: {}

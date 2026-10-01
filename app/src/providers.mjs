@@ -1,7 +1,7 @@
 // Model providers: OpenRouter and Vercel AI Gateway by key, ChatGPT by device-code sign-in.
 // Keys are write-only: stored encrypted, tested, never returned to the browser.
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, chownSync, unlinkSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, chownSync, chmodSync, unlinkSync, statSync } from "node:fs";
 import { getSecret, putSecret, deleteSecret, secretMeta } from "./auth.mjs";
 import { ROOT, IMAGE, chatgptAuthPath } from "./computer.mjs";
 import { audit } from "./db.mjs";
@@ -106,7 +106,7 @@ const loginState = {
 export function startChatgptLogin() {
   if (loginState.proc) return loginState.public();
   const dir = `${ROOT}/chatgpt`;
-  mkdirSync(dir, { recursive: true }); chownSync(dir, 1500, 1500);
+  mkdirSync(dir, { recursive: true }); chownSync(dir, 1500, 1500); chmodSync(dir, 0o770);
   Object.assign(loginState, { url: null, code: null, status: "starting", error: null, startedAt: Date.now() });
   const proc = spawn("docker", ["run", "-i", "--rm", "--name", "pc-chatgpt-login", "--label", "pitcrew=computer", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
     "--read-only", "--tmpfs", "/tmp", "--tmpfs", "/home/crew:uid=1500,gid=1500", "-e", "CODEX_HOME=/auth", "-v", `${dir}:/auth`, "--entrypoint", "codex", IMAGE, "login", "--device-auth"], { stdio: ["ignore", "pipe", "pipe"] });
@@ -122,7 +122,7 @@ export function startChatgptLogin() {
   const killer = setTimeout(() => proc.kill(), 16 * 60 * 1000);
   proc.on("exit", (code) => {
     clearTimeout(killer); loginState.proc = null;
-    if (code === 0 && existsSync(chatgptAuthPath())) { loginState.status = "connected"; chownSync(chatgptAuthPath(), 1500, 1500); audit("driver", "provider.chatgpt.connected"); }
+    if (code === 0 && existsSync(chatgptAuthPath())) { loginState.status = "connected"; chownSync(chatgptAuthPath(), 1500, 1500); chmodSync(chatgptAuthPath(), 0o660); audit("driver", "provider.chatgpt.connected"); }
     else { loginState.status = "failed"; loginState.error = out.split("\n").filter(Boolean).slice(-2).join(" ").slice(0, 200) || `exit ${code}`; }
   });
   return loginState.public();

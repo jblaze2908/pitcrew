@@ -66,16 +66,36 @@ try {
   const st = await api("GET", "/api/state");
   const chief = st.bots.find((b) => b.kind === "chief");
   check("Crew Chief is built in", !!chief, chief ? `${chief.provider} · ${chief.model}` : "");
-  const { id: th } = await api("POST", "/api/threads", { botId: "chief", title: "E2E · browser form" });
+  // --probe: run the browser chore on a temporary OpenRouter/Claude crew member (retired afterwards), leaving the Chief alone.
+  let botId = "chief";
+  if (process.argv.includes("--probe")) { const b = await api("POST", "/api/hire", { name: "E2E probe", job: "Temporary test crew member", provider: "openrouter", model: "anthropic/claude-sonnet-5.5", weekly_cap_usd: 2 }); botId = b.id; globalThis.probeId = b.id; }
+  const { id: th } = await api("POST", "/api/threads", { botId, title: "E2E · browser form" });
+  globalThis.e2eThreads = [th];
+  const comp = async () => (await api("GET", `/api/bots/${botId}`)).bot.computer;
+  if (process.argv.includes("--probe")) {
+    // Lazy stages: chat needs no computer; a command boots the computer but not the desktop.
+    const r0 = await runAndWait(th, "What is 17 times 3? Answer with just the number, without using any tools.");
+    const c0 = await comp();
+    check("chat-only turn starts no computer", /51/.test(lastAgent(r0.evs)) && !c0.up, `said ${lastAgent(r0.evs).slice(0, 20)} · computer up=${c0.up} · ${r0.secs}s`);
+    const r1s = await runAndWait(th, "Run `uname -n; echo pitcrew > /bot/work/lazy.txt; cat /bot/work/lazy.txt` in the shell and reply with its output.");
+    const c1 = await comp();
+    check("shell turn boots the computer, not the desktop", c1.up && !c1.desktop && /pitcrew/.test(lastAgent(r1s.evs)), `computer up=${c1.up} desktop=${c1.desktop} · ${r1s.secs}s`);
+    const ch = await api("GET", `/api/bots/${botId}/changes`);
+    const lazy = ch.flatMap((r) => r.changes.map((c) => ({ ...c, turn: r.id }))).find((c) => c.path === "lazy.txt");
+    const d = lazy && await api("GET", `/api/turns/${lazy.turn}/diff?path=lazy.txt`);
+    check("Files view recorded the shell's write with a diff", lazy?.status === "added" && /pitcrew/.test(d?.afterText || ""), lazy ? `${lazy.status} ${lazy.path}` : "not recorded");
+  }
 
   // 1. Browser chore on the bot's own computer, gated by jev.
   const r1 = await runAndWait(th, "Using your browser tools: open https://httpbin.org/forms/post, fill Customer name 'Pitcrew v1', choose size Medium, tick Onion, and submit the order. Then read the page and reply with ONLY: custname=<value> size=<value>.");
   const tools = r1.evs.filter((e) => e.kind === "tool");
-  check("computer started and browser tools ran", tools.some((e) => /browser\./.test(e.data.title)), `${tools.length} tool calls in ${r1.secs}s`);
+  check("browser tools ran on the computer", tools.some((e) => e.data.type === "browser"), `${tools.length} tool calls in ${r1.secs}s`);
   check("jev raised a pit stop for the submit", r1.approved.length > 0, r1.approved.join(" | ") || "none");
+  if (process.argv.includes("--probe")) { const c2 = await comp(); check("browser turn booted the desktop", c2.desktop, `desktop=${c2.desktop}`); }
+  check("no page JavaScript used", !tools.some((e) => /evaluate|run_code/.test(e.data.title)), tools.map((e) => e.data.title.split(" ")[0]).join(","));
   check("form submitted, result read back", /custname=Pitcrew v1/i.test(lastAgent(r1.evs)) && /size=medium/i.test(lastAgent(r1.evs)), lastAgent(r1.evs).slice(0, 100));
   const run1 = (await api("GET", "/api/telemetry")).runs.find((r) => r.thread_id === th);
-  check("run recorded with tokens and cost", run1 && run1.input_tokens > 0, run1 ? `${run1.status} in=${run1.input_tokens} out=${run1.output_tokens} cost=$${run1.cost_usd.toFixed(4)} (${run1.cost_basis})` : "missing");
+  check("run recorded with tokens and cost", run1 && run1.input_tokens > 0, run1 ? `${run1.status} in=${run1.input_tokens} cached=${run1.cached_tokens} out=${run1.output_tokens} cost=$${run1.cost_usd.toFixed(4)} (${run1.cost_basis})` : "missing");
 
   if (want("browser")) {
     const gates = db.prepare("SELECT action, data FROM audit WHERE actor='jev' AND ts>? ORDER BY id").all(Date.now() - 20 * 60e3).map((r) => `${r.action} ${JSON.parse(r.data).call?.tool || JSON.parse(r.data).call?.command || ""} [${JSON.parse(r.data).effect}]`);
@@ -129,6 +149,8 @@ try {
 } catch (e) {
   if (!e.done) check("e2e ran to completion", false, e.message);
 } finally {
+  for (const t of globalThis.e2eThreads || []) await api("PATCH", `/api/threads/${t}`, { archived: true }).catch(() => {});
+  if (globalThis.probeId) await api("POST", `/api/bots/${globalThis.probeId}/archive`).catch(() => {});
   db.prepare("DELETE FROM sessions WHERE hash=?").run(hash);
 }
 const failed = results.filter((x) => !x).length;
