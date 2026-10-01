@@ -130,12 +130,12 @@ try {
     check("approving the HIRE created the crew member", !!nb, nb ? `${nb.name} · cap $${nb.weekly_cap_usd}` : "");
   }
 
-  // 4. Live view: WebSocket → VNC handshake through the control plane.
+  // 4. Live view: WebSocket → VNC handshake through the control plane, to a computer the browser chore left running.
   const rfb = await new Promise((resolve) => {
     const s = connect(8330, "127.0.0.1");
     const key = randomBytes(16).toString("base64");
     let got = Buffer.alloc(0), upgraded = false;
-    s.on("connect", () => s.write(`GET /live/chief/ws HTTP/1.1\r\nHost: 127.0.0.1:8330\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Protocol: binary\r\nCookie: pc_s=${token}\r\n\r\n`));
+    s.on("connect", () => s.write(`GET /live/${globalThis.probeId || "chief"}/ws HTTP/1.1\r\nHost: 127.0.0.1:8330\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Protocol: binary\r\nCookie: pc_s=${token}\r\n\r\n`));
     s.on("data", (d) => {
       got = Buffer.concat([got, d]);
       if (!upgraded) { const i = got.indexOf("\r\n\r\n"); if (i < 0) return; if (!/^HTTP\/1.1 101/.test(got.toString())) { s.destroy(); return resolve(got.toString().split("\r\n")[0]); } upgraded = true; got = got.subarray(i + 4); }

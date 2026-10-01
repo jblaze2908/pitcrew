@@ -4,6 +4,7 @@
     "169.254.169.254", "172.17.0.1", "metadata.google.internal", "[fd00:ec2::254]",
     "127.0.0.1:9222", "localhost:9222", "127.0.0.1:7700", "localhost:7700"
   ],
+  "URLAllowlist": ["chrome://top-chrome"],
   "ProxySettings": { "ProxyMode": "pac_script", "ProxyPacMandatory": true },
   "SSLErrorOverrideAllowed": false,
   "SafeBrowsingProtectionLevel": 1,

@@ -159,7 +159,7 @@ export function browserPolicy(botId) {
   const blocked = [...new Set(entries.filter((r) => r.mode === "blocked" && siteFor(botId, r.domain).mode === "blocked").map((r) => r.domain))];
   // A more specific allowed host under a blocked domain (member's own, or global without a global block over it).
   const allowed = entries.filter((r) => r.mode !== "blocked" && !["blocked", "unknown"].includes(siteFor(botId, r.domain).mode) && blocked.some((d) => r.domain.endsWith(`.${d}`))).map((r) => r.domain);
-  return { ...b, URLBlocklist: [...(b.URLBlocklist || []), ...blocked], ...(allowed.length ? { URLAllowlist: [...new Set(allowed)] } : {}) };
+  return { ...b, URLBlocklist: [...(b.URLBlocklist || []), ...blocked], URLAllowlist: [...new Set([...(b.URLAllowlist || []), ...allowed])] };
 }
 export function writeBrowserPolicy(botId) {
   const p = browserPolicy(botId);
