@@ -3,9 +3,9 @@
 import { writeFileSync, chownSync, readFileSync } from "node:fs";
 import { posix } from "node:path";
 import { execFs } from "./execfs.mjs";
-import { one, all, run, now, uid, json, getSetting, setSetting, audit } from "./db.mjs";
+import { one, all, run, now, uid, json, getSetting, setSetting, audit, pruneLabels } from "./db.mjs";
 import { getSecret } from "./auth.mjs";
-import { jev } from "./jev.mjs";
+import { jev, redact } from "./jev.mjs";
 import { getBot, listBots, instructions, dynamicTools, normaliseSpec, createBot } from "./crew.mjs";
 import { brainFor, computerFor, allComputers, allBrains, botDir, ensureDirs, usageLog, toolManifest, PW_OUT } from "./computer.mjs";
 import { providerReady, estimateCost } from "./providers.mjs";
@@ -405,26 +405,34 @@ async function gate(c, threadId, call, pit) {
   if (call.kind === "mcp" && ["browser", "computer"].includes(call.server) && !(await waitLease(b.id, threadId, call))) return false;
   const sig = signature(call), pat = pattern(call);
   const v = await jev(call, { policy: b.policy, apiKey: getSecret("openrouter") || "missing" });
-  if (v.decision === "block") { audit("jev", "gate.block", { threadId, effect: v.effect, reason: v.reason, call: gateSummary(call) }); addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Blocked by jev: ${v.reason}. Nothing ran.`, tone: "bad" }); return false; }
-  if (v.decision === "allow") return logDecision(threadId, v, call);
+  if (v.decision === "block") { logDecision(threadId, b.id, v, call); addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Blocked by jev: ${v.reason}. Nothing ran.`, tone: "bad" }); return false; }
+  if (v.decision === "allow") return logDecision(threadId, b.id, v, call);
   // A standing approval covers repeats of the same action, but never money, deletion or sharing.
   const standing = ruleFor(b.id, threadId, [pat, sig], v.effect === "unknown" ? "ask" : v.effect);
-  if (standing && !["pay", "delete", "share"].includes(v.effect)) return logDecision(threadId, { ...v, decision: "allow", by: `rule:${standing.label}` }, call);
+  if (standing && !["pay", "delete", "share"].includes(v.effect)) return logDecision(threadId, b.id, v, call, { decision: "allow", by: `rule:${standing.label}`, source: "standing" });
   const learned = learnedTrust(b, pat, v);
-  if (learned) return logDecision(threadId, { ...v, decision: "allow", by: `learned:${pat} (${learned.approvals} approvals)` }, call);
-  const decision = await pitStop({ botId: b.id, threadId, kind: pit.kind, effect: v.effect === "unknown" ? "ask" : v.effect, title: pit.title, detail: { ...pit.detail, signature: sig, pattern: pat }, jev: v });
+  if (learned) return logDecision(threadId, b.id, v, call, { decision: "allow", by: `learned:${pat} (${learned.approvals} approvals)`, source: "learned" });
+  // Logged before the pit stop opens, so decide() always finds the label row to fill in.
+  const id = uid("ps");
+  logDecision(threadId, b.id, v, call, { decision: "ask", pitstop: id });
+  const decision = await pitStop({ id, botId: b.id, threadId, kind: pit.kind, effect: v.effect === "unknown" ? "ask" : v.effect, title: pit.title, detail: { ...pit.detail, signature: sig, pattern: pat }, jev: v });
   return decision === "approved";
 }
-// Every gate decision lands in the audit log, so "why did this run without asking?" always has an answer.
-function logDecision(threadId, v, call) {
-  audit("jev", `gate.${v.decision}`, { threadId, effect: v.effect, by: v.by, reason: v.reason, ms: v.ms ?? null, call: gateSummary(call) });
-  bus.emit("jev", { threadId, effect: v.effect, by: v.by, ms: v.ms ?? null });
-  return true;
+// Every gate decision lands in the audit log and jev_labels, so "why did this run without asking?" always has an answer.
+// Per gate call: one redaction walk and two small INSERTs. v is the rules'/jev's verdict; the options are what overrode it.
+const labelSource = (by) => (by === "fail-closed" ? "fail-closed" : /^(jev|judge):/.test(by || "") ? "jev" : "rule");
+export function logDecision(threadId, botId, v, call, { decision = v.decision, by = v.by, source = labelSource(v.by), pitstop = null } = {}) {
+  const safe = redact(call);
+  audit("jev", `gate.${decision}`, { threadId, effect: v.effect, by, reason: v.reason, ms: v.ms ?? null, call: gateSummary(safe), ...(pitstop ? { pitstop } : {}) });
+  const verdict = { effect: v.effect, decision: v.decision, reason: v.reason, by: v.by, model: /^(jev|judge):/.test(v.by || "") ? v.by.replace(/^\w+:/, "") : null, ms: v.ms ?? null, answers: v.answers ?? null, probabilities: v.probabilities ?? null };
+  run("INSERT INTO jev_labels(id,ts,bot_id,thread_id,source,call,verdict,decision,pitstop_id) VALUES(?,?,?,?,?,?,?,?,?)", uid("jl"), now(), botId, threadId ?? null, source,
+    JSON.stringify({ ...safe, host: hostOf(call.arguments?.page_url) || null }), JSON.stringify(verdict), decision, pitstop);
+  if (decision === "allow") bus.emit("jev", { threadId, effect: v.effect, by, ms: v.ms ?? null });
+  return decision === "allow";
 }
 const gateSummary = (c) => (c.kind === "shell" ? { kind: "shell", command: String(c.command).slice(0, 300) } : { kind: c.kind, server: c.server, tool: c.tool, args: JSON.stringify(c.arguments || {}).slice(0, 300) });
 
-export function pitStop({ botId, threadId, kind, effect, title, detail, jev: v = {}, expiresMin = 30 }) {
-  const id = uid("ps");
+export function pitStop({ id = uid("ps"), botId, threadId, kind, effect, title, detail, jev: v = {}, expiresMin = 30 }) {
   run("INSERT INTO pitstops(id,bot_id,thread_id,turn_id,kind,effect,title,detail,jev,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
     id, botId, threadId, threadId ? active.get(threadId)?.turnId ?? null : null, kind, effect, title, JSON.stringify(detail), JSON.stringify(v), now(), now() + expiresMin * 60000);
   if (threadId) { addEvent(threadId, active.get(threadId)?.turnId, "pitstop", { id }); setThreadStatus(threadId, "needs"); }
@@ -454,6 +462,9 @@ export async function decide(id, decision, { scope = "once", note = "", spec = n
   }
   if (detail.pattern && ps.kind !== "hire" && (status === "approved" || status === "denied") && note !== "Kill switch" && learnable(getBot(ps.bot_id)?.policy, ps.effect, json(ps.jev, {}).by)) learn(ps, detail, status);
   run("UPDATE pitstops SET status=?, scope=?, note=?, decided_at=? WHERE id=?", status, scope, String(note).slice(0, 500), now(), id);
+  // A kill-switch denial judges nothing about the call, so it trains as no answer.
+  const label = note === "Kill switch" ? "expired" : status;
+  run("UPDATE jev_labels SET driver_decision=?, driver_scope=? WHERE pitstop_id=?", label, label === "expired" ? null : scope, id);
   audit(status === "expired" ? "system" : "driver", `pitstop.${status}`, { id, scope, title: ps.title });
   bus.emit("pitstop", { id, botId: ps.bot_id, status });
   if (ps.thread_id && active.has(ps.thread_id)) setThreadStatus(ps.thread_id, "running");
@@ -685,7 +696,10 @@ export function addSchedule(botId, threadId, spec, prompt) {
   audit("crew", "schedule.added", { id, botId, spec });
   return one("SELECT * FROM schedules WHERE id=?", id);
 }
+let nextPrune = 0;
 function tickSchedules() {
+  // Rides the schedule tick (30 s) but deletes at most hourly; the ts index keeps it a range scan.
+  if (now() >= nextPrune) { nextPrune = now() + 3600000; pruneLabels(); }
   if (getSetting("paused") === "1") return;
   for (const s of all("SELECT * FROM schedules WHERE enabled=1 AND next_run<=?", now())) {
     run("UPDATE schedules SET last_run=?, next_run=? WHERE id=?", now(), nextRun(s.spec), s.id);
