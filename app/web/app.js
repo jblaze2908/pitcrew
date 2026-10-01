@@ -715,7 +715,7 @@ async function hireView(psId) {
 }
 
 // ---------- settings ----------
-async function settingsView() {
+async function settingsView(tab = "general") {
   const prov = await api("GET", "/api/providers");
   const keyCard = (id, hint) => {
     const p = prov[id];
@@ -736,23 +736,32 @@ async function settingsView() {
   const pollLogin = () => { let n = 0; const t = setInterval(async () => { if (current.name !== "settings" || ++n > 400) return clearInterval(t); const pr = await api("GET", "/api/providers", undefined, { quiet: true }).catch(() => null); const st = pr?.openai?.login?.status; if (st !== "starting") renderView(); if (st !== "starting" && st !== "waiting") clearInterval(t); }, 2500); };
   if (login.status === "waiting" || login.status === "starting") setTimeout(pollLogin, 2500);
 
-  const name = h("input", { value: S.driverName });
-  const defProv = h("select", {}, Object.entries(prov).map(([k, p]) => h("option", { value: k, selected: k === S.defaultProvider }, p.label)));
-  const plain = h("input", { type: "checkbox", checked: S.plainVoice });
+  // Each field saves on change; there is no form to remember to submit.
+  const saveSettings = async (patch) => { S = await api("PATCH", "/api/settings", patch); renderChrome(); toast("Saved"); };
+  const name = h("input", { value: S.driverName, onchange: () => saveSettings({ driverName: name.value }) });
+  const defProv = h("select", { onchange: () => saveSettings({ defaultProvider: defProv.value }) }, Object.entries(prov).map(([k, p]) => h("option", { value: k, selected: k === S.defaultProvider }, p.label)));
+  const plain = h("input", { type: "checkbox", checked: S.plainVoice, onchange: () => saveSettings({ plainVoice: plain.checked }) });
   const theme = h("div", { class: "seg" }, ["dark", "light"].map((t) => h("button", { class: document.documentElement.dataset.theme === t ? "on" : "", onclick: (e) => { document.documentElement.dataset.theme = t; try { localStorage.setItem("pc-theme", t); } catch {} theme.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === e.target)); } }, t)));
   const cur = h("input", { type: "password", placeholder: "Current password", autocomplete: "current-password" }), nxt = h("input", { type: "password", placeholder: "New password (12+)", autocomplete: "new-password" });
-  return h("div", { class: "page" }, h("h1", { class: "pc-h2" }, "Settings"),
-    h("p", { class: "pc-lab" }, "Providers"), h("div", { class: "grid3" }, keyCard("openrouter", "sk-or-…"), keyCard("aigateway", "AI Gateway key"), chatgpt),
-    h("p", { class: "small faint" }, "jev (the pit-stop decider) runs on TypeSafe Jev through your OpenRouter key. Without one, every consequential action becomes a pit stop."),
-    h("p", { class: "pc-lab" }, "You and the crew"),
-    h("div", { class: "grid2" }, h("div", { class: "pc-card col" }, lab("Your name", name), lab("Default provider for new crew members", defProv), h("label", { class: "row small" }, plain, "Plain voice for the whole crew"),
-      h("button", { class: "pc-pill s", onclick: async () => { S = await api("PATCH", "/api/settings", { driverName: name.value, defaultProvider: defProv.value, plainVoice: plain.checked }); renderChrome(); toast("Saved"); } }, "Save")),
-      h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "Appearance"), theme, h("p", { class: "pc-lab" }, "Password"), cur, nxt, h("div", { class: "row" }, h("button", { class: "pc-pill o s", onclick: async () => { await api("POST", "/api/password", { current: cur.value, next: nxt.value }); location.reload(); } }, "Change password"), h("button", { class: "pc-pill o s", onclick: async () => { await api("POST", "/api/logout"); location.reload(); } }, "Sign out")))),
-    h("p", { class: "pc-lab" }, "Sites (whole crew)"), await sitesEditor("global", "Every crew member gets these. A member's own entry wins, except a crew-wide block. Loopback (the crew's own file server) is always allowed; private network addresses never are."),
-    h("p", { class: "pc-lab" }, "Kill switch"),
+  const anyKey = Object.values(prov).some((p) => p.connected);
+  const TABS = [["general", "General"], ["models", "Models and keys", !anyKey], ["sites", "Sites"], ["safety", "Safety", S.paused], ["account", "Account"]];
+  if (!TABS.some(([k]) => k === tab)) tab = "general";
+  const tabs = h("div", { class: "tabs" }, TABS.map(([k, l, dot]) => h("a", { href: `#/settings/${k}`, class: tab === k ? "on" : "" }, l, dot ? h("i", { class: "dot" }) : null)));
+  const body = {
+    general: () => h("div", { class: "pc-card col", style: "max-width:640px" }, lab("Your name", name), lab("Default provider for new crew members", defProv),
+      h("label", { class: "row small" }, plain, "Plain voice for the whole crew"), h("div", { class: "field" }, h("label", {}, "Theme"), theme)),
+    models: () => h("div", { class: "col" }, h("div", { class: "grid3" }, keyCard("openrouter", "sk-or-…"), keyCard("aigateway", "AI Gateway key"), chatgpt),
+      h("p", { class: "small faint" }, "jev (the pit-stop decider) runs on TypeSafe Jev through your OpenRouter key. Without one, every consequential action becomes a pit stop.")),
+    sites: async () => sitesEditor("global", "Every crew member gets these. A member's own entry wins, except a crew-wide block. Loopback (the crew's own file server) is always allowed; private network addresses never are."),
+    safety: () => h("div", { class: "col" },
     h("div", { class: "pc-card spread" }, h("div", { class: "col", style: "gap:4px;flex:1" }, h("b", { class: "pc-h3" }, S.paused ? "The crew is stopped" : "Stop every crew member now"), h("p", { class: "small muted" }, "Interrupts every run, denies every pending pit stop, stops every computer and pauses schedules until you resume.")),
       S.paused ? h("button", { class: "pc-pill", onclick: async () => { S = await api("POST", "/api/resume"); renderChrome(); renderView(); } }, "Resume the crew")
-        : h("button", { class: "pc-pill sig", onclick: async (e) => { if (!confirmInline(e.target, "Stop everything?")) return; const r = await api("POST", "/api/kill"); toast(`Stopped. ${r.inFlight.length} run${r.inFlight.length === 1 ? " was" : "s were"} mid-flight.`); S = await api("GET", "/api/state"); renderChrome(); renderView(); } }, "Stop the crew")));
+        : h("button", { class: "pc-pill sig", onclick: async (e) => { if (!confirmInline(e.target, "Stop everything?")) return; const r = await api("POST", "/api/kill"); toast(`Stopped. ${r.inFlight.length} run${r.inFlight.length === 1 ? " was" : "s were"} mid-flight.`); S = await api("GET", "/api/state"); renderChrome(); renderView(); } }, "Stop the crew")),
+      h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "Pit-stop decider"), h("p", { class: "small" }, prov.openrouter?.connected ? "jev is checking consequential actions through your OpenRouter key." : "jev is off: no OpenRouter key. Every consequential action becomes a pit stop."),
+        h("p", { class: "small faint" }, "What each crew member may do without asking lives on its Profile tab; per-site rules on Sites."))),
+    account: () => h("div", { class: "pc-card col", style: "max-width:520px" }, h("p", { class: "pc-lab" }, "Password"), cur, nxt, h("div", { class: "row" }, h("button", { class: "pc-pill o s", onclick: async () => { await api("POST", "/api/password", { current: cur.value, next: nxt.value }); location.reload(); } }, "Change password"), h("button", { class: "pc-pill o s", onclick: async () => { await api("POST", "/api/logout"); location.reload(); } }, "Sign out"))),
+  }[tab];
+  return h("div", { class: "page" }, h("h1", { class: "pc-h2" }, "Settings"), tabs, await body());
 }
 
 // ---------- live view ----------
