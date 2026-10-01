@@ -37,6 +37,10 @@ CREATE INDEX IF NOT EXISTS pitstops_status ON pitstops(status, created_at);
 CREATE TABLE IF NOT EXISTS rules (
   id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, thread_id TEXT, effect TEXT NOT NULL, match TEXT NOT NULL, label TEXT NOT NULL,
   created_at INTEGER NOT NULL, revoked_at INTEGER);
+CREATE TABLE IF NOT EXISTS learned (
+  bot_id TEXT NOT NULL, pattern TEXT NOT NULL, effect TEXT NOT NULL, label TEXT NOT NULL,
+  approvals INTEGER NOT NULL DEFAULT 0, denials INTEGER NOT NULL DEFAULT 0, streak INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL, PRIMARY KEY (bot_id, pattern, effect));
 CREATE TABLE IF NOT EXISTS memory (
   id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, text TEXT NOT NULL, source TEXT NOT NULL,
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, forgotten_at INTEGER);

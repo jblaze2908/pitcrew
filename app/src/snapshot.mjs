@@ -6,7 +6,8 @@ import { lstatSync, readdirSync, readFileSync, writeFileSync, mkdirSync, existsS
 import { createHash } from "node:crypto";
 import { botDir, ROOT } from "./computer.mjs";
 
-const SKIP = new Set(["node_modules", ".git", ".venv", "venv", "__pycache__", ".next", ".cache", ".turbo", ".pnpm-store", "target"]);
+// .playwright-mcp: browser snapshot files from before they moved to PW_OUT; tool output, not the crew's work.
+const SKIP = new Set(["node_modules", ".git", ".venv", "venv", "__pycache__", ".next", ".cache", ".turbo", ".pnpm-store", "target", ".playwright-mcp"]);
 const MAX_FILES = 5000, MAX_TEXT = 1 << 20;
 const shadow = (id) => `${ROOT}/data/shadow/${id}`;
 const last = new Map(); // bot id → previous manifest, to skip re-hashing unchanged files

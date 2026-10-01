@@ -44,11 +44,14 @@ function mood(b, threads, pending, up) {
   return last === "completed" ? "done" : "idle";
 }
 function botCard(b, pending) {
-  const threads = all("SELECT id,title,status,updated_at,pinned FROM threads WHERE bot_id=? AND archived=0 ORDER BY pinned DESC, updated_at DESC", b.id);
+  const threads = all("SELECT id,title,status,created_at,updated_at,pinned FROM threads WHERE bot_id=? AND archived=0 ORDER BY pinned DESC, updated_at DESC", b.id);
   const c = allComputers().find((x) => x.bot.id === b.id), br = allBrains().find((x) => x.bot.id === b.id);
   return { ...b, threads, mood: mood(b, threads, pending, !!c?.up || !!br?.up), spend: R.weekSpend(b.id), computer: { up: !!c?.up, desktop: !!c?.desktopUp, startedAt: c?.startedAt ?? null, lease: R.leaseHeld(b.id) } };
 }
-const pitRow = (p) => p && { ...p, detail: json(p.detail, {}), jev: json(p.jev, {}) };
+const pitRow = (p) => p && { ...p, detail: json(p.detail, {}), jev: json(p.jev, {}), learn: p.status === "pending" ? R.learnProgress(p) : null };
+const LEARNED = `SELECT l.rowid id, l.*, ${R.LEARN_AFTER} need, b.name bot_name FROM learned l JOIN bots b ON b.id=l.bot_id`;
+// A learned pattern only acts while the member's policy allows its effect; hide the ones a policy change switched off.
+const liveLearned = (rows) => rows.filter((l) => getBot(l.bot_id)?.policy[l.effect] === "allow");
 function state() {
   const pending = all("SELECT * FROM pitstops WHERE status='pending' ORDER BY created_at").map(pitRow);
   const dayStart = (() => { const d = new Date(now() + 330 * 60000); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - 330 * 60000; })();
@@ -133,7 +136,7 @@ route("GET", "/api/bots/:id", (req, res, { id }) => {
   const b = getBot(id); if (!b) throw A.httpErr(404, "No such crew member");
   const pending = all("SELECT * FROM pitstops WHERE status='pending'");
   return { bot: botCard(b, pending), memory: all("SELECT * FROM memory WHERE bot_id=? AND forgotten_at IS NULL ORDER BY created_at DESC", id),
-    schedules: all("SELECT * FROM schedules WHERE bot_id=? ORDER BY created_at DESC", id), rules: all("SELECT * FROM rules WHERE bot_id=? AND revoked_at IS NULL ORDER BY created_at DESC", id) };
+    schedules: all("SELECT * FROM schedules WHERE bot_id=? ORDER BY created_at DESC", id), rules: all("SELECT * FROM rules WHERE bot_id=? AND revoked_at IS NULL ORDER BY created_at DESC", id), learned: liveLearned(all(`${LEARNED} WHERE l.bot_id=? ORDER BY l.updated_at DESC`, id)) };
 });
 route("PATCH", "/api/bots/:id", async (req, res, { id }) => updateBot(id, await jbody(req)));
 route("POST", "/api/bots/:id/archive", (req, res, { id }) => {
@@ -203,6 +206,9 @@ route("POST", "/api/pitstops/batch", async (req) => {
 });
 route("GET", "/api/rules", () => all("SELECT r.*, b.name bot_name FROM rules r JOIN bots b ON b.id=r.bot_id WHERE r.revoked_at IS NULL ORDER BY r.created_at DESC"));
 route("POST", "/api/rules/:id/revoke", (req, res, { id }) => { run("UPDATE rules SET revoked_at=? WHERE id=?", now(), id); audit("driver", "rule.revoked", { id }); return { ok: true }; });
+route("GET", "/api/learned", () => liveLearned(all(`${LEARNED} ORDER BY l.updated_at DESC LIMIT 200`)));
+// "Ask again": the pattern starts over and needs a fresh run of approvals; its history stays for the audit trail.
+route("POST", "/api/learned/:id/reset", (req, res, { id }) => { run("UPDATE learned SET streak=0, updated_at=? WHERE rowid=?", now(), Number(id)); audit("driver", "learned.reset", { id }); return { ok: true }; });
 
 // Memory and schedules
 route("POST", "/api/bots/:id/memory", async (req, res, { id }) => { const b = await jbody(req); const text = String(b.text || "").trim().slice(0, 500); if (!text) throw A.httpErr(400, "Empty"); const mid = uid("me"); run("INSERT INTO memory(id,bot_id,text,source,created_at,updated_at) VALUES(?,?,?,?,?,?)", mid, id, text, "driver", now(), now()); return { id: mid }; });
@@ -229,7 +235,7 @@ route("GET", "/api/library", () => listBots().map((b) => ({ id: b.id, name: b.na
 route("GET", "/api/export", (req, res) => {
   const dump = { exportedAt: new Date().toISOString(), note: "Pitcrew export. Provider keys and auth tokens are never included.",
     settings: all("SELECT key,value FROM settings WHERE key!='password'"), bots: all("SELECT * FROM bots"), threads: all("SELECT * FROM threads"), turns: all("SELECT * FROM turns"),
-    events: all("SELECT * FROM events"), pitstops: all("SELECT * FROM pitstops"), rules: all("SELECT * FROM rules"), memory: all("SELECT * FROM memory"),
+    events: all("SELECT * FROM events"), pitstops: all("SELECT * FROM pitstops"), rules: all("SELECT * FROM rules"), learned: all("SELECT * FROM learned"), memory: all("SELECT * FROM memory"),
     schedules: all("SELECT * FROM schedules"), surfaces: all("SELECT * FROM surfaces"), audit: all("SELECT * FROM audit") };
   audit("driver", "export");
   send(res, 200, JSON.stringify(dump), { "Content-Type": "application/json", "Content-Disposition": `attachment; filename="pitcrew-export-${new Date().toISOString().slice(0, 10)}.json"` });
