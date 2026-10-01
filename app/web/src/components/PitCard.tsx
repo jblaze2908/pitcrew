@@ -1,0 +1,108 @@
+// A pit stop: what the member wants to do, why jev stopped it, and the choices that fit its kind.
+import { useEffect, useState } from "react";
+import type { Personality, PitStop } from "../../../shared/types";
+import { api } from "../lib/api";
+import { ago, usd, when } from "../lib/format";
+import { useStore } from "../lib/store";
+import { toast } from "../lib/toast";
+import { EffectChip, Face } from "./ui";
+
+type Scope = "once" | "thread" | "always" | "site" | "full" | "block";
+
+export function PitCard({ p: given, onDone }: { p: PitStop; onDone?: (r: PitStop) => void }) {
+  const { bot } = useStore();
+  // The decided card replaces itself in place; nothing around it needs a refetch.
+  const [p, setP] = useState(given);
+  useEffect(() => setP(given), [given]);
+  const [note, setNote] = useState("");
+  const b = bot(p.bot_id), d = p.detail || {}, j = p.jev || {};
+  const done = p.status !== "pending";
+  const who = b?.name || "the crew";
+
+  const decide = async (decision: "approve" | "deny", scope?: Scope) => {
+    const r = await api.post<PitStop>(`/api/pitstops/${p.id}/decide`, { decision, scope, note });
+    toast(decision === "approve" ? "Approved" : "Denied");
+    if (r?.id) setP(r);
+    onDone?.(r);
+  };
+  const btn = (label: string, onClick: () => void, sig = false) => <button className={`pc-pill ${sig ? "sig" : "o"} s`} onClick={onClick}>{label}</button>;
+  const openLink = (label: string) => p.thread_id && <a className="small faint" href={`#/t/${p.thread_id}`} style={{ marginLeft: "auto" }}>{label}</a>;
+  const noteInput = <input placeholder="Note for the crew (optional)" className="small" value={note} onChange={(e) => setNote(e.target.value)} />;
+  const noAlways = ["pay", "delete", "share"].includes(p.effect) || p.kind === "hire" || p.kind === "plan";
+
+  const body = p.kind === "command" ? <pre>{String(d.command || "").replace(/^\/bin\/(ba)?sh -l?c /, "")}</pre>
+    : p.kind === "mcp" ? <pre>{`${d.server || ""}.${d.tool || ""}\n${JSON.stringify(d.args || d.message || {}, null, 1).slice(0, 1200)}`}</pre>
+    : p.kind === "file" ? <pre>{(d.paths || []).join("\n")}</pre>
+    : p.kind === "hire" ? <HireSummary s={d.spec || {}} />
+    : p.kind === "site" ? <SiteSummary d={d} /> : null;
+
+  let actions = null;
+  if (!done) {
+    if (p.kind === "hire") actions = <div className="acts"><a className="pc-pill sig s" href={`#/hire/${p.id}`}>Review &amp; hire</a>{btn("Decline", () => decide("deny"))}</div>;
+    else if (p.kind === "lease") actions = <div className="acts">{btn("Hand it back", () => decide("approve", "once"), true)}{btn("Keep control", () => decide("deny"))}<a className="small faint" href={`#/live/${p.bot_id}`} style={{ marginLeft: "auto" }}>Open live view</a></div>;
+    else if (p.kind === "site") actions = <>{noteInput}<div className="acts">
+      {p.thread_id && btn("Allow once (this thread)", () => decide("approve", "thread"))}
+      {btn("Allow site", () => decide("approve", "site"), true)}
+      {btn("Allow site fully", () => decide("approve", "full"))}
+      {btn("Block site", () => decide("deny", "block"))}
+      {openLink("Open thread")}</div></>;
+    else if (p.kind === "plan") actions = <div className="acts">
+      {btn(p.effect === "browse" ? "Allow for this plan" : "Allow", () => decide("approve", "once"), true)}
+      {btn(p.effect === "browse" ? "Use what they know" : "Finish with what it has", () => decide("deny"))}
+      {openLink("Open plan")}</div>;
+    else actions = <>{noteInput}<div className="acts">
+      {btn("Approve once", () => decide("approve", "once"), true)}
+      {p.thread_id && btn("For this thread", () => decide("approve", "thread"))}
+      {!noAlways && btn("Always for this member", () => decide("approve", "always"))}
+      {btn("Deny", () => decide("deny"))}
+      {openLink("Open thread")}</div></>;
+  }
+
+  return (
+    <div className={`pit ${done ? "done" : ""}`}>
+      <div className="spread">
+        <div className="row"><Face b={b} size="sm" mood={done ? "idle" : "needs"} /><b>{b?.name || p.bot_id}</b><EffectChip kind={p.effect} /></div>
+        <span className="pc-m small faint">{done ? `${p.status} ${ago(p.decided_at)}` : `expires ${when(p.expires_at)}`}</span>
+      </div>
+      <p className="t">{p.title}</p>
+      {body}
+      {j.reason && <p className="why">{`jev · ${j.by || ""} · ${j.reason}${j.ms ? ` · ${j.ms} ms` : ""}`}</p>}
+      {!done && p.learn && <p className="small faint">{p.learn.need - p.learn.streak <= 1
+        ? `Approve this and ${who} stops asking for “${p.learn.label}”.`
+        : `Approve “${p.learn.label}” ${p.learn.need - p.learn.streak} times in a row and ${who} stops asking.`}</p>}
+      {actions}
+      {done && p.note && <p className="small faint">{p.note}</p>}
+    </div>
+  );
+}
+
+// A domain pit stop: the exact address, https or not, and any look-alike warning, before the four choices.
+function SiteSummary({ d }: { d: Record<string, any> }) {
+  const warn = d.homograph || d.lookalike;
+  return (
+    <div className="col" style={{ gap: 4 }}>
+      {warn && <p className="badc small">{`Looks like ${d.lookalike?.brand || d.homograph?.brand || "another site"}${d.lookalike?.domain ? ` (${d.lookalike.domain})` : ""}: ${[d.homograph?.why, d.lookalike?.why].filter(Boolean).join("; ")}${d.homograph?.unicode ? `. Shown as ${d.homograph.unicode}` : ""}.`}</p>}
+      <pre>{`${d.url || d.host}\n${d.https ? "https" : "NOT https: anything typed here can be read in transit"}`}</pre>
+      <p className="small faint">Allow site: browse it; other effects follow this member's permissions. Fully: every effect allowed there except paying, which always asks.</p>
+    </div>
+  );
+}
+
+export interface HireSpec {
+  name?: string; job?: string; hue?: string; shape?: string; provider?: string; model?: string; weekly_cap_usd?: number; reason?: string;
+  personality?: Personality; schedule?: { spec?: string; prompt?: string } | null;
+}
+export function HireSummary({ s }: { s: HireSpec }) {
+  return (
+    <div className="row" style={{ gap: 16, alignItems: "flex-start" }}>
+      <Face b={s} size="lg" mood="idle" />
+      <div className="col" style={{ gap: 4 }}>
+        <b className="pc-h3">{s.name}</b>
+        <p className="muted small">{s.job}</p>
+        {s.reason && <p className="small">Why: {s.reason}</p>}
+        <p className="pc-m small faint">{`${s.provider} · ${s.model} · cap ${usd(s.weekly_cap_usd)}/wk${s.schedule?.spec ? ` · ${s.schedule.spec}` : ""}`}</p>
+        {s.personality?.role && <p className="small faint">Voice: {s.personality.role}</p>}
+      </div>
+    </div>
+  );
+}
