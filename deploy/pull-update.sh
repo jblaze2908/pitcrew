@@ -48,8 +48,17 @@ if [[ -z "$deployed_commit" || -z "$prev_computer" ]] || ! docker image inspect 
   computer_tag="$short"
 fi
 
+# The read-only code view (px0) image, rebuilt only when px0/ changed, like the computer.
+prev_code="$(sed -n 's/^PITCREW_CODE_TAG=//p' "$RELEASE" 2>/dev/null || true)"
+code_tag="$prev_code"
+if [[ -z "$deployed_commit" || -z "$prev_code" ]] || ! docker image inspect "pitcrew-px0:$prev_code" >/dev/null 2>&1 \
+   || ! git diff --quiet "$deployed_commit" "$target_commit" -- px0/; then
+  code_tag="$short"
+fi
+
 # Build everything before touching the running stack, so a broken build never takes the app down.
 if [[ "$computer_tag" == "$short" ]]; then docker build -q -t "pitcrew-computer:$short" computer >/dev/null || reject "computer image build failed"; fi
+if [[ "$code_tag" == "$short" ]]; then docker build -q -t "pitcrew-px0:$short" px0 >/dev/null || reject "code view image build failed"; fi
 docker build -q --build-arg COMPUTER_IMAGE="pitcrew-computer:$computer_tag" -t "pitcrew-brain:$short" brain >/dev/null || reject "brain image build failed"
 docker build -q --build-arg COMPUTER_IMAGE="pitcrew-computer:$computer_tag" -t "pitcrew-app:$short" app >/dev/null || reject "app image build failed"
 
@@ -61,7 +70,7 @@ if running; then
 fi
 
 next="$STATE_DIR/next.env"
-printf 'PITCREW_TAG=%s\nPITCREW_COMPUTER_TAG=%s\n' "$short" "$computer_tag" >"$next"
+printf 'PITCREW_TAG=%s\nPITCREW_COMPUTER_TAG=%s\nPITCREW_CODE_TAG=%s\n' "$short" "$computer_tag" "$code_tag" >"$next"
 healthy() { for _ in {1..30}; do curl --fail --silent -m 5 "$HEALTH_URL" >/dev/null && return 0; sleep 3; done; return 1; }
 rollback() {
   echo "Rolling back to $(cat "$RELEASE" 2>/dev/null | tr '\n' ' ')" >&2
@@ -74,9 +83,9 @@ mv "$next" "$RELEASE"
 git branch --force deployed "$target_commit"
 rm -f "$STATE_DIR/failed-commit"
 # Keep the last three releases' images for rollback.
-for repo in pitcrew-app pitcrew-brain pitcrew-computer; do
+for repo in pitcrew-app pitcrew-brain pitcrew-computer pitcrew-px0; do
   keep="$(grep -h "TAG=" "$RELEASE" | cut -d= -f2 | sort -u | tr '\n' '|')"
   docker image ls "$repo" --format '{{.Tag}} {{.CreatedAt}}' | sort -k2 -r | awk '{print $1}' | tail -n +4 | grep -Ev "^(${keep%|})$" | xargs -r -I{} docker image rm "$repo:{}" >/dev/null 2>&1 || true
 done
 notify "✅ deployed $short"
-echo "deployed $short (computer $computer_tag)"
+echo "deployed $short (computer $computer_tag, code view $code_tag)"

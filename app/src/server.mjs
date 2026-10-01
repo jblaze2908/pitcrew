@@ -10,6 +10,7 @@ import * as P from "./providers.mjs";
 import * as R from "./runtime.mjs";
 import { getBot, listBots, ensureChief, updateBot, normaliseSpec, createBot } from "./crew.mjs";
 import { objectText } from "./snapshot.mjs";
+import { listProjects, openProject, proxyCode, startCodeSweeper, reapCode } from "./code.mjs";
 import { botDir, listFiles, reapOrphans, startIdleSweeper, allComputers, allBrains, startBootSocket, toolManifest } from "./computer.mjs";
 
 const PORT = Number(process.env.PORT || 8330);
@@ -153,6 +154,8 @@ route("POST", "/api/threads", async (req) => {
   return { id };
 });
 route("GET", "/api/threads/:id", (req, res, { id }) => threadView(id));
+route("GET", "/api/bots/:id/projects", (req, res, { id }) => { if (!getBot(id)) throw A.httpErr(404, "No such crew member"); return listProjects(id); });
+route("POST", "/api/bots/:id/projects/open", async (req, res, { id }) => { if (!getBot(id)) throw A.httpErr(404, "No such crew member"); const b = await jbody(req); const r = await openProject(id, String(b.path || "")); audit("driver", "code.opened", { botId: id, path: r.project.path }); return r; });
 route("GET", "/api/bots/:id/threads", (req, res, { id }) => { if (!getBot(id)) throw A.httpErr(404, "No such crew member"); return R.findThreads(id, new URL(req.url, "http://x").searchParams.get("q") || "", { limit: 30 }); });
 route("PATCH", "/api/threads/:id", async (req, res, { id }) => {
   const b = await jbody(req);
@@ -307,6 +310,7 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
   try {
     if (url.pathname === "/healthz") return send(res, 200, "ok");
+    if (url.pathname.startsWith("/code/")) return proxyCode(req, res); // token-authed, sandboxed: see code.mjs
     const fm = /^\/files\/([\w-]+)\/(.+)$/.exec(url.pathname);
     if (fm) return authed(req) ? serveFile(req, res, fm[1], fm[2]) : send(res, 401, "Sign in");
     if (!url.pathname.startsWith("/api/")) return serveStatic(req, res, url.pathname);
@@ -372,6 +376,8 @@ ensureChief();
 A.ensureSetupToken();
 R.bootRuntime();
 await reapOrphans();
+await reapCode();
+startCodeSweeper();
 startIdleSweeper(R.isBusy, R.isThinking);
 startBootSocket(R.computerHooks);
 toolManifest().then((m) => console.log(`tool manifest: ${m.browser.length} browser, ${m.computer.length} pixel`)).catch((e) => console.error("tool manifest failed:", e.message));

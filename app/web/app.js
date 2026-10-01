@@ -228,7 +228,11 @@ async function crewView(id, tab = "threads", ...rest) {
       h("thead", {}, h("tr", {}, h("th", {}, "Thread"), h("th", { class: "num" }, "Created"), h("th", { class: "num" }, "Last active"))), tbody)))
       : h("div", { class: "pc-card tight" }, h("p", { class: "empty" }, "No threads yet."));
   }
-  else if (tab === "files") body = await filesView(b, ...rest);
+  else if (tab === "files") {
+    const projects = rest[0] === "projects";
+    const seg = h("div", { class: "seg" }, h("a", { class: projects ? "" : "on", href: `#/crew/${id}/files` }, "Files"), h("a", { class: projects ? "on" : "", href: `#/crew/${id}/files/projects` }, "Projects"));
+    body = h("div", { class: "col" }, seg, projects ? await projectsView(b, rest[1]) : await filesView(b, ...rest));
+  }
   else if (tab === "computer") body = computerCard(b);
   else if (tab === "profile") body = await profileEditor(b);
   else if (tab === "memory") body = memoryEditor(b, d.memory);
@@ -661,6 +665,23 @@ async function liveView(id) {
   threadHook = (type, x) => { if (type === "lease" && x.botId === id) { held = x.held; paint(); } prevHook(type, x); };
   window.addEventListener("hashchange", () => { rfb?.disconnect(); rfb = null; }, { once: true });
   return page;
+}
+
+// ---------- projects (read-only code view) ----------
+// px0 runs per project in its own read-only container; the frame is sandboxed, so it never shares Pitcrew's origin.
+async function projectsView(b, encPath) {
+  const list = await api("GET", `/api/bots/${b.id}/projects`);
+  if (!list.length) return h("div", { class: "pc-card" }, h("p", { class: "empty" }, `No code projects in ${b.name}'s workspace yet. A folder with .git, package.json, go.mod, pyproject.toml or similar shows up here.`));
+  const path = encPath ? decodeURIComponent(encPath) : list[0].path;
+  const sel = h("select", { class: "projsel" }, list.map((p) => h("option", { value: p.path, selected: p.path === path }, `${p.path}${p.git ? " · git" : ""}`)));
+  sel.addEventListener("change", () => (location.hash = `#/crew/${b.id}/files/projects/${encodeURIComponent(sel.value)}`));
+  const frame = h("iframe", { class: "codeview", sandbox: "allow-scripts allow-popups allow-downloads", referrerpolicy: "no-referrer", title: `${path}, read-only` });
+  const status = h("span", { class: "small faint" }, "Starting the code view…");
+  const newTab = h("a", { class: "small hidden", target: "_blank", rel: "noopener noreferrer" }, "Open in a new tab");
+  api("POST", `/api/bots/${b.id}/projects/open`, { path }, { quiet: true })
+    .then((r) => { frame.src = r.url; newTab.href = r.url; newTab.classList.remove("hidden"); status.textContent = ""; })
+    .catch((e) => { status.textContent = e.message; status.className = "small badc"; });
+  return h("div", { class: "col" }, h("div", { class: "row" }, sel, h("span", { class: "pc-chip ok" }, "read-only"), status, h("span", { style: "flex:1" }), newTab), frame);
 }
 
 // ---------- docked live view ----------

@@ -127,3 +127,14 @@ test("find_threads ranks own threads by title and transcript, never another memb
   assert.deepEqual(R.findThreads("b_find", "bescom", { exclude: "t_bill" }).map((t) => t.id), []);
 });
 
+test("code view allows px0's reads and refuses every write", async () => {
+  const { allowed, listProjects } = await import("../app/src/code.mjs");
+  for (const [m, p] of [["GET", ""], ["GET", "static/app.js"], ["GET", "api/tree"], ["GET", "api/file"], ["GET", "api/stream"], ["GET", "api/git/log"], ["POST", "api/session"], ["HEAD", ""]]) assert.equal(allowed(m, p), true, `${m} ${p}`);
+  for (const [m, p] of [["POST", "api/git/commit"], ["POST", "api/git/push"], ["POST", "api/git/stage"], ["POST", "api/git/pull"], ["POST", "api/agent/edit"], ["POST", "api/settings"], ["POST", "api/lsp/install"], ["GET", "api/lsp/setup"], ["POST", "api/pr/submit"], ["GET", "static/../api/git/push"], ["PUT", "api/session"]])
+    assert.equal(allowed(m, p), false, `${m} ${p}`);
+  const w = `${root}/bots/b_code/work`;
+  mkdirSync(`${w}/rent-split/.git`, { recursive: true }); mkdirSync(`${w}/rent-split/node_modules/x`, { recursive: true }); writeFileSync(`${w}/rent-split/node_modules/x/package.json`, "{}");
+  mkdirSync(`${w}/out`, { recursive: true }); writeFileSync(`${w}/out/notes.md`, "hi");
+  mkdirSync(`${w}/tools/scraper`, { recursive: true }); writeFileSync(`${w}/tools/scraper/pyproject.toml`, "");
+  assert.deepEqual(listProjects("b_code").map((p) => p.path).sort(), ["rent-split", "tools/scraper"]);
+});

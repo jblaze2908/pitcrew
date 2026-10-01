@@ -16,6 +16,7 @@ services:
       PITCREW_HOST: pitcrew.example.com
       PITCREW_MAX_COMPUTERS: "3"
       PITCREW_COMPUTER_IMAGE: pitcrew-computer:${PITCREW_COMPUTER_TAG:-1}
+      PITCREW_CODE_IMAGE: pitcrew-px0:${PITCREW_CODE_TAG:-1}
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }

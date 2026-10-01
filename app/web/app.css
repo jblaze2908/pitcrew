@@ -125,6 +125,8 @@ main{overflow:auto;min-width:0}
 .seg{display:inline-flex;border-radius:99px;box-shadow:inset 0 0 0 1px var(--line-2);padding:3px;gap:2px}
 .seg button{height:26px;padding:0 12px;border-radius:99px;font:500 12px/1 var(--font-body);color:var(--ink-2)}
 .seg button.on{background:var(--btn);color:var(--on-btn)}
+.seg a{display:inline-flex;align-items:center;height:26px;padding:0 12px;border-radius:99px;font:500 12px/1 var(--font-body);color:var(--ink-2)}
+.seg a.on{background:var(--btn);color:var(--on-btn)}
 
 /* Files and diffs */
 .files{display:grid;grid-template-columns:300px minmax(0,1fr);gap:16px;align-items:start}
@@ -261,3 +263,7 @@ svg text{fill:var(--ink-3);font:10px var(--font-data)}
 .dock .bar{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line)}
 .dock .vnc{aspect-ratio:16/10;background:var(--ground-deep)}
 @media (max-width:640px){.dock{left:16px;right:16px;bottom:16px;width:auto}}
+/* read-only code view */
+.projsel{width:auto;min-width:220px}
+.codeview{width:100%;height:calc(100vh - 300px);min-height:420px;border:1px solid var(--line-2);border-radius:var(--radius-sm);background:#0d0d10}
+.col>.seg{align-self:flex-start}
