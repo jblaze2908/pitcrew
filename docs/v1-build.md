@@ -28,6 +28,10 @@ Built: single-user auth (setup token → password), providers (OpenRouter key, A
 
 Not in this build (next): email/calendar integrations (need OAuth apps; any hosted MCP connector works meanwhile), incidents grouping, egress allowlist, recipes, phone PWA push.
 
+## Deploys
+
+Pull-based, like Draft: `pitcrew.timer` on the host runs `deploy/pull-update.sh` every 2 minutes from `/opt/pitcrew`, using a read-only deploy key. A merge to main is live within ~2–3 minutes. Each release is per-commit images; a failed health check rolls back to the previous images. CI (`.github/workflows/ci.yml`) runs syntax checks and unit tests.
+
 ## v1.1 — brain / computer split (2026-10-01)
 
 Jai's direction: not every task needs a computer. Anything that needs a runtime (bash, code, browser) takes the computer; everything else must not boot one.
