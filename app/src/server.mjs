@@ -152,7 +152,7 @@ route("POST", "/api/threads", async (req) => {
   const id = uid("th"); run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES(?,?,?,?,?)", id, b.botId, String(b.title || "New thread").slice(0, 120), now(), now());
   return { id };
 });
-route("GET", "/api/threads/:id", (req, res, { id }) => threadView(id));
+route("GET", "/api/threads/:id", (req, res, { id }) => { const v = threadView(id); R.prewarmBrain(id); return v; });
 route("GET", "/api/bots/:id/projects", (req, res, { id }) => { if (!getBot(id)) throw A.httpErr(404, "No such crew member"); return listProjects(id); });
 route("POST", "/api/bots/:id/projects/open", async (req, res, { id }) => { if (!getBot(id)) throw A.httpErr(404, "No such crew member"); const b = await jbody(req); const r = await openProject(id, String(b.path || "")); audit("driver", "code.opened", { botId: id, path: r.project.path }); return r; });
 route("GET", "/api/bots/:id/threads", (req, res, { id }) => { if (!getBot(id)) throw A.httpErr(404, "No such crew member"); return R.findThreads(id, new URL(req.url, "http://x").searchParams.get("q") || "", { limit: 30 }); });

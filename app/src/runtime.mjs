@@ -97,6 +97,7 @@ const brainHooks = {
 export const computerHooks = {
   isBusy,
   getBot,
+  paused: () => getSetting("paused") === "1",
   onState: (c) => {
     bus.emit("computer", { botId: c.bot.id, up: c.up, desktop: c.desktopUp, startedAt: c.startedAt });
     // The desktop the driver held is gone; a lease on it would block the crew with no screen to hand back from.
@@ -155,6 +156,8 @@ async function startTurn(threadId, text, attachments, trigger) {
   if (getSetting("paused") === "1") throw new Error("The crew is stopped (kill switch). Resume the crew in Settings first.");
   if (weekSpend(b.id) >= b.weekly_cap_usd) throw new Error(`${b.name} has reached this week's cap ($${b.weekly_cap_usd.toFixed(2)}). Raise the cap to continue.`);
   if (!providerReady(b.provider)) throw new Error(`${b.name} uses ${b.provider === "openai" ? "the ChatGPT plan" : b.provider}, which isn't connected. Add it in Settings → Providers.`);
+  const warm = warmPlan(threadId);
+  if (warm) computer(b).prewarm(warm.desktop);
   const turnId = uid("tu");
   active.set(threadId, { turnId, codexTurnId: null, base: null, total: null, last: null, usageFrom: logSize(b.id) });
   run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,provider,model,started_at) VALUES(?,?,?,?,?,?,?,?)", turnId, threadId, b.id, "starting", trigger, b.provider, b.model, now());
@@ -174,13 +177,19 @@ async function startTurn(threadId, text, attachments, trigger) {
       await c.request("thread/resume", { threadId: codexId, ...common, sandbox: "danger-full-access", approvalPolicy: "untrusted", excludeTurns: true }, 120000);
       c.loaded.add(codexId);
     }
+    // Developer instructions reach Codex only at start/resume (which just sent the current list); memories saved since
+    // go in as turn context, persisted in the thread's history.
+    if (!c.mems.has(codexId)) c.mems.set(codexId, memMap(mems));
+    const memDelta = memoryDelta(c.mems.get(codexId), mems);
     byCodex.set(codexId, threadId);
     const a0 = active.get(threadId);
     if (a0) try { a0.snap = snapshot(b.id); } catch {}
     const carry = getThread(threadId).carry;
     if (carry) run("UPDATE threads SET carry=NULL WHERE id=?", threadId);
     // Every turn names the computer environment, so commands never run in the brain itself.
-    const r = await c.request("turn/start", { threadId: codexId, environments: ENVS, input: toInput(b.id, carry ? `${carry}\n\n---\n\n${text}` : text, attachments), responsesapiClientMetadata: { pitcrew_turn: turnId } }, 120000);
+    const r = await c.request("turn/start", { threadId: codexId, environments: ENVS, input: toInput(b.id, carry ? `${carry}\n\n---\n\n${text}` : text, attachments), responsesapiClientMetadata: { pitcrew_turn: turnId },
+      ...(memDelta ? { additionalContext: { pitcrew_memory: { kind: "application", value: memDelta } } } : {}) }, 120000);
+    if (memDelta) c.mems.set(codexId, memMap(mems));
     const a = active.get(threadId);
     if (a) a.codexTurnId = r.turn.id;
     run("UPDATE turns SET codex_turn_id=?, status='running' WHERE id=?", r.turn.id, turnId);
@@ -188,6 +197,34 @@ async function startTurn(threadId, text, attachments, trigger) {
     finishTurn(threadId, "failed", e.message);
     throw Object.assign(new Error(e.message), { silent: true });
   }
+}
+
+const memMap = (mems) => new Map(mems.map((m) => [m.id, m.text]));
+// What changed in a member's memory since this thread was last told, or null. Rendered by Codex as a developer
+// message (<pitcrew_memory>) at that point in the thread, so the cached prefix stays intact.
+export function memoryDelta(seen, mems) {
+  if (!seen) return null;
+  const changed = mems.filter((m) => seen.get(m.id) !== m.text).map((m) => `- [${m.id}] ${m.text}`);
+  const ids = new Set(mems.map((m) => m.id)), gone = [...seen.keys()].filter((id) => !ids.has(id));
+  if (!changed.length && !gone.length) return null;
+  return [`Your memory changed since this thread was told (this replaces older entries with the same id):`, ...changed, ...(gone.length ? [`Forgotten: ${gone.map((id) => `[${id}]`).join(", ")}`] : [])].join("\n");
+}
+
+// Which stage of the computer the next turn likely needs, from the thread's last 3 turns: stage 1 (exec-server, ~20 MiB)
+// if any ran a command or used the browser/screen, the desktop (~470 MiB) only if the last one did. One indexed query per turn.
+const EXEC_TOOLS = new Set(["commandExecution", "browser", "computer"]);
+export function warmPlan(threadId) {
+  const recent = all("SELECT id FROM turns WHERE thread_id=? ORDER BY started_at DESC LIMIT 3", threadId).map((t) => t.id);
+  if (!recent.length) return null;
+  const used = all(`SELECT turn_id, json_extract(data,'$.type') type FROM events WHERE thread_id=? AND kind='tool' AND turn_id IN (${recent.map(() => "?").join(",")})`, threadId, ...recent);
+  if (!used.some((u) => EXEC_TOOLS.has(u.type))) return null;
+  return { desktop: used.some((u) => u.turn_id === recent[0] && (u.type === "browser" || u.type === "computer")) };
+}
+
+// Opening a thread in the UI starts its member's brain (~0.3-0.6 s cold), so the first message doesn't wait on it.
+export function prewarmBrain(threadId) {
+  const t = getThread(threadId), b = t && getBot(t.bot_id);
+  if (b && !b.archived && getSetting("paused") !== "1") brain(b).prewarm();
 }
 
 async function finishTurn(threadId, status, error) {
@@ -554,13 +591,16 @@ async function dynamicTool(c, threadId, p) {
     case "remember": {
       const text = String(a.text || "").trim().slice(0, 500);
       if (!text) return say("Nothing to remember", false);
-      if (a.id && one("SELECT 1 FROM memory WHERE id=? AND bot_id=?", a.id, b.id)) run("UPDATE memory SET text=?, updated_at=? WHERE id=?", text, now(), a.id);
-      else run("INSERT INTO memory(id,bot_id,text,source,created_at,updated_at) VALUES(?,?,?,?,?,?)", uid("me"), b.id, text, `thread:${threadId}`, now(), now());
+      const id = a.id && one("SELECT 1 FROM memory WHERE id=? AND bot_id=?", a.id, b.id) ? a.id : uid("me");
+      if (id === a.id) run("UPDATE memory SET text=?, updated_at=? WHERE id=?", text, now(), id);
+      else run("INSERT INTO memory(id,bot_id,text,source,created_at,updated_at) VALUES(?,?,?,?,?,?)", id, b.id, text, `thread:${threadId}`, now(), now());
+      c.mems.get(p.threadId)?.set(id, text); // this thread already knows; other threads get it on their next turn
       addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Remembered: ${text}` });
-      return say("Saved.");
+      return say(`Saved as [${id}].`);
     }
     case "forget": {
       run("UPDATE memory SET forgotten_at=? WHERE id=? AND bot_id=?", now(), String(a.id), b.id);
+      c.mems.get(p.threadId)?.delete(String(a.id));
       return say("Forgotten.");
     }
     case "schedule_task": {

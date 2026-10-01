@@ -15,6 +15,7 @@ import { execFs } from "./execfs.mjs";
 export const ROOT = process.env.PITCREW_ROOT || "/srv/pitcrew";
 export const IMAGE = process.env.PITCREW_COMPUTER_IMAGE || "pitcrew-computer:1";
 const BRAIN = process.env.PITCREW_BRAIN_CONTAINER || "pitcrew-brain";
+const CODEX_BIN = "/opt/pitcrew/brain/codex"; // brain/Dockerfile links it to the native binary
 const CREW_UID = 1500;
 const MAX_UP = Number(process.env.PITCREW_MAX_COMPUTERS || 3);
 const IDLE_MS = Number(process.env.PITCREW_IDLE_MS || 10 * 60 * 1000);
@@ -65,9 +66,12 @@ function writeBrainConfig(b) {
     // With ChatGPT auth, Codex pulls the account's apps and plugins (Gmail, Drive…) into every thread: ~100k tokens of
     // tools per request (measured 2026-10-01) and authority no crew member was granted. Pitcrew supplies browser and
     // computer tools itself, behind jev.
+    // Built-ins Pitcrew never serves: goal tools, request_user_input (answered "unhandled") and the skills catalogue.
+    // ~7 KB less per model request (measured 2026-10-01, codex 0.156.1, keys checked with --strict-config).
     `[features]`, ...["apps", "plugins", "remote_plugin", "plugin_sharing", "recommended_plugins", "tool_suggest", "skill_mcp_dependency_install",
-      "browser_use", "browser_use_external", "browser_use_full_cdp_access", "computer_use", "in_app_browser", "image_generation", "multi_agent", "realtime_conversation"].map((f) => `${f} = false`),
+      "browser_use", "browser_use_external", "browser_use_full_cdp_access", "computer_use", "in_app_browser", "image_generation", "multi_agent", "realtime_conversation", "goals"].map((f) => `${f} = false`),
     `tool_call_mcp_elicitation = true`, ``,
+    `[skills]`, `include_instructions = false`, ``, `[tools.experimental_request_user_input]`, `enabled = false`, ``,
     // Model traffic goes through the brain's loopback proxy: Anthropic prompt caching + billed-cost tap.
     `[model_providers.openrouter]`, `name = "OpenRouter"`, `base_url = "http://127.0.0.1:8788/${b.id}/openrouter"`, `env_key = "OPENROUTER_API_KEY"`, `wire_api = "responses"`, ``,
     `[model_providers.aigateway]`, `name = "Vercel AI Gateway"`, `base_url = "http://127.0.0.1:8788/${b.id}/aigateway"`, `env_key = "AI_GATEWAY_API_KEY"`, `wire_api = "responses"`, ``,
@@ -143,13 +147,16 @@ class Rpc {
 
 // ---------- brain session (one Codex app-server per crew member) ----------
 export class Brain {
-  constructor(bot, hooks) { this.bot = bot; this.hooks = hooks; this.rpc = null; this.ready = null; this.loaded = new Set(); this.lastActive = Date.now(); }
+  // mems: codex thread id → Map(memory id → text) that thread has been told, so a turn can pass only what changed.
+  constructor(bot, hooks) { this.bot = bot; this.hooks = hooks; this.rpc = null; this.ready = null; this.loaded = new Set(); this.mems = new Map(); this.lastActive = Date.now(); }
   get up() { return !!this.rpc && !this.rpc.closed; }
   ensure() {
     this.lastActive = Date.now();
     if (!this.ready) this.ready = this.#start().catch((e) => { this.ready = null; throw e; });
     return this.ready;
   }
+  // Starts a stopped brain without refreshing a running one's idle clock (the thread view calls this on every open).
+  prewarm() { if (!this.ready) this.ensure().catch(() => {}); }
   async #start() {
     const b = this.bot, uid = ensureBrainDir(b);
     ensureDirs(b.id); writeBrainConfig(b); linkChatgpt(b.id);
@@ -158,12 +165,13 @@ export class Brain {
     put("OPENROUTER_API_KEY", getSecret("openrouter")); put("AI_GATEWAY_API_KEY", getSecret("aigateway"));
     for (const m of b.mcp || []) if (m.tokenSecret) put("MCP_TOKEN_" + m.name.toUpperCase().replace(/-/g, "_"), getSecret(m.tokenSecret));
     // Keys reach the brain as `-e NAME` read from this process's env, never on the command line; computers never get them.
-    const proc = spawn("docker", ["exec", "-i", "--user", `${uid}:${CREW_UID}`, "-w", `/brains/${b.id}`, ...envArgs, BRAIN, "codex", "app-server"], { stdio: ["pipe", "pipe", "pipe"], env });
+    // The native binary, not npm's node wrapper: ~45 ms and ~47 MB RSS less per member. The image sets the wrapper's env.
+    const proc = spawn("docker", ["exec", "-i", "--user", `${uid}:${CREW_UID}`, "-w", `/brains/${b.id}`, ...envArgs, BRAIN, CODEX_BIN, "app-server"], { stdio: ["pipe", "pipe", "pipe"], env });
     this.rpc = new Rpc(proc, {
       name: "brain",
       onRequest: (m, p) => { this.lastActive = Date.now(); return this.hooks.onRequest(this, m, p); },
       onNotify: (m, p) => { this.lastActive = Date.now(); this.hooks.onNotify(this, m, p); },
-      onExit: (code, tail) => { this.rpc = null; this.ready = null; this.loaded.clear(); reclaimChatgpt(b.id); this.hooks.onBrainExit?.(this, code, tail); },
+      onExit: (code, tail) => { this.rpc = null; this.ready = null; this.loaded.clear(); this.mems.clear(); reclaimChatgpt(b.id); this.hooks.onBrainExit?.(this, code, tail); },
     });
     await this.rpc.request("initialize", { clientInfo: { name: "pitcrew", title: "Pitcrew", version: "1.1" }, capabilities: { experimentalApi: true, requestAttestation: false } }, 60000);
     this.rpc.notify("initialized", {});
@@ -215,6 +223,12 @@ export class Computer {
       docker(["network", "disconnect", `pc-net-${this.bot.id}`, BRAIN]);
       this.hooks.onState?.(this);
     });
+  }
+  // Speculative boot at turn start, alongside the first model request. Only into a free slot: it never evicts another
+  // member's computer, and a kill switch thrown while it boots stops it again.
+  prewarm(desktop) {
+    if (this.ready || allComputers().filter((c) => c !== this && c.ready).length >= MAX_UP) return;
+    this.ensure().then(() => (this.hooks.paused?.() ? this.stop() : desktop && this.desktop())).catch(() => {});
   }
   async desktop() {
     await this.ensure(); this.touch();
@@ -271,20 +285,29 @@ export function startBootSocket(hooks) {
   try { unlinkSync(path); } catch {}
   createServer((s) => {
     let buf = "";
-    s.on("error", () => {});
-    s.on("data", async (d) => {
-      buf += d; const i = buf.indexOf("\n"); if (i < 0) return;
-      let msg; try { msg = JSON.parse(buf.slice(0, i)); } catch { return s.end('{"ok":false,"error":"bad request"}\n'); }
-      if (msg.op === "info") return s.end(JSON.stringify({ ok: true, info: (await toolManifest().catch(() => ({}))).execInfo || null }) + "\n");
-      const bot = hooks.getBot(msg.bot);
-      if (!bot) return s.end('{"ok":false,"error":"no such crew member"}\n');
-      const c = computerFor(bot, hooks);
-      if (msg.op === "touch") { c.touch(); return s.end('{"ok":true}\n'); }
-      if (msg.op === "fs") { let r; try { r = execFs(bot.id, String(msg.method), msg.params || {}); } catch { r = { fallback: true }; } if (c.up) c.touch(); return s.end(JSON.stringify(r) + "\n"); }
-      try { const t0 = Date.now(), was = c.up; await c.ensure(); hooks.onComputerBoot?.(bot.id); s.end(JSON.stringify({ ok: true, host: c.name, bootMs: was ? 0 : Date.now() - t0 }) + "\n"); }
-      catch (e) { s.end(JSON.stringify({ ok: false, error: e.message }) + "\n"); }
+    s.setEncoding("utf8"); s.on("error", () => {});
+    // A request with an `id` keeps the connection open and its reply carries the id (the gateway's one persistent
+    // connection, so per-turn fs probes skip a connect each); without one, reply and close.
+    const reply = (msg, r) => (msg?.id !== undefined ? s.write(JSON.stringify({ ...r, id: msg.id }) + "\n") : s.end(JSON.stringify(r) + "\n"));
+    s.on("data", (d) => {
+      buf += d; let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i); buf = buf.slice(i + 1);
+        let msg; try { msg = JSON.parse(line); } catch { s.end('{"ok":false,"error":"bad request"}\n'); return; }
+        bootOp(hooks, msg).then((r) => { if (!s.destroyed) reply(msg, r); });
+      }
     });
   }).listen(path, () => chmodSync(path, 0o666));
+}
+async function bootOp(hooks, msg) {
+  if (msg.op === "info") return { ok: true, info: (await toolManifest().catch(() => ({}))).execInfo || null };
+  const bot = hooks.getBot(msg.bot);
+  if (!bot) return { ok: false, error: "no such crew member" };
+  const c = computerFor(bot, hooks);
+  if (msg.op === "touch") { c.touch(); return { ok: true }; }
+  if (msg.op === "fs") { let r; try { r = execFs(bot.id, String(msg.method), msg.params || {}); } catch { r = { fallback: true }; } if (c.up) c.touch(); return r; }
+  try { const t0 = Date.now(), was = c.up; await c.ensure(); hooks.onComputerBoot?.(bot.id); return { ok: true, host: c.name, bootMs: was ? 0 : Date.now() - t0 }; }
+  catch (e) { return { ok: false, error: e.message }; }
 }
 
 // Containers from a previous control-plane process lost their sessions; remove them at boot.
