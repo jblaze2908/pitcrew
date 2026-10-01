@@ -153,6 +153,7 @@ route("POST", "/api/threads", async (req) => {
   return { id };
 });
 route("GET", "/api/threads/:id", (req, res, { id }) => threadView(id));
+route("GET", "/api/bots/:id/threads", (req, res, { id }) => { if (!getBot(id)) throw A.httpErr(404, "No such crew member"); return R.findThreads(id, new URL(req.url, "http://x").searchParams.get("q") || "", { limit: 30 }); });
 route("PATCH", "/api/threads/:id", async (req, res, { id }) => {
   const b = await jbody(req);
   if (b.title) run("UPDATE threads SET title=? WHERE id=?", String(b.title).slice(0, 120), id);

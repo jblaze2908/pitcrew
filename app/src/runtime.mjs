@@ -56,8 +56,11 @@ export function titleFrom(text, attachments = []) {
   if (s.length > 60) s = `${s.slice(0, 58).replace(/\s+\S*$/, "")}…`;
   return s[0].toUpperCase() + s.slice(1);
 }
+// A greeting says nothing about what the thread is for, so the thread waits for its first real message.
+const SMALL_TALK = /^(hi+|hey+|hello+|yo|sup|hola|namaste|good (morning|afternoon|evening|night)|thanks?( you)?|ty|ok(ay)?|cool|test(ing)?|ping|are you there|you there)[\s!.?,]*$/i;
+export const isSmallTalk = (text) => SMALL_TALK.test(String(text || "").trim());
 function nameThread(t, text, attachments) {
-  if (t.title !== UNTITLED || one("SELECT 1 FROM events WHERE thread_id=? AND kind='user' LIMIT 1", t.id)) return;
+  if (t.title !== UNTITLED || (isSmallTalk(text) && !attachments.length)) return;
   const title = titleFrom(text, attachments);
   if (title === UNTITLED) return;
   run("UPDATE threads SET title=? WHERE id=?", title, t.id);
@@ -309,6 +312,8 @@ function keepSnapshot(botId, codexId, text) {
 }
 const CONSEQUENTIAL_PAY = /\b(pay|buy|purchase|place order|checkout|check out|transfer|subscribe|donate|confirm payment)\b/i;
 const CONSEQUENTIAL_SEND = /\b(submit|send|post|publish|reply|confirm|sign up|register|book|reserve|apply|delete|remove|unsubscribe|cancel (my )?(order|subscription|account))\b/i;
+// Snapshot lines carry attributes for the model ([cursor=pointer], [active]); people only need role and name.
+export const tidyElement = (s) => String(s || "").replace(/\s*\[[a-z-]+(=[^\]]*)?\]/g, "").replace(/:\s*$/, "").trim();
 const roleOf = (element) => /^([a-z]+)\b/.exec(element || "")?.[1] || null;
 const hostOf = (url) => { try { return url ? new URL(url).hostname : ""; } catch { return ""; } };
 export function ground(snap, tool, args) {
@@ -317,7 +322,7 @@ export function ground(snap, tool, args) {
   const elements = refs.map((r) => ({ ref: r, element: find(r) || "(not in the last snapshot)" }));
   const grounded = { ...args, page_url: snap?.url || null, ...(elements.length ? { grounded_elements: elements } : {}) };
   let effect = null;
-  const label = elements.map((e) => e.element).join(" ");
+  const label = elements.map((e) => tidyElement(e.element)).join(" ");
   // A plain link click is navigation; links that pay, send or delete still get their consequential class.
   if (/^browser_(click|press_key|select_option)$/.test(tool) && elements.length)
     effect = CONSEQUENTIAL_PAY.test(label) ? "pay" : CONSEQUENTIAL_SEND.test(label) ? "send" : tool === "browser_click" && elements.every((e) => roleOf(e.element) === "link") ? "browse" : null;
@@ -514,6 +519,13 @@ async function dynamicTool(c, threadId, p) {
         return say(`Scheduled ${s.id}: ${s.spec}.`);
       } catch (e) { return say(e.message, false); }
     }
+    case "find_threads": {
+      const found = findThreads(b.id, a.query, { exclude: threadId, limit: Math.min(Number(a.limit) || 8, 20) });
+      if (!found.length) return say(`No other threads match "${String(a.query || "").slice(0, 80)}".`);
+      const day = (t) => new Date(t + IST).toISOString().slice(0, 16).replace("T", " ");
+      return say(found.map((t) => `- [${t.title}](${threadLink(t.id)}) · last active ${day(t.updated_at)} IST${t.archived ? " · archived" : ""}${t.of ? ` · matched ${t.matched}/${t.of} terms` : ""}${t.snippet ? `\n  ${t.snippet}` : ""}`).join("\n")
+        + "\n\nGive the driver the matching thread as a markdown link exactly as written above.");
+    }
     case "propose_crew_member": {
       if (b.kind !== "chief") return say("Only the Crew Chief can propose crew members.", false);
       const spec = normaliseSpec(a);
@@ -545,6 +557,7 @@ async function runtimeTool(br, threadId, p) {
     const mcp = await comp.mcp(kind);
     comp.touch();
     if (kind === "browser" && tool !== "browser_tabs") await frontTab(mcp);
+    if (kind === "browser" && comp.viewers > 0 && /^browser_(click|select_option)$/.test(tool) && args.target) await glideTo(mcp, args);
     const r = await mcp.request("tools/call", { name: tool, arguments: args }, 120000);
     const content = Array.isArray(r.content) ? r.content : [];
     const text = content.filter((x) => x.type === "text").map((x) => x.text).join("\n");
@@ -579,6 +592,38 @@ export async function frontTab(mcp) {
     if (t?.count > 1) await call({ action: "select", index: t.current });
   } catch {}
 }
+
+// While the driver watches, move the pointer onto the element first and let the live-view pointer finish its glide,
+// so the press lands where the pointer already is instead of mid-flight. Unwatched runs skip it (~0.6 s per click).
+const GLIDE_MS = 520;
+async function glideTo(mcp, args) {
+  try { await mcp.request("tools/call", { name: "browser_hover", arguments: { element: args.element || "target", target: args.target } }, 15000); } catch {}
+  await new Promise((r) => setTimeout(r, GLIDE_MS));
+}
+
+// ---------- finding past threads ----------
+// Ranks a crew member's own threads by how many query terms appear in the title (weighted) and the transcript.
+// One indexed scan of that member's user/agent events per call; calls are rare (a tool call or a search box).
+const HOST = process.env.PITCREW_HOST || "pitcrew.example.com";
+export function findThreads(botId, query, { exclude = null, limit = 8 } = {}) {
+  const terms = [...new Set(String(query || "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((t) => t.length > 1))].slice(0, 8);
+  const threads = all("SELECT id,title,archived,created_at,updated_at FROM threads WHERE bot_id=? AND id IS NOT ? ORDER BY updated_at DESC", botId, exclude);
+  if (!terms.length) return threads.slice(0, limit).map((t) => ({ ...t, score: 0, snippet: "" }));
+  const byId = new Map(threads.map((t) => [t.id, { ...t, hits: new Set(), score: 0, snippet: "" }]));
+  const like = terms.map(() => "lower(data) LIKE ?").join(" OR ");
+  for (const e of all(`SELECT thread_id, data FROM events WHERE kind IN ('user','agent') AND thread_id IN (SELECT id FROM threads WHERE bot_id=?) AND (${like})`, botId, ...terms.map((t) => `%${t}%`))) {
+    const t = byId.get(e.thread_id); if (!t) continue;
+    const text = String(json(e.data, {}).text || ""), low = text.toLowerCase();
+    for (const term of terms) if (low.includes(term)) {
+      t.hits.add(term); t.score += 1;
+      if (!t.snippet) { const i = low.indexOf(term); t.snippet = `${i > 60 ? "…" : ""}${text.slice(Math.max(0, i - 60), i + 100).replace(/\s+/g, " ").trim()}…`; }
+    }
+  }
+  for (const t of byId.values()) for (const term of terms) if (t.title.toLowerCase().includes(term)) { t.hits.add(term); t.score += 5; }
+  return [...byId.values()].filter((t) => t.hits.size).sort((a, b) => b.hits.size - a.hits.size || b.score - a.score || b.updated_at - a.updated_at)
+    .slice(0, limit).map(({ hits, ...t }) => ({ ...t, matched: hits.size, of: terms.length }));
+}
+export const threadLink = (id) => `https://${HOST}/#/t/${id}`;
 
 // ---------- schedules ----------
 const DOW = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -652,6 +697,11 @@ export function bootRuntime() {
   for (const ps of all("SELECT id,thread_id FROM pitstops WHERE status='pending' AND kind!='hire'")) run("UPDATE pitstops SET status='expired', note='Control plane restarted', decided_at=? WHERE id=?", now(), ps.id);
   run("UPDATE turns SET status='failed', error='Control plane restarted', ended_at=? WHERE status IN ('starting','running')", now());
   run("UPDATE threads SET status='idle' WHERE status!='idle'"); // also clears pre-v1.2 'done'/'failed' thread states
+  // Name threads left untitled (from before naming existed, or still on small talk) from their first real message.
+  for (const t of all("SELECT id FROM threads WHERE title=?", UNTITLED)) {
+    const first = all("SELECT data FROM events WHERE thread_id=? AND kind='user' ORDER BY id LIMIT 20", t.id).map((e) => json(e.data, {})).find((d) => !isSmallTalk(d.text) || d.attachments?.length);
+    if (first) { const title = titleFrom(first.text, first.attachments || []); if (title !== UNTITLED) run("UPDATE threads SET title=? WHERE id=?", title, t.id); }
+  }
   setInterval(tickSchedules, 30000).unref();
 }
 export { isBusy, isThinking };

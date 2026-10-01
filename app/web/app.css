@@ -240,3 +240,24 @@ svg text{fill:var(--ink-3);font:10px var(--font-data)}
   .surface,.tool,.err,.live{margin-left:0}
   .sf-bar{grid-template-columns:90px 1fr 70px}
 }
+
+/* thread list: the title takes the slack so the date columns sit at the right edge */
+.tbl.threads th:first-child,.tbl.threads td:first-child{width:100%}
+.tbl.threads .num{padding-left:28px}
+.tbl.threads .snip{margin-top:4px;max-width:720px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* folded tool steps */
+.steps{margin-left:40px;font:12px/1.4 var(--font-data);color:var(--ink-3)}
+.steps>summary{cursor:pointer;list-style:none;display:flex;gap:10px;align-items:center;white-space:nowrap;overflow:hidden}
+.steps>summary::-webkit-details-marker{display:none}
+.steps>summary::before{content:"";flex:none;border-left:5px solid var(--ink-3);border-top:4px solid transparent;border-bottom:4px solid transparent;transition:transform .15s}
+.steps[open]>summary::before{transform:rotate(90deg)}
+.steps .last{overflow:hidden;text-overflow:ellipsis;opacity:.7}
+.steps .last::before{content:"· "}
+.steps[open] .last{display:none}
+.steps-body{display:flex;flex-direction:column;gap:10px;margin:10px 0 2px 2px;padding-left:14px;border-left:1px solid var(--line)}
+.steps-body .tool{margin-left:0}
+/* docked live view */
+.dock{position:fixed;right:20px;bottom:20px;width:400px;z-index:50;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 14px 36px rgba(0,0,0,.45)}
+.dock .bar{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line)}
+.dock .vnc{aspect-ratio:16/10;background:var(--ground-deep)}
+@media (max-width:640px){.dock{left:16px;right:16px;bottom:16px;width:auto}}

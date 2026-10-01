@@ -34,6 +34,9 @@ const when = (t) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "s
 const bot = (id) => S?.bots.find((b) => b.id === id);
 const face = (b, size = "sm", mood) => h("pc-bot", { size, hue: b?.hue || "c1", shape: b?.shape || "square", mood: mood || b?.mood || "idle" });
 const MOOD_LABEL = { needs: ["PIT STOP", "sig"], working: [null], failed: ["FAIL", "bad"], sleep: ["GARAGE", ""], done: ["DONE", ""], idle: ["READY", ""] };
+const stepOk = (e) => e.data.status === "completed" && (e.data.exitCode == null || e.data.exitCode === 0);
+// Older events carry the model-facing snapshot attributes; show role and name only.
+const tidyTitle = (s) => String(s || "").replace(/\s*\[[a-z-]+(=[^\]]*)?\]/g, "").replace(/:(?=\s|$)/g, "");
 const effectChip = (e) => h("pc-effect", { kind: e }, e === "hire" ? "HIRE" : String(e || "ask").replace("_", " "));
 
 // Minimal, safe markdown: escape first, then a few inline and block forms.
@@ -42,7 +45,8 @@ function md(text) {
   const inline = (s) => esc(s)
     .replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s"]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    // Links into this app (a thread the crew found) open in place; anything else opens a new tab.
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s"]+)\)/g, (m, t, u) => u.startsWith(`${location.origin}/`) ? `<a href="${u.slice(location.origin.length)}">${t}</a>` : `<a href="${u}" target="_blank" rel="noopener noreferrer">${t}</a>`);
   const out = [];
   const parts = String(text || "").split(/```[\w-]*\n?/);
   parts.forEach((p, i) => {
@@ -91,7 +95,7 @@ let es;
 function connectStream() {
   es?.close();
   es = new EventSource("/api/stream");
-  const refresh = () => { clearTimeout(rerenderTimer); rerenderTimer = setTimeout(async () => { S = await api("GET", "/api/state", undefined, { quiet: true }).catch(() => S); renderChrome(); if (current.name !== "thread" && current.name !== "live" && current.name !== "hire" && current.name !== "settings") renderView(); }, 250); };
+  const refresh = () => { clearTimeout(rerenderTimer); rerenderTimer = setTimeout(async () => { S = await api("GET", "/api/state", undefined, { quiet: true }).catch(() => S); renderChrome(); if (current.name !== "thread" && current.name !== "live" && current.name !== "hire" && current.name !== "settings" && !$(".threadq")?.value) renderView(); }, 250); };
   for (const t of ["thread", "turn", "pitstop", "computer", "paused", "lease"]) es.addEventListener(t, (e) => { refresh(); threadHook(t, JSON.parse(e.data)); });
   es.addEventListener("event", (e) => threadHook("event", JSON.parse(e.data)));
   es.addEventListener("delta", (e) => threadHook("delta", JSON.parse(e.data)));
@@ -102,9 +106,12 @@ function connectStream() {
 let threadHook = () => {};
 
 // ---------- shell ----------
+let here = "", backTo = null; // where the live view's Back returns to
 function route() {
+  const prev = here; here = location.hash;
   const [name, ...args] = (location.hash.replace(/^#\/?/, "") || "wall").split("/");
   current = { name: name || "wall", args };
+  if (current.name === "live" && prev && !prev.startsWith("#/live")) backTo = prev;
   threadHook = () => {};
   renderChrome(); renderView();
 }
@@ -206,13 +213,21 @@ async function crewView(id, tab = "threads", ...rest) {
   const newThread = async () => { const r = await api("POST", "/api/threads", { botId: id, title: "New thread" }); location.hash = `#/t/${r.id}`; };
   let body;
   // Threads carry no outcome of their own; only a live run (working, or waiting on a pit stop) earns a chip.
-  if (tab === "threads") body = h("div", { class: "pc-card tight" }, b.threads.length ? h("table", { class: "tbl" },
-    h("thead", {}, h("tr", {}, h("th", {}, "Thread"), h("th", { class: "num" }, "Created"), h("th", { class: "num" }, "Last active"))), h("tbody", {}, b.threads.map((t) => {
-    const live = t.status === "running" ? h("span", { class: "pc-chip blue" }, "working") : t.status === "needs" ? h("span", { class: "pc-chip hot" }, "pit stop") : null;
-    const tr = h("tr", { style: "cursor:pointer" }, h("td", {}, h("div", { class: "row", style: "gap:8px" }, h("b", {}, t.title), t.pinned ? h("span", { class: "pc-chip" }, "pinned") : null, live)),
-      h("td", { class: "num faint small" }, when(t.created_at)), h("td", { class: "num faint small", title: when(t.updated_at) }, ago(t.updated_at)));
-    tr.addEventListener("click", () => (location.hash = `#/t/${t.id}`)); return tr;
-  }))) : h("p", { class: "empty" }, "No threads yet."));
+  if (tab === "threads") {
+    const tbody = h("tbody");
+    const rows = (list) => tbody.replaceChildren(...(list.length ? list.map((t) => {
+      const live = t.status === "running" ? h("span", { class: "pc-chip blue" }, "working") : t.status === "needs" ? h("span", { class: "pc-chip hot" }, "pit stop") : null;
+      const tr = h("tr", { style: "cursor:pointer" }, h("td", {}, h("div", { class: "row", style: "gap:8px" }, h("b", {}, t.title), t.pinned ? h("span", { class: "pc-chip" }, "pinned") : null, t.archived ? h("span", { class: "pc-chip" }, "archived") : null, live), t.snippet ? h("p", { class: "small faint snip" }, t.snippet) : null),
+        h("td", { class: "num faint small" }, when(t.created_at)), h("td", { class: "num faint small", title: when(t.updated_at) }, ago(t.updated_at)));
+      tr.addEventListener("click", () => (location.hash = `#/t/${t.id}`)); return tr;
+    }) : [h("tr", {}, h("td", { colspan: 3, class: "faint small" }, "No threads match."))]));
+    rows(b.threads);
+    const q = h("input", { type: "search", class: "threadq", placeholder: "Find a thread by its title or anything said in it" });
+    let qt; q.addEventListener("input", () => { clearTimeout(qt); qt = setTimeout(async () => { const v = q.value.trim(); rows(v ? await api("GET", `/api/bots/${id}/threads?q=${encodeURIComponent(v)}`, undefined, { quiet: true }).catch(() => []) : b.threads); }, 200); });
+    body = b.threads.length ? h("div", { class: "col" }, q, h("div", { class: "pc-card tight" }, h("table", { class: "tbl threads" },
+      h("thead", {}, h("tr", {}, h("th", {}, "Thread"), h("th", { class: "num" }, "Created"), h("th", { class: "num" }, "Last active"))), tbody)))
+      : h("div", { class: "pc-card tight" }, h("p", { class: "empty" }, "No threads yet."));
+  }
   else if (tab === "files") body = await filesView(b, ...rest);
   else if (tab === "computer") body = computerCard(b);
   else if (tab === "profile") body = await profileEditor(b);
@@ -367,7 +382,7 @@ async function threadView(id) {
         ? h("a", { href: `/files/${b.id}/${p}?inline=1`, target: "_blank", rel: "noopener" }, h("img", { src: `/files/${b.id}/${p}?inline=1`, alt: p.split("/").pop(), loading: "lazy" }))
         : h("a", { class: "pc-chip", href: `/files/${b.id}/${p}` }, p.split("/").pop().replace(/^[a-z0-9]+-/, "")))) : null);
       case "agent": return h("div", { class: "msg bot" }, face(b, "sm", "idle"), md(e.data.text));
-      case "tool": return h("details", { class: "tool" }, h("summary", {}, h("span", { class: `st ${e.data.status === "completed" && (e.data.exitCode == null || e.data.exitCode === 0) ? "ok" : e.data.status === "inProgress" ? "" : "bad"}` }), e.data.title), (e.data.output || e.data.error) && h("pre", {}, e.data.error || e.data.output));
+      case "tool": return h("details", { class: "tool" }, h("summary", {}, h("span", { class: `st ${stepOk(e) ? "ok" : e.data.status === "inProgress" ? "" : "bad"}` }), tidyTitle(e.data.title)), (e.data.output || e.data.error) && h("pre", {}, e.data.error || e.data.output));
       case "system": return h("p", { class: `sys ${e.data.tone === "bad" ? "bad" : ""}` }, e.data.text);
       case "error": return h("p", { class: "err" }, e.data.text);
       case "changes": return h("div", { class: "changes" }, h("div", { class: "spread" }, h("b", { class: "small" }, `Changed ${e.data.count} file${e.data.count === 1 ? "" : "s"}`), h("a", { class: "small faint", href: `#/crew/${e.data.botId}/files/${e.data.turnId}` }, "Review changes")),
@@ -382,7 +397,25 @@ async function threadView(id) {
     }
     return null;
   };
-  for (const e of d.events) { const el = renderEvent(e); if (el) stream.append(el); }
+  // A run's tool calls fold into one "N steps" row per stretch between messages: open while the run goes, folded after.
+  let group = null;
+  const place = (e, el, before = null) => {
+    const add = (x) => (before ? before.before(x) : stream.append(x));
+    if (e.kind !== "tool") { group = null; add(el); return; }
+    const turn = e.turn_id ?? e.turnId ?? null;
+    const adjacent = group && group.el.parentNode === stream && (before ? group.el.nextElementSibling === before : stream.lastElementChild === group.el);
+    if (!adjacent || group.turn !== turn) {
+      const body = h("div", { class: "steps-body" }), label = h("span", {}), last = h("span", { class: "last" });
+      group = { el: h("details", { class: "steps" }, h("summary", {}, label, last), body), body, label, last, turn, n: 0, bad: 0 };
+      group.el.open = !!before; // set as a property: h() reads any "on…" attribute as an event handler
+      add(group.el);
+    }
+    group.body.append(el); group.n++; if (!stepOk(e) && e.data.status !== "inProgress") group.bad++;
+    group.label.textContent = `${group.n} step${group.n === 1 ? "" : "s"}${group.bad ? ` · ${group.bad} failed` : ""}`;
+    group.last.textContent = tidyTitle(e.data.title);
+  };
+  for (const e of d.events) { const el = renderEvent(e); if (el) place(e, el); }
+  if (d.thread.running && group) group.el.open = true;
   stream.append(liveLine);
 
   const running = () => d.thread.running;
@@ -434,7 +467,7 @@ async function threadView(id) {
   const panel = h("aside", { class: "panel" },
     h("div", { class: "col" }, h("p", { class: "pc-lab" }, "Crew member"), h("a", { class: "row", href: `#/crew/${b.id}` }, face(b, "md"), h("div", {}, h("b", { class: "pc-h3" }, b.name), h("p", { class: "pc-m small faint" }, `${b.provider} · ${b.model}`)))),
     h("div", { class: "col" }, h("p", { class: "pc-lab" }, "Context"), ctxMeter, ctxLabel, h("div", { class: "row" }, h("button", { class: "pc-pill o s", onclick: async () => { await api("POST", `/api/threads/${id}/compact`); } }, "Compact"), h("button", { class: "pc-pill o s", onclick: async () => { const r = await api("POST", `/api/threads/${id}/fresh`); location.hash = `#/t/${r.id}`; } }, "Fresh thread from here"))),
-    h("div", { class: "col" }, h("p", { class: "pc-lab" }, "Computer"), b.computer?.desktop ? h("a", { class: "mini", href: `#/live/${b.id}` }, h("span", { class: "pc-pill s" }, "Watch live")) : h("div", { class: "mini" }, h("span", { class: "small faint" }, b.computer?.up ? "Runtime up · no desktop yet" : "In the garage")), h("p", { class: "small faint" }, "Chat needs no computer. It starts on the first command or browser action and stops after 10 idle minutes."), h("a", { class: "small", href: `#/crew/${b.id}/files` }, "Browse files and changes")),
+    h("div", { class: "col" }, h("p", { class: "pc-lab" }, "Computer"), b.computer?.desktop ? h("div", { class: "col", style: "gap:8px" }, h("a", { class: "mini", href: `#/live/${b.id}` }, h("span", { class: "pc-pill s" }, "Watch live")), h("button", { class: "small", style: "text-align:left;padding:0", onclick: () => openDock(b) }, "Watch in a corner while you chat")) : h("div", { class: "mini" }, h("span", { class: "small faint" }, b.computer?.up ? "Runtime up · no desktop yet" : "In the garage")), h("p", { class: "small faint" }, "Chat needs no computer. It starts on the first command or browser action and stops after 10 idle minutes."), h("a", { class: "small", href: `#/crew/${b.id}/files` }, "Browse files and changes")),
     h("div", { class: "col" }, h("p", { class: "pc-lab" }, "Other threads"), ...(bot(b.id)?.threads || []).filter((t) => t.id !== id).slice(0, 8).map((t) => h("a", { class: "small muted", href: `#/t/${t.id}` }, t.title))),
     h("button", { class: "small faint", style: "text-align:left;padding:0", onclick: async (e) => { if (!confirmInline(e.target, "Archive?")) return; await api("PATCH", `/api/threads/${id}`, { archived: true }); location.hash = `#/crew/${b.id}`; } }, "Archive thread"));
 
@@ -453,11 +486,11 @@ async function threadView(id) {
       if (x.kind === "agent" && streaming) { streaming.el.remove(); streaming = null; }
       if (x.kind === "pitstop") { const all = await api("GET", "/api/pitstops?status=pending", undefined, { quiet: true }).catch(() => []); for (const p of all) pits.set(p.id, p); }
       if (x.kind === "surface") { const fresh = await api("GET", `/api/threads/${id}`, undefined, { quiet: true }).catch(() => null); for (const s of fresh?.surfaces || []) surfaces.set(s.id, s); }
-      const el = renderEvent(x); if (el) { liveLine.before(el); scroll(x.kind === "user"); }
+      const el = renderEvent(x); if (el) { place(x, el, liveLine); scroll(x.kind === "user"); }
     } else if (type === "activity") { liveLine.lastChild.textContent = x.text; }
     else if (type === "context") setCtx(x.tokens, x.window);
     else if (type === "thread") { setRunning(x.status === "running" || x.status === "needs"); if (x.title && title.isConnected) { d.thread.title = x.title; title.textContent = x.title; } }
-    else if (type === "turn") { setRunning(false); if (streaming) { streaming.el.remove(); streaming = null; } }
+    else if (type === "turn") { setRunning(false); if (streaming) { streaming.el.remove(); streaming = null; } stream.querySelectorAll("details.steps[open]").forEach((x) => (x.open = false)); }
     else if (type === "pitstop" && x.status !== "pending") { const all = await api("GET", `/api/threads/${id}`, undefined, { quiet: true }).catch(() => null); if (all) { for (const p of all.pitstops) pits.set(p.id, p); stream.querySelectorAll(".pit").forEach(() => {}); } }
   };
   setTimeout(() => scroll(true), 30);
@@ -610,7 +643,10 @@ async function liveView(id) {
     paint();
   });
   const status = h("span", { class: "small faint" }, "Connecting…");
-  const page = h("div", { class: "liveview" }, h("header", {}, face(b, "sm"), h("b", { class: "pc-h3" }, `${b.name}'s computer`), status, h("span", { style: "flex:1" }), note, leaseBtn, h("a", { class: "pc-pill o s", href: `#/crew/${id}` }, "Close")), h("div", { class: "screen" }, screen));
+  const page = h("div", { class: "liveview" }, h("header", {}, face(b, "sm"), h("b", { class: "pc-h3" }, `${b.name}'s computer`), status, h("span", { style: "flex:1" }), note, leaseBtn,
+    h("button", { class: "pc-pill o s", title: "Keep watching in a corner", onclick: () => { location.hash = backTo || `#/crew/${id}`; openDock(b); } }, "Minimize"),
+    h("a", { class: "pc-pill o s", href: backTo || `#/crew/${id}` }, backTo?.startsWith("#/t/") ? "Back to chat" : "Back")), h("div", { class: "screen" }, screen));
+  if (dock?.botId === id) closeDock();
   paint();
   (async () => {
     if (!b.computer.up) { status.textContent = "Starting the computer…"; await api("POST", `/api/bots/${id}/computer/start`).catch(() => {}); await new Promise((r) => setTimeout(r, 1500)); }
@@ -626,5 +662,25 @@ async function liveView(id) {
   window.addEventListener("hashchange", () => { rfb?.disconnect(); rfb = null; }, { once: true });
   return page;
 }
+
+// ---------- docked live view ----------
+// A small view-only window onto one crew member's screen that stays put while you move around the app.
+let dock = null;
+const liveUrl = (id) => `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/live/${id}/ws`;
+async function openDock(b) {
+  closeDock();
+  const screen = h("div", { class: "vnc" }), status = h("span", { class: "small faint" }, "Connecting…");
+  const el = h("div", { class: "dock" }, h("div", { class: "bar" }, face(b, "xs"), h("b", { class: "small" }, b.name), status, h("span", { style: "flex:1" }),
+    h("a", { class: "small", href: `#/live/${b.id}` }, "Expand"), h("button", { class: "small faint", title: "Stop watching", onclick: closeDock }, "✕")), screen);
+  document.body.append(el);
+  const d = { botId: b.id, el, rfb: null }; dock = d;
+  const { default: RFB } = await import("/novnc/core/rfb.js");
+  if (dock !== d) return;
+  d.rfb = new RFB(screen, liveUrl(b.id));
+  d.rfb.scaleViewport = true; d.rfb.resizeSession = false; d.rfb.viewOnly = true; d.rfb.background = "transparent";
+  d.rfb.addEventListener("connect", () => (status.textContent = "Live"));
+  d.rfb.addEventListener("disconnect", () => (status.textContent = "Disconnected"));
+}
+function closeDock() { if (!dock) return; dock.rfb?.disconnect(); dock.el.remove(); dock = null; }
 
 boot();

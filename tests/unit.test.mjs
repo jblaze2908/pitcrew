@@ -105,3 +105,25 @@ test("two approvals in a row teach a pattern; a denial resets it; consequential 
   assert.equal(open("send"), null); await decide("approve");
   assert.equal(open("browse", "fail-closed"), null); await decide("deny");
 });
+
+test("greetings don't name a thread; labels drop snapshot attributes", () => {
+  for (const t of ["hi", "Hello!", "hey there?", "good morning", "thanks", "ok"]) assert.equal(R.isSmallTalk(t), t !== "hey there?", t);
+  assert.equal(R.isSmallTalk("hi, pay my BESCOM bill"), false);
+  assert.equal(R.tidyElement('button "Submit" [cursor=pointer]:'), 'button "Submit"');
+  assert.equal(R.tidyElement('link "Docs" [active] [cursor=pointer]'), 'link "Docs"');
+});
+
+test("find_threads ranks own threads by title and transcript, never another member's", () => {
+  run("INSERT INTO bots(id,name,created_at) VALUES('b_find','Finder',0),('b_other','Other',0)");
+  const th = (id, bot, title, at) => run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES(?,?,?,?,?)", id, bot, title, at, at);
+  const ev = (tid, kind, text) => run("INSERT INTO events(thread_id,kind,data,ts) VALUES(?,?,?,0)", tid, kind, JSON.stringify({ text }));
+  th("t_bill", "b_find", "Pay the BESCOM bill", 1); ev("t_bill", "user", "pay electricity for October");
+  th("t_gsoc", "b_find", "GSoC check", 2); ev("t_gsoc", "agent", "I checked the Google Summer of Code page; results are out on the electricity board site too");
+  th("t_x", "b_other", "BESCOM elsewhere", 3); ev("t_x", "user", "bescom electricity");
+  const r = R.findThreads("b_find", "bescom electricity");
+  assert.deepEqual(r.map((t) => t.id), ["t_bill", "t_gsoc"]);
+  assert.equal(r[0].matched, 2);
+  assert.ok(r[1].snippet.includes("electricity"));
+  assert.deepEqual(R.findThreads("b_find", "bescom", { exclude: "t_bill" }).map((t) => t.id), []);
+});
+
