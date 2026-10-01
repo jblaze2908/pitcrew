@@ -115,6 +115,7 @@ route("PATCH", "/api/settings", async (req) => {
   if (b.driverName !== undefined) setSetting("driver_name", String(b.driverName).trim().slice(0, 40) || "Driver");
   if (["openrouter", "aigateway", "openai"].includes(b.defaultProvider)) setSetting("default_provider", b.defaultProvider);
   if (b.plainVoice !== undefined) setSetting("plain_voice", b.plainVoice ? "1" : "0");
+  if (b.plans !== undefined) setSetting("plans", b.plans ? "1" : "0");
   audit("driver", "settings.updated", { fields: Object.keys(b) });
   return state();
 });

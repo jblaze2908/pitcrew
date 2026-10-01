@@ -116,14 +116,25 @@ export function instructions(b, memories) {
     memories.length ? `What you remember (edit with remember/forget):\n${memories.map((m) => `- [${m.id}] ${m.text}`).join("\n")}` : "",
     b.kind === "chief" ? `You are the Crew Chief, the only built-in crew member. When you notice recurring work that deserves its own crew member (the same kind of task 3+ times), call propose_crew_member. ${driver} always reviews and approves a hire; you can't create one yourself.` : "",
     b.kind === "chief" ? crewRoster(b, driver) : `The Crew Chief may ask you something on ${driver}'s behalf. Answer it fully in one reply; that reply goes back to the Chief.`,
+    b.kind === "chief" && getSetting("plans") === "1" ? planRules(driver) : "",
   ].filter(Boolean).join("\n\n");
 }
+
+// Orchestration rules (prototype). They encode what the 2026-10-01 spike got wrong: no loop-back after a result that
+// changed the picture, assumptions passed on as facts, and the Chief doing members' work itself.
+const planRules = (driver) => [`Plans: when work needs one or more crew members, call plan instead of doing it yourself.`,
+  `- Put ${driver}'s preferences and limits in constraints, word for word.`,
+  `- After every item, Pitcrew wakes you with its result. Ask: does this change the picture? Is a constraint still untested? If so, reopen the item that can fix it (say why) or add one. Reopen later items that depended on it too.`,
+  `- Results come as answer, from-their-data, assumed and couldn't-check. Never repeat an assumption as fact; if your answer rests on one, say so.`,
+  `- Don't search, browse or calculate members' work yourself. If you must do a step, add it as an item with member "Crew Chief".`,
+  `- Finish with plan.finish: the answer plus every constraint marked met, unmet or untested. Then tell ${driver} the answer in plain words.`].join("\n");
 
 // Sent at thread start/resume only, so a hire or retire reaches the Chief at its next brain start.
 function crewRoster(b, driver) {
   const crew = listBots().filter((x) => x.id !== b.id);
   if (!crew.length) return "";
-  return [`Your crew. When a question or task falls in a member's job, call ask_crew_member and build on their answer: they work from their own memory, logins and computer. Private members talk only to ${driver}; don't ask them.`,
+  const how = getSetting("plans") === "1" ? "put it in a plan" : "call ask_crew_member and build on their answer";
+  return [`Your crew. When a question or task falls in a member's job, ${how}: they work from their own memory, logins and computer. Private members talk only to ${driver}; don't ask them.`,
     ...crew.map((x) => `- ${x.name}${x.private ? " (private)" : ""}: ${x.job || "no job set"}`)].join("\n");
 }
 
@@ -174,7 +185,17 @@ export function dynamicTools(b, manifest = { browser: [], computer: [] }) {
     { type: "function", name: "schedule_task", description: 'Run a prompt on a schedule in this thread. when: "daily HH:MM", "weekly mon HH:MM", "every N minutes|hours" (min 15 minutes). Times are Asia/Kolkata.',
       inputSchema: { type: "object", properties: { when: { type: "string" }, prompt: { type: "string" } }, required: ["when", "prompt"] } },
   ];
-  if (b.kind === "chief") tools.push({ type: "function", name: "ask_crew_member",
+  const plans = b.kind === "chief" && getSetting("plans") === "1";
+  if (plans) tools.push({ type: "function", name: "plan",
+    description: "Run work that needs crew members as a living todo list that Pitcrew executes. First call: goal, constraints (the driver's preferences and limits, word for word) and add. Later calls: add, reopen (send an item back with a new task and why), cancel, or finish. Pitcrew starts every item whose `after` items are done, hands it their results, and wakes you after each item ends. You may finish only when every constraint is marked met, unmet or untested.",
+    inputSchema: { type: "object", properties: {
+      goal: { type: "string" }, constraints: { type: "array", items: { type: "string" } },
+      add: { type: "array", items: { type: "object", properties: { key: { type: "string", description: "Short id you choose, e.g. dates" }, member: { type: "string", description: "Member name; Crew Chief for work you do yourself" }, task: { type: "string", description: "Self-contained: the member sees only this and the results of its `after` items" }, after: { type: "array", items: { type: "string" } } }, required: ["key", "member", "task"] } },
+      reopen: { type: "array", items: { type: "object", properties: { key: { type: "string" }, task: { type: "string" }, why: { type: "string" } }, required: ["key", "task", "why"] } },
+      cancel: { type: "array", items: { type: "string" } },
+      finish: { type: "object", properties: { answer: { type: "string" }, constraints: { type: "array", items: { type: "object", properties: { text: { type: "string" }, status: { type: "string", enum: ["met", "unmet", "untested"] }, note: { type: "string" } }, required: ["text", "status"] } } }, required: ["answer", "constraints"] },
+    } } });
+  if (b.kind === "chief" && !plans) tools.push({ type: "function", name: "ask_crew_member",
     description: "Ask another crew member a question, or give them a task in their job, and wait up to 10 minutes for their answer. They work in their own thread with their own memory, logins, computer, cap and permissions; any pit stop they hit still goes to the driver.",
     inputSchema: { type: "object", properties: { member: { type: "string", description: "The member's name" }, question: { type: "string", description: "Self-contained: they can't see this thread. Say what you need back." } }, required: ["member", "question"] } });
   if (b.kind === "chief") tools.push({ type: "function", name: "propose_crew_member",

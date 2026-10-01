@@ -118,6 +118,7 @@ select.to:hover,select.to:focus{box-shadow:inset 0 0 0 1px var(--ink-3)}
 select.to option{background:var(--surface);color:var(--ink)}
 .deleg{margin-left:40px;max-width:760px;gap:8px}
 .deleg details summary{cursor:pointer}
+.plan .pitem{display:flex;flex-direction:column;gap:3px;padding:10px 0;border-top:1px solid var(--line)}
 .atts{display:flex;gap:8px;flex-wrap:wrap}
 .att{position:relative;display:flex;align-items:center;height:56px;max-width:220px;padding:0 26px 0 10px;border-radius:10px;background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--line)}
 .att span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
