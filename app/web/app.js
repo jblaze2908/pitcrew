@@ -303,11 +303,9 @@ async function profileEditor(b) {
     cap: h("input", { type: "number", min: 0, step: "0.5", value: b.weekly_cap_usd }), plain: h("input", { type: "checkbox", checked: !!p.plain }) };
   const dials = {}; for (const k of ["warmth", "talk", "humour"]) dials[k] = h("input", { type: "range", min: 1, max: 5, value: p[k] || 3 });
   const pm = await providerModelPicker(b.provider, b.model);
-  const policy = {}; for (const [k, v] of Object.entries(b.policy)) policy[k] = h("select", { disabled: ["delete", "share", "pay"].includes(k) }, ["allow", "ask"].map((o) => h("option", { value: o, selected: o === v }, o)));
   const save = async () => {
     await api("PATCH", `/api/bots/${b.id}`, { name: f.name.value, job: f.job.value, weekly_cap_usd: +f.cap.value, provider: pm.provider(), model: pm.model(),
-      personality: { role: f.role.value, quirks: f.quirks.value.split(";").map((s) => s.trim()).filter(Boolean), signoff: f.signoff.value, callMe: f.callMe.value, plain: f.plain.checked, warmth: +dials.warmth.value, talk: +dials.talk.value, humour: +dials.humour.value },
-      policy: Object.fromEntries(Object.entries(policy).map(([k, s]) => [k, s.value])) });
+      personality: { role: f.role.value, quirks: f.quirks.value.split(";").map((s) => s.trim()).filter(Boolean), signoff: f.signoff.value, callMe: f.callMe.value, plain: f.plain.checked, warmth: +dials.warmth.value, talk: +dials.talk.value, humour: +dials.humour.value } });
     toast("Saved. New threads use it; running computers pick it up at next start."); S = await api("GET", "/api/state"); renderChrome();
   };
   return h("div", { class: "grid2" },
@@ -317,9 +315,29 @@ async function profileEditor(b) {
       ...Object.entries(dials).map(([k, el]) => h("div", { class: "dial" }, h("span", { class: "muted" }, k[0].toUpperCase() + k.slice(1)), el, h("span", { class: "pc-m faint" }, el.value))),
       lab("Quirks", f.quirks), lab("Sign-off", f.signoff), lab("Calls you", f.callMe), h("label", { class: "row small" }, f.plain, "Plain voice"),
       h("p", { class: "small faint" }, "Personality never changes permissions, caps or jev. Pit stops and money always use a plain voice.")),
-    h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "Permissions by effect"), h("table", { class: "tbl" }, h("tbody", {}, Object.entries(policy).map(([k, s]) => h("tr", {}, h("td", {}, h("pc-effect", { kind: k }, k.replace("_", " "))), h("td", {}, s))))),
-      h("p", { class: "small faint" }, "Pay, delete and share always ask.")),
-    h("div", { class: "row" }, h("button", { class: "pc-pill", onclick: save }, "Save")));
+    permissionsCard(b),
+    h("div", { class: "row formbar" }, h("button", { class: "pc-pill", onclick: save }, "Save profile"), h("span", { class: "small faint" }, "Permissions save as you change them.")));
+}
+// Plain-language effects, in rising order of consequence. Each toggle saves on its own: there's no half-edited policy.
+const EFFECTS = [["read", "Look at files and data"], ["browse", "Open and read web pages"], ["draft", "Fill in forms and write drafts, without sending"],
+  ["write_workspace", "Create and edit files in its own workspace"], ["signin", "Log in, or enter passwords and one-time codes"], ["install", "Install software"],
+  ["send", "Send messages, post, or submit forms"], ["exec_untrusted", "Run downloaded or unknown code"], ["delete", "Delete things outside its workspace"],
+  ["share", "Send your private data somewhere new"], ["pay", "Spend money"]];
+const LOCKED = ["delete", "share", "pay"];
+function permissionsCard(b) {
+  const known = new Set(EFFECTS.map(([k]) => k)), rows = [...EFFECTS.filter(([k]) => k in b.policy), ...Object.keys(b.policy).filter((k) => !known.has(k)).map((k) => [k, k.replace(/_/g, " ")])];
+  const row = ([k, what]) => {
+    const ctl = LOCKED.includes(k) ? h("span", { class: "lock small faint", title: "Can't be changed" }, "Always asks")
+      : h("div", { class: "seg" }, ["allow", "ask"].map((v) => h("button", { class: b.policy[k] === v ? "on" : "", onclick: async (e) => {
+          if (b.policy[k] === v) return;
+          await api("PATCH", `/api/bots/${b.id}`, { policy: { [k]: v } }); b.policy[k] = v;
+          e.target.parentNode.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === e.target));
+          toast(`${what}: ${v === "allow" ? "no need to ask" : "asks you first"}`);
+        } }, v === "allow" ? "Allow" : "Ask")));
+    return h("div", { class: "perm" }, h("pc-effect", { kind: k }, k.replace(/_/g, " ")), h("span", { class: "what" }, what), ctl);
+  };
+  return h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, `What ${b.name} may do without asking`), h("div", { class: "perms" }, rows.map(row)),
+    h("p", { class: "small faint" }, "Spending money, deleting outside the workspace and sharing private data always ask. ", h("a", { href: `#/crew/${b.id}/sites`, style: "text-decoration:underline" }, "Per-site rules"), " can tighten this further."));
 }
 function confirmInline(btn, text) { if (btn.dataset.armed) return true; btn.dataset.armed = "1"; btn.textContent = `${text} Click again`; setTimeout(() => { delete btn.dataset.armed; }, 4000); return false; }
 const lab = (label, el, help) => h("div", { class: "field" }, h("label", {}, label), el, help && h("span", { class: "help" }, help));
@@ -366,31 +384,46 @@ const SITE_EFFECTS = ["read", "draft", "browse", "write_workspace", "signin", "i
 const MODE_LABEL = { allowed: "allowed", read: "read only", blocked: "blocked" };
 async function sitesEditor(scope, help) {
   const d = await api("GET", `/api/sites?scope=${encodeURIComponent(scope)}`);
-  const save = async (domain, mode, overrides) => { await api("PUT", "/api/sites", { scope, domain, mode, overrides }); toast("Saved"); renderView({ keepScroll: true }); };
-  const domain = h("input", { placeholder: "example.com, or app.example.com for one subdomain" });
-  const mode = h("select", {}, [["allowed", "Allowed"], ["full", "Allowed fully (all but pay)"], ["read", "Read only"], ["blocked", "Blocked"]].map(([v, l]) => h("option", { value: v }, l)));
-  const fullO = () => Object.fromEntries(SITE_EFFECTS.map((e) => [e, "allow"]));
-  const add = () => save(domain.value, mode.value === "full" ? "allowed" : mode.value, mode.value === "full" ? fullO() : {});
-  const chips = (o) => Object.entries(o || {}).map(([e, v]) => h("span", { class: "row", style: "gap:4px" }, h("pc-effect", { kind: e }, e.replace("_", " ")), h("span", { class: "small faint" }, v)));
+  const put = (domain, mode, overrides = {}) => api("PUT", "/api/sites", { scope, domain, mode, overrides });
+  const FULL = () => Object.fromEntries(SITE_EFFECTS.map((e) => [e, "allow"]));
+  // "Fully" is stored as allowed with every effect overridden to allow; anything in between is a custom allowed site.
+  const kindOf = (r) => r.mode !== "allowed" ? r.mode : SITE_EFFECTS.every((e) => r.overrides?.[e] === "allow") ? "full" : Object.keys(r.overrides || {}).length ? "custom" : "allowed";
+  const KINDS = [["read", "Read only"], ["allowed", "Allowed"], ["full", "Fully"], ["blocked", "Blocked"]];
+  const SUMMARY = { read: "Reads pages; asks before anything else", allowed: "Follows this member's permissions", full: "Does anything except pay", blocked: "Never opens", custom: "Custom" };
+  const store = (domain, k) => put(domain, k === "full" ? "allowed" : k, k === "full" ? FULL() : {});
+  const seg = (cur, onPick) => h("div", { class: "seg" }, KINDS.map(([k, l]) => h("button", { class: (cur === "custom" ? "allowed" : cur) === k ? "on" : "", onclick: (e) => onPick(k, e) }, l)));
+  const segPick = (e) => e.target.parentNode.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === e.target));
+  let pick = "read";
+  const domain = h("input", { placeholder: "Add a site: example.com, or app.example.com for one subdomain" });
+  const add = async () => { if (!domain.value.trim()) return; await store(domain.value.trim(), pick); toast(`${domain.value.trim()}: ${KINDS.find(([k]) => k === pick)[1].toLowerCase()}`); renderView({ keepScroll: true }); };
+  domain.addEventListener("keydown", (e) => e.key === "Enter" && add());
+  // Typing in the add box also filters the list, so a long preset list stays findable.
+  domain.addEventListener("input", () => list.querySelectorAll(".site").forEach((x) => x.classList.toggle("hidden", !x.dataset.domain.includes(domain.value.trim().toLowerCase()))));
   const row = (r) => {
-    const cell = h("td", {}, h("div", { class: "row", style: "flex-wrap:wrap;gap:6px" }, r.mode === "allowed" ? chips(r.overrides) : h("span", { class: "small faint" }, r.mode === "read" ? "browse and read only; everything else asks" : "never opened")));
-    const edit = () => {
-      const m = h("select", {}, Object.entries(MODE_LABEL).map(([v, l]) => h("option", { value: v, selected: v === r.mode }, l)));
-      const sel = Object.fromEntries(SITE_EFFECTS.map((e) => [e, h("select", { class: "small" }, [["", "member's"], ["allow", "allow"], ["ask", "ask"]].map(([v, l]) => h("option", { value: v, selected: (r.overrides?.[e] || "") === v }, l)))]));
-      cell.replaceChildren(h("div", { class: "col", style: "gap:6px" }, m,
-        h("div", { class: "grid3", style: "gap:4px 12px" }, SITE_EFFECTS.map((e) => h("label", { class: "row small", style: "gap:6px" }, h("pc-effect", { kind: e }, e.replace("_", " ")), sel[e]))),
-        h("p", { class: "small faint" }, "Overrides apply when the mode is allowed. Pay always asks."),
-        h("div", { class: "row" }, h("button", { class: "pc-pill s", onclick: () => save(r.domain, m.value, Object.fromEntries(Object.entries(sel).filter(([, x]) => x.value).map(([e, x]) => [e, x.value]))) }, "Save"))));
+    let kind = kindOf(r);
+    const sum = h("span", { class: "what" }, kind === "custom" ? Object.entries(r.overrides).map(([e, v]) => `${e.replace(/_/g, " ")}: ${v}`).join(" · ") : SUMMARY[kind]);
+    const custom = h("div", { class: "custom hidden" });
+    const sync = () => { sum.textContent = kind === "custom" ? Object.entries(r.overrides).map(([e, v]) => `${e.replace(/_/g, " ")}: ${v}`).join(" · ") : SUMMARY[kind]; modeSeg.querySelectorAll("button").forEach((x, i) => x.classList.toggle("on", KINDS[i][0] === (kind === "custom" ? "allowed" : kind))); };
+    const openCustom = () => {
+      const cur = { ...(r.overrides || {}) };
+      custom.replaceChildren(...SITE_EFFECTS.map((e) => h("div", { class: "perm" }, h("pc-effect", { kind: e }, e.replace(/_/g, " ")), h("span", { class: "what" }, "On this site"),
+        h("div", { class: "seg" }, [["", "Member's"], ["allow", "Allow"], ["ask", "Ask"]].map(([v, l]) => h("button", { class: (cur[e] || "") === v ? "on" : "", onclick: async (ev) => {
+          if (v) cur[e] = v; else delete cur[e];
+          await put(r.domain, "allowed", cur); r.mode = "allowed"; r.overrides = { ...cur }; segPick(ev); kind = kindOf(r); sync(); toast(`${r.domain}: saved`);
+        } }, l))))), h("p", { class: "small faint" }, "Pay always asks, whatever you set here."));
+      custom.classList.toggle("hidden");
     };
-    return h("tr", {}, h("td", { class: "pc-m" }, r.domain), h("td", {}, h("span", { class: `pc-chip ${r.mode === "blocked" ? "hot" : r.mode === "allowed" ? "ok" : ""}` }, MODE_LABEL[r.mode] || r.mode), r.by === "preset" ? h("span", { class: "pc-chip", style: "margin-left:4px" }, "preset") : null),
-      cell, h("td", { class: "small faint" }, when(r.updated_at)),
-      h("td", { class: "num" }, h("div", { class: "row", style: "justify-content:flex-end" }, h("button", { class: "small faint", onclick: edit }, "Edit"),
-        h("button", { class: "small sig", onclick: async (e) => { if (!confirmInline(e.target, "Remove?")) return; await api("DELETE", `/api/sites?scope=${encodeURIComponent(scope)}&domain=${encodeURIComponent(r.domain)}`); toast("Removed"); renderView({ keepScroll: true }); } }, "Remove"))));
+    const modeSeg = seg(kind, async (k) => { await store(r.domain, k); kind = k; r.mode = k === "full" ? "allowed" : k; r.overrides = k === "full" ? FULL() : {}; sync(); custom.classList.add("hidden"); toast(`${r.domain}: ${KINDS.find(([x]) => x === k)[1].toLowerCase()}`); });
+    const remove = h("button", { class: "small faint", title: "Remove", onclick: async (e) => { if (!confirmInline(e.target, "Remove?")) return; await api("DELETE", `/api/sites?scope=${encodeURIComponent(scope)}&domain=${encodeURIComponent(r.domain)}`); toast(`${r.domain} removed`); renderView({ keepScroll: true }); } }, "Remove");
+    return h("div", { class: "site", "data-domain": r.domain },
+      h("div", { class: "siterow" }, h("span", { class: "pc-m dom", title: `Updated ${when(r.updated_at)}` }, r.domain, r.by === "preset" ? h("small", { class: "faint" }, " preset") : null),
+        modeSeg,
+        sum, h("div", { class: "row acts" }, h("button", { class: "small faint", onclick: openCustom }, "Customize"), remove)), custom);
   };
+  const list = h("div", { class: "sites" }, d.sites.map(row));
   return h("div", { class: "col" }, help && h("p", { class: "small muted" }, help),
-    h("div", { class: "row" }, h("div", { style: "flex:1" }, domain), mode, h("button", { class: "pc-pill s", onclick: add }, "Add")),
-    h("div", { class: "pc-card tight scrollx" }, d.sites.length ? h("table", { class: "tbl" }, h("thead", {}, h("tr", {}, h("th", {}, "Domain"), h("th", {}, "Mode"), h("th", {}, "Overrides"), h("th", {}, "Updated"), h("th"))), h("tbody", {}, d.sites.map(row)))
-      : h("p", { class: "empty" }, "No sites yet. A site the crew hasn't been allowed to open asks you first.")));
+    h("div", { class: "pc-card col" }, h("div", { class: "addsite" }, domain, seg(pick, (k, e) => { pick = k; segPick(e); }), h("button", { class: "pc-pill s", onclick: add }, "Add")),
+      d.sites.length ? list : h("p", { class: "empty" }, "No sites yet. A site the crew hasn't been allowed to open asks you first.")));
 }
 function rulesList(rules, after) {
   return h("div", { class: "pc-card tight" }, rules.length ? h("table", { class: "tbl" }, h("thead", {}, h("tr", {}, h("th", {}, "Standing approval"), h("th", {}, "Effect"), h("th", {}, "Crew"), h("th", {}, "Since"), h("th"))), h("tbody", {}, rules.map((r) => h("tr", {}, h("td", { class: "pc-m" }, r.label), h("td", {}, h("pc-effect", { kind: r.effect }, r.effect)), h("td", {}, r.bot_name || r.bot_id), h("td", { class: "small faint" }, when(r.created_at)),
