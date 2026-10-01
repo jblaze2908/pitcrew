@@ -4,38 +4,42 @@
 // root-only shadow dir outside the bot's mount, so a crew member can't see or rewrite its own history.
 import { lstatSync, readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { botDir, ROOT } from "./computer.mjs";
+import { botDir, ROOT } from "./computer.js";
+
+export interface FileState { size: number; mtime: number; hash: string | null; text: boolean }
+export interface Snapshot { files: Record<string, FileState>; truncated: boolean }
+export interface Change { path: string; status: "added" | "deleted" | "modified"; text: boolean; size: number; before: string | null; after: string | null; lines: number }
 
 // .playwright-mcp: browser snapshot files from before they moved to PW_OUT; tool output, not the crew's work.
 const SKIP = new Set(["node_modules", ".git", ".venv", "venv", "__pycache__", ".next", ".cache", ".turbo", ".pnpm-store", "target", ".playwright-mcp"]);
 const MAX_FILES = 5000, MAX_TEXT = 1 << 20;
-const shadow = (id) => `${ROOT}/data/shadow/${id}`;
-const last = new Map(); // bot id → previous manifest, to skip re-hashing unchanged files
+const shadow = (id: string) => `${ROOT}/data/shadow/${id}`;
+const last = new Map<string, Record<string, FileState>>(); // bot id → previous manifest, to skip re-hashing unchanged files
 // The manifest is also kept on disk, so the first turn after a restart doesn't re-hash the whole workspace.
-const manifestPath = (id) => `${shadow(id)}/manifest.json`;
-function previous(id) {
-  if (!last.has(id)) { let m = null; try { m = JSON.parse(readFileSync(manifestPath(id), "utf8")); } catch {} last.set(id, m && typeof m === "object" && !Array.isArray(m) ? m : {}); }
-  return last.get(id);
+const manifestPath = (id: string) => `${shadow(id)}/manifest.json`;
+function previous(id: string) {
+  if (!last.has(id)) { let m: any = null; try { m = JSON.parse(readFileSync(manifestPath(id), "utf8")); } catch {} last.set(id, m && typeof m === "object" && !Array.isArray(m) ? m : {}); }
+  return last.get(id)!;
 }
 
-const isText = (buf) => { const n = Math.min(buf.length, 8000); for (let i = 0; i < n; i++) if (buf[i] === 0) return false; return true; };
+const isText = (buf: Buffer) => { const n = Math.min(buf.length, 8000); for (let i = 0; i < n; i++) if (buf[i] === 0) return false; return true; };
 
-export function snapshot(id) {
-  const base = `${botDir(id)}/work`, prev = previous(id), files = {};
+export function snapshot(id: string): Snapshot {
+  const base = `${botDir(id)}/work`, prev = previous(id), files: Record<string, FileState> = {};
   let count = 0, truncated = false, reused = 0;
   mkdirSync(`${shadow(id)}/objects`, { recursive: true, mode: 0o700 });
-  const walk = (rel) => {
-    let ents; try { ents = readdirSync(rel ? `${base}/${rel}` : base, { withFileTypes: true }); } catch { return; }
+  const walk = (rel: string) => {
+    let ents: import("node:fs").Dirent[]; try { ents = readdirSync(rel ? `${base}/${rel}` : base, { withFileTypes: true }); } catch { return; }
     for (const e of ents) {
       if (truncated) return;
       const r = rel ? `${rel}/${e.name}` : e.name;
       if (e.isDirectory()) { if (!SKIP.has(e.name)) walk(r); continue; }
       if (!e.isFile()) continue;
       if (++count > MAX_FILES) { truncated = true; return; }
-      let st; try { st = lstatSync(`${base}/${r}`); } catch { continue; }
+      let st: import("node:fs").Stats; try { st = lstatSync(`${base}/${r}`); } catch { continue; }
       const p = prev[r];
       if (p && p.size === st.size && p.mtime === st.mtimeMs) { files[r] = p; reused++; continue; }
-      let hash = null, text = false;
+      let hash: string | null = null, text = false;
       if (st.size <= MAX_TEXT) {
         try {
           const buf = readFileSync(`${base}/${r}`);
@@ -56,25 +60,25 @@ export function snapshot(id) {
   return { files, truncated };
 }
 
-const lines = (id, hash) => { try { return readFileSync(`${shadow(id)}/objects/${hash}`, "utf8").split("\n").length; } catch { return 0; } };
+const lines = (id: string, hash: string | null) => { try { return readFileSync(`${shadow(id)}/objects/${hash}`, "utf8").split("\n").length; } catch { return 0; } };
 
 // Compares two snapshots. Line counts are a cheap size signal for the summary; the real diff happens in the browser.
-export function changes(id, before, after) {
-  const out = [];
+export function changes(id: string, before: Snapshot, after: Snapshot) {
+  const out: Change[] = [];
   const paths = new Set([...Object.keys(before.files), ...Object.keys(after.files)]);
   for (const p of [...paths].sort()) {
     const a = before.files[p], b = after.files[p];
     if (a && b && a.size === b.size && a.mtime === b.mtime) continue;
     if (a && b && a.hash && a.hash === b.hash) continue;
     const status = !a ? "added" : !b ? "deleted" : "modified";
-    out.push({ path: p, status, text: !!(b || a).text, size: (b || a).size, before: a?.hash || null, after: b?.hash || null,
+    out.push({ path: p, status, text: !!(b || a)!.text, size: (b || a)!.size, before: a?.hash || null, after: b?.hash || null,
       lines: (b?.text ? lines(id, b.hash) : 0) - (a?.text ? lines(id, a.hash) : 0) });
     if (out.length >= 300) break;
   }
   return out;
 }
 
-export function objectText(id, hash) {
+export function objectText(id: string, hash: string) {
   if (!/^[0-9a-f]{64}$/.test(hash || "")) return null;
   try { return readFileSync(`${shadow(id)}/objects/${hash}`, "utf8"); } catch { return null; }
 }

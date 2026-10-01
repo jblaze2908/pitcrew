@@ -2,12 +2,12 @@
 // provider keys → AES-256-GCM under a master key that never leaves /srv/pitcrew/data.
 import { randomBytes, scryptSync, timingSafeEqual, createHash, createCipheriv, createDecipheriv } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { DATA, one, run, now, getSetting, setSetting, audit } from "./db.mjs";
+import { DATA, one, run, now, getSetting, setSetting, audit } from "./db.js";
 
 const SESSION_MS = 30 * 24 * 3600 * 1000;
-const sha = (s) => createHash("sha256").update(s).digest("hex");
+const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
-function fileSecret(name, bytes) {
+function fileSecret(name: string, bytes: number) {
   const p = `${DATA}/${name}`;
   if (!existsSync(p)) writeFileSync(p, randomBytes(bytes).toString("base64url"), { mode: 0o600 });
   return readFileSync(p, "utf8").trim();
@@ -18,7 +18,7 @@ const MASTER = Buffer.from(fileSecret("master.key", 32), "base64url");
 export const setupDone = () => !!getSetting("password");
 export function ensureSetupToken() { if (!setupDone()) fileSecret("setup-token", 18); }
 
-export function setupPassword(token, password) {
+export function setupPassword(token: unknown, password: unknown) {
   if (setupDone()) throw httpErr(409, "Already set up");
   const expected = fileSecret("setup-token", 18);
   if (!safeEq(token, expected)) throw httpErr(403, "Setup token doesn't match");
@@ -26,7 +26,7 @@ export function setupPassword(token, password) {
   audit("driver", "setup.password");
 }
 
-export function setPassword(password) {
+export function setPassword(password: unknown) {
   if (typeof password !== "string" || password.length < 12) throw httpErr(400, "Use at least 12 characters");
   const salt = randomBytes(16);
   const hash = scryptSync(password, salt, 64, { N: 1 << 15, r: 8, p: 1, maxmem: 64 << 20 });
@@ -34,8 +34,8 @@ export function setPassword(password) {
 }
 
 // Global limiter: a single-driver app has one legitimate client, so failures anywhere count together.
-let failures = [];
-export function checkPassword(password) {
+let failures: number[] = [];
+export function checkPassword(password: unknown) {
   const t = now();
   failures = failures.filter((f) => t - f < 15 * 60 * 1000);
   if (failures.length >= 10) throw httpErr(429, "Too many attempts. Try again in 15 minutes.");
@@ -53,30 +53,32 @@ export function newSession() {
   run("DELETE FROM sessions WHERE expires_at < ?", now());
   return token;
 }
-export const sessionValid = (token) => !!token && !!one("SELECT 1 FROM sessions WHERE hash=? AND expires_at>?", sha(token), now());
-export const endSession = (token) => token && run("DELETE FROM sessions WHERE hash=?", sha(token));
+export const sessionValid = (token: string | undefined) => !!token && !!one("SELECT 1 FROM sessions WHERE hash=? AND expires_at>?", sha(token), now());
+export const endSession = (token: string | undefined) => token && run("DELETE FROM sessions WHERE hash=?", sha(token));
 export const endAllSessions = () => run("DELETE FROM sessions");
 
-export function putSecret(name, value) {
+export function putSecret(name: string, value: string) {
   const iv = randomBytes(12);
   const c = createCipheriv("aes-256-gcm", MASTER, iv);
   const data = Buffer.concat([c.update(String(value), "utf8"), c.final()]);
   const blob = [iv, c.getAuthTag(), data].map((b) => b.toString("base64url")).join(".");
   run("INSERT INTO secrets(name,blob,updated_at) VALUES(?,?,?) ON CONFLICT(name) DO UPDATE SET blob=excluded.blob, updated_at=excluded.updated_at", name, blob, now());
 }
-export function getSecret(name) {
-  const row = one("SELECT blob FROM secrets WHERE name=?", name);
+export function getSecret(name: string): string | null {
+  const row = one<{ blob: string }>("SELECT blob FROM secrets WHERE name=?", name);
   if (!row) return null;
   const [iv, tag, data] = row.blob.split(".").map((s) => Buffer.from(s, "base64url"));
   const d = createDecipheriv("aes-256-gcm", MASTER, iv);
   d.setAuthTag(tag);
   return Buffer.concat([d.update(data), d.final()]).toString("utf8");
 }
-export const secretMeta = (name) => one("SELECT updated_at FROM secrets WHERE name=?", name) || null;
-export const deleteSecret = (name) => run("DELETE FROM secrets WHERE name=?", name);
+export const secretMeta = (name: string) => one<{ updated_at: number }>("SELECT updated_at FROM secrets WHERE name=?", name) || null;
+export const deleteSecret = (name: string) => run("DELETE FROM secrets WHERE name=?", name);
 
-function safeEq(a, b) {
+function safeEq(a: unknown, b: string) {
   const x = Buffer.from(String(a || "")), y = Buffer.from(String(b));
   return x.length === y.length && timingSafeEqual(x, y);
 }
-export function httpErr(status, message) { const e = new Error(message); e.status = status; return e; }
+// An error the HTTP layer answers with this status and message (anything else is a 500).
+export type HttpError = Error & { status?: number };
+export function httpErr(status: number, message: string): HttpError { const e: HttpError = new Error(message); e.status = status; return e; }

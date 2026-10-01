@@ -5,13 +5,15 @@
 //          Stage 1 runs Codex's exec-server (the brain's shell and apply_patch execute here, via the exec gateway).
 //          Stage 2, the desktop and Chromium, boots on the first browser or pixel tool.
 // State lives on the host: /srv/pitcrew/bots/<id> (the computer's /bot) and /srv/pitcrew/brains/<id> (Codex home).
-import { spawn, execFile } from "node:child_process";
+import { spawn, execFile, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createServer } from "node:net";
 import { createHash } from "node:crypto";
 import { mkdirSync, chownSync, chmodSync, writeFileSync, existsSync, lstatSync, symlinkSync, unlinkSync, copyFileSync, statSync, readdirSync, readFileSync, renameSync } from "node:fs";
-import { getSecret } from "./auth.mjs";
-import { execFs } from "./execfs.mjs";
-import { policyMount } from "./domains.mjs";
+import { getSecret } from "./auth.js";
+import { execFs } from "./execfs.js";
+import { policyMount } from "./domains.js";
+import type { Bot } from "../shared/types.js";
+import type { ToolManifest, McpTool } from "./crew.js";
 
 export const ROOT = process.env.PITCREW_ROOT || "/srv/pitcrew";
 export const IMAGE = process.env.PITCREW_COMPUTER_IMAGE || "pitcrew-computer:1";
@@ -21,21 +23,21 @@ const CREW_UID = 1500;
 const MAX_UP = Number(process.env.PITCREW_MAX_COMPUTERS || 3);
 const IDLE_MS = Number(process.env.PITCREW_IDLE_MS || 10 * 60 * 1000);
 const BRAIN_IDLE_MS = 20 * 60 * 1000;
-const HEX = { c1: "#4f7dff", c2: "#16c2c2", c3: "#2fcc80", c5: "#ff6fab", c6: "#9577ff" };
+const HEX: Record<string, string> = { c1: "#4f7dff", c2: "#16c2c2", c3: "#2fcc80", c5: "#ff6fab", c6: "#9577ff" };
 
-export const botDir = (id) => `${ROOT}/bots/${id}`;
+export const botDir = (id: string) => `${ROOT}/bots/${id}`;
 // Inside the computer; on the host under botDir, so the control plane can read Playwright's snapshot files.
 export const PW_OUT = "/bot/run/playwright";
 // Playwright MCP waits this long after each action for triggered work (default 500 ms; click 589-620 → 196-226 ms, measured).
 export const PW_SETTLE_MS = 100;
-export const brainDir = (id) => `${ROOT}/brains/${id}`;
-export const usageLog = (id) => `${ROOT}/brains/_usage/${id}.jsonl`;
+export const brainDir = (id: string) => `${ROOT}/brains/${id}`;
+export const usageLog = (id: string) => `${ROOT}/brains/_usage/${id}.jsonl`;
 export const chatgptAuthPath = () => `${ROOT}/chatgpt/auth.json`;
-const docker = (args, opts = {}) => new Promise((res) => execFile("docker", args, { timeout: 120000, ...opts }, (err, out, errOut) => res({ ok: !err, out: String(out || ""), err: String(errOut || "") })));
+const docker = (args: string[], opts: { timeout?: number } = {}) => new Promise<{ ok: boolean; out: string; err: string }>((res) => execFile("docker", args, { timeout: 120000, ...opts }, (err, out, errOut) => res({ ok: !err, out: String(out || ""), err: String(errOut || "") })));
 // Each crew member's Codex runs as its own uid, so a stray local shell couldn't read another member's threads.
-export const brainUid = (id) => 20000 + (parseInt(createHash("sha1").update(id).digest("hex").slice(0, 6), 16) % 30000);
+export const brainUid = (id: string) => 20000 + (parseInt(createHash("sha1").update(id).digest("hex").slice(0, 6), 16) % 30000);
 
-function ensureDirs(id) {
+function ensureDirs(id: string) {
   const base = botDir(id);
   for (const d of ["", "/work", "/work/downloads", "/work/out", "/work/uploads", "/profile", "/run", "/config"]) {
     mkdirSync(base + d, { recursive: true });
@@ -43,16 +45,16 @@ function ensureDirs(id) {
   }
 }
 // v1 kept Codex's home inside the computer's mount; move it out so threads resume and the computer can't read them.
-function migrateCodexHome(id, uid) {
+function migrateCodexHome(id: string, uid: number) {
   const old = `${botDir(id)}/codex`, d = brainDir(id);
   if (existsSync(d) || !existsSync(old)) return;
   mkdirSync(`${ROOT}/brains`, { recursive: true });
   renameSync(old, d);
   try { unlinkSync(`${d}/auth.json`); } catch {}
-  const own = (p) => { chownSync(p, uid, CREW_UID); if (statSync(p).isDirectory()) for (const e of readdirSync(p)) { const q = `${p}/${e}`; if (lstatSync(q).isSymbolicLink()) continue; own(q); } };
+  const own = (p: string) => { chownSync(p, uid, CREW_UID); if (statSync(p).isDirectory()) for (const e of readdirSync(p)) { const q = `${p}/${e}`; if (lstatSync(q).isSymbolicLink()) continue; own(q); } };
   own(d);
 }
-function ensureBrainDir(b) {
+function ensureBrainDir(b: { id: string }) {
   const uid = brainUid(b.id), d = brainDir(b.id);
   migrateCodexHome(b.id, uid);
   mkdirSync(`${ROOT}/brains/_usage`, { recursive: true }); chownSync(`${ROOT}/brains/_usage`, CREW_UID, CREW_UID); chmodSync(`${ROOT}/brains/_usage`, 0o700);
@@ -62,8 +64,8 @@ function ensureBrainDir(b) {
 }
 
 // Codex config for one crew member's brain; regenerated at every brain start.
-function writeBrainConfig(b) {
-  const q = (s) => JSON.stringify(String(s));
+function writeBrainConfig(b: Bot) {
+  const q = (s: string) => JSON.stringify(String(s));
   const lines = [
     `# Written by the Pitcrew control plane at brain start. Edits here are overwritten.`,
     // With ChatGPT auth, Codex pulls the account's apps and plugins (Gmail, Drive…) into every thread: ~100k tokens of
@@ -89,12 +91,12 @@ function writeBrainConfig(b) {
 }
 
 // ChatGPT auth: one shared auth.json, symlinked into each brain home. If Codex refreshed it by replacing the link, copy it back.
-function linkChatgpt(id) {
+function linkChatgpt(id: string) {
   const link = `${brainDir(id)}/auth.json`;
   try { if (lstatSync(link)) unlinkSync(link); } catch {}
   if (existsSync(chatgptAuthPath())) symlinkSync("/auth/auth.json", link);
 }
-function reclaimChatgpt(id) {
+function reclaimChatgpt(id: string) {
   const local = `${brainDir(id)}/auth.json`;
   try {
     const st = lstatSync(local);
@@ -103,8 +105,11 @@ function reclaimChatgpt(id) {
 }
 
 // ---------- JSON-RPC over a child's stdio (shared by brain sessions and MCP clients) ----------
-class Rpc {
-  constructor(proc, { onRequest, onNotify, onExit, name }) {
+type Handlers = { onRequest?: (method: string, params: any) => unknown; onNotify?: (method: string, params: any) => void; onExit?: (code: number | null, errTail: string) => void; name: string };
+export class Rpc {
+  proc: ChildProcessWithoutNullStreams; name: string; closed = false;
+  pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>(); nextId = 1;
+  constructor(proc: ChildProcessWithoutNullStreams, { onRequest, onNotify, onExit, name }: Handlers) {
     this.proc = proc; this.pending = new Map(); this.nextId = 1; this.name = name;
     let buf = "", errTail = "";
     proc.stdout.on("data", (d) => {
@@ -112,7 +117,7 @@ class Rpc {
       while ((i = buf.indexOf("\n")) >= 0) {
         const line = buf.slice(0, i); buf = buf.slice(i + 1);
         if (!line.startsWith("{")) continue;
-        let msg; try { msg = JSON.parse(line); } catch { continue; }
+        let msg: any; try { msg = JSON.parse(line); } catch { continue; }
         this.#dispatch(msg, onRequest, onNotify);
       }
     });
@@ -124,34 +129,41 @@ class Rpc {
       onExit?.(code, errTail);
     });
   }
-  async #dispatch(msg, onRequest, onNotify) {
+  async #dispatch(msg: any, onRequest: Handlers["onRequest"], onNotify: Handlers["onNotify"]) {
     if (msg.id !== undefined && msg.method) {
       let reply;
       try { const result = await onRequest?.(msg.method, msg.params); reply = result === undefined ? { id: msg.id, error: { code: -32601, message: "unhandled" } } : { id: msg.id, result }; }
-      catch (e) { reply = { id: msg.id, error: { code: -32000, message: String(e.message).slice(0, 200) } }; }
+      catch (e: any) { reply = { id: msg.id, error: { code: -32000, message: String(e.message).slice(0, 200) } }; }
       this.write(reply);
     } else if (msg.id !== undefined) {
       const p = this.pending.get(msg.id); this.pending.delete(msg.id);
       msg.error ? p?.reject(Object.assign(new Error(msg.error.message || JSON.stringify(msg.error)), { rpc: msg.error })) : p?.resolve(msg.result);
     } else if (msg.method) onNotify?.(msg.method, msg.params || {});
   }
-  write(obj) { if (!this.closed) this.proc.stdin.write(JSON.stringify(obj) + "\n"); }
-  request(method, params, timeoutMs = 60000) {
+  write(obj: unknown) { if (!this.closed) this.proc.stdin.write(JSON.stringify(obj) + "\n"); }
+  request<T = any>(method: string, params: unknown, timeoutMs = 60000): Promise<T> {
     if (this.closed) return Promise.reject(new Error(`${this.name} is not running`));
-    return new Promise((resolve, reject) => {
+    return new Promise<T>((resolve, reject) => {
       const id = this.nextId++;
       const t = setTimeout(() => { this.pending.delete(id); reject(new Error(`${method} timed out`)); }, timeoutMs);
       this.pending.set(id, { resolve: (v) => { clearTimeout(t); resolve(v); }, reject: (e) => { clearTimeout(t); reject(e); } });
       this.write({ jsonrpc: "2.0", id, method, params });
     });
   }
-  notify(method, params) { this.write({ jsonrpc: "2.0", method, params }); }
+  notify(method: string, params: unknown) { this.write({ jsonrpc: "2.0", method, params }); }
 }
 
 // ---------- brain session (one Codex app-server per crew member) ----------
+export interface BrainHooks {
+  onNotify: (br: Brain, method: string, params: any) => void;
+  onRequest: (br: Brain, method: string, params: any) => unknown;
+  onBrainExit?: (br: Brain, code: number | null, errTail: string) => void;
+}
 export class Brain {
+  bot: Bot; hooks: BrainHooks; rpc: Rpc | null = null; ready: Promise<Brain> | null = null; loaded = new Set<string>(); lastActive = Date.now();
   // mems: codex thread id → Map(memory id → text) that thread has been told, so a turn can pass only what changed.
-  constructor(bot, hooks) { this.bot = bot; this.hooks = hooks; this.rpc = null; this.ready = null; this.loaded = new Set(); this.mems = new Map(); this.lastActive = Date.now(); }
+  mems = new Map<string, Map<string, string>>();
+  constructor(bot: Bot, hooks: BrainHooks) { this.bot = bot; this.hooks = hooks; }
   get up() { return !!this.rpc && !this.rpc.closed; }
   ensure() {
     this.lastActive = Date.now();
@@ -163,8 +175,8 @@ export class Brain {
   async #start() {
     const b = this.bot, uid = ensureBrainDir(b);
     ensureDirs(b.id); writeBrainConfig(b); linkChatgpt(b.id);
-    const env = { PATH: process.env.PATH }, envArgs = ["-e", `CODEX_HOME=/brains/${b.id}`, "-e", `HOME=/brains/${b.id}/home`];
-    const put = (k, v) => { if (v) { env[k] = v; envArgs.push("-e", k); } };
+    const env: Record<string, string | undefined> = { PATH: process.env.PATH }, envArgs = ["-e", `CODEX_HOME=/brains/${b.id}`, "-e", `HOME=/brains/${b.id}/home`];
+    const put = (k: string, v: string | null) => { if (v) { env[k] = v; envArgs.push("-e", k); } };
     put("OPENROUTER_API_KEY", getSecret("openrouter")); put("AI_GATEWAY_API_KEY", getSecret("aigateway"));
     for (const m of b.mcp || []) if (m.tokenSecret) put("MCP_TOKEN_" + m.name.toUpperCase().replace(/-/g, "_"), getSecret(m.tokenSecret));
     // Keys reach the brain as `-e NAME` read from this process's env, never on the command line; computers never get them.
@@ -182,7 +194,7 @@ export class Brain {
     await this.rpc.request("environment/add", { environmentId: "computer", execServerUrl: `ws://127.0.0.1:7700/${b.id}` });
     return this;
   }
-  request(method, params, t) { this.lastActive = Date.now(); return this.rpc ? this.rpc.request(method, params, t) : Promise.reject(new Error("brain is not running")); }
+  request<T = any>(method: string, params: unknown, t?: number): Promise<T> { this.lastActive = Date.now(); return this.rpc ? this.rpc.request<T>(method, params, t) : Promise.reject(new Error("brain is not running")); }
   async stop() { if (this.rpc) this.rpc.proc.kill(); }
 }
 
@@ -203,8 +215,19 @@ export async function readPlanLimits() {
 }
 
 // ---------- computer (machine) ----------
+export interface ComputerHooks {
+  isBusy: (c: Computer) => unknown;
+  getBot: (id: string) => Bot | undefined;
+  paused?: () => boolean;
+  onState?: (c: Computer) => void;
+  onComputerBoot?: (botId: string) => void;
+}
+export type ToolKind = "browser" | "computer";
 export class Computer {
-  constructor(bot, hooks) { this.bot = bot; this.hooks = hooks; this.ready = null; this.desk = null; this.mcps = {}; this.starting = {}; this.up = false; this.desktopUp = false; this.startedAt = null; this.viewers = 0; this.lastActive = Date.now(); }
+  bot: Bot; hooks: ComputerHooks; ready: Promise<Computer> | null = null; desk: Promise<void> | null = null;
+  mcps: Partial<Record<ToolKind, Rpc>> = {}; starting: Partial<Record<ToolKind, Promise<Rpc>>> = {};
+  up = false; desktopUp = false; startedAt: number | null = null; viewers = 0; lastActive = Date.now();
+  constructor(bot: Bot, hooks: ComputerHooks) { this.bot = bot; this.hooks = hooks; }
   get name() { return `pc-bot-${this.bot.id}`; }
   touch() { this.lastActive = Date.now(); }
   ensure() {
@@ -237,7 +260,7 @@ export class Computer {
   #watch() {
     execFile("docker", ["wait", this.name], { timeout: 0 }, () => {
       this.up = false; this.desktopUp = false; this.ready = null; this.desk = null; this.startedAt = null;
-      for (const m of Object.values(this.mcps)) try { m.proc.kill(); } catch {}
+      for (const m of Object.values(this.mcps)) try { m!.proc.kill(); } catch {}
       this.mcps = {};
       docker(["network", "disconnect", `pc-net-${this.bot.id}`, BRAIN]);
       this.hooks.onState?.(this);
@@ -245,9 +268,9 @@ export class Computer {
   }
   // Speculative boot at turn start, alongside the first model request. Only into a free slot: it never evicts another
   // member's computer, and a kill switch thrown while it boots stops it again.
-  prewarm(desktop) {
+  prewarm(desktop: boolean) {
     if (this.ready || allComputers().filter((c) => c !== this && c.ready).length >= MAX_UP) return;
-    this.ensure().then(() => (this.hooks.paused?.() ? this.stop() : desktop && this.desktop())).catch(() => {});
+    this.ensure().then<unknown>(() => (this.hooks.paused?.() ? this.stop() : desktop && this.desktop())).catch(() => {});
   }
   async desktop() {
     await this.ensure(); this.touch();
@@ -261,7 +284,7 @@ export class Computer {
   // MCP servers that live inside the computer (Playwright over CDP, pixel control), reached over docker exec stdio.
   // Neither touches Chrome or X before its first tool call, so spawn + initialize (449-631 ms for Playwright, measured)
   // overlaps the desktop boot (~1.26 s) instead of following it.
-  async mcp(kind) {
+  async mcp(kind: ToolKind): Promise<Rpc> {
     const live = this.mcps[kind];
     if (live && !live.closed) { await this.desktop(); return live; }
     await this.ensure();
@@ -270,11 +293,11 @@ export class Computer {
   }
   // Playwright's per-action snapshot files go to PW_OUT, not the default ./.playwright-mcp in the workspace, where they
   // showed up as the run's "changed files". --codegen none drops the "Ran Playwright code" block from every result.
-  async #spawnMcp(kind) {
+  async #spawnMcp(kind: ToolKind) {
     const cmd = kind === "browser" ? ["-e", "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright", this.name, "playwright-mcp", "--cdp-endpoint", "http://127.0.0.1:9222", "--output-dir", PW_OUT, "--output-max-size", String(32 << 20), "--codegen", "none", "--timeout-settle", String(PW_SETTLE_MS)] : ["-e", "DISPLAY=:1", this.name, "node", "/opt/pitcrew/computer-mcp.mjs"];
     const rpc = new Rpc(spawn("docker", ["exec", "-i", ...cmd], { stdio: ["pipe", "pipe", "pipe"] }), { name: `${kind} tools` });
     try { await rpc.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "pitcrew", version: "1.1" } }, 30000); }
-    catch (e) { rpc.proc.kill(); throw e; }
+    catch (e: any) { rpc.proc.kill(); throw e; }
     rpc.notify("notifications/initialized", {});
     this.mcps[kind] = rpc;
     return rpc;
@@ -282,14 +305,14 @@ export class Computer {
   async stop() { if (this.up) await docker(["stop", "-t", "5", this.name]); }
 }
 
-const brains = new Map(), computers = new Map();
+const brains = new Map<string, Brain>(), computers = new Map<string, Computer>();
 export const allComputers = () => [...computers.values()];
 export const allBrains = () => [...brains.values()];
-export function brainFor(bot, hooks) { let x = brains.get(bot.id); if (!x) { x = new Brain(bot, hooks); brains.set(bot.id, x); } x.bot = bot; return x; }
-export function computerFor(bot, hooks) { let x = computers.get(bot.id); if (!x) { x = new Computer(bot, hooks); computers.set(bot.id, x); } x.bot = bot; return x; }
+export function brainFor(bot: Bot, hooks: BrainHooks) { let x = brains.get(bot.id); if (!x) { x = new Brain(bot, hooks); brains.set(bot.id, x); } x.bot = bot; return x; }
+export function computerFor(bot: Bot, hooks: ComputerHooks) { let x = computers.get(bot.id); if (!x) { x = new Computer(bot, hooks); computers.set(bot.id, x); } x.bot = bot; return x; }
 
 // the host has ~7.7 GB; a computer idles at ~300 MiB with its desktop. Stop the stalest idle one to make room.
-async function makeRoom(self) {
+async function makeRoom(self: Computer) {
   const up = allComputers().filter((c) => c.up && c !== self);
   if (up.length < MAX_UP) return;
   const idle = up.filter((c) => !self.hooks.isBusy(c) && c.viewers === 0).sort((a, b) => a.lastActive - b.lastActive);
@@ -298,7 +321,7 @@ async function makeRoom(self) {
 }
 
 // Once a minute: idle computers go back to the garage; idle brain sessions exit (threads stay on disk).
-export function startIdleSweeper(isBusy, isThinking) {
+export function startIdleSweeper(isBusy: (c: Computer) => unknown, isThinking: (botId: string) => boolean) {
   setInterval(() => {
     for (const c of allComputers()) if (c.up && !isBusy(c) && c.viewers === 0 && Date.now() - c.lastActive > IDLE_MS) c.stop();
     for (const b of allBrains()) if (b.up && !isThinking(b.bot.id) && Date.now() - b.lastActive > BRAIN_IDLE_MS) b.stop();
@@ -306,7 +329,7 @@ export function startIdleSweeper(isBusy, isThinking) {
 }
 
 // The exec gateway in the brain asks for a computer here; only the brain container mounts this socket's directory.
-export function startBootSocket(hooks) {
+export function startBootSocket(hooks: ComputerHooks) {
   const dir = `${ROOT}/run`, path = `${dir}/boot.sock`;
   mkdirSync(dir, { recursive: true });
   try { unlinkSync(path); } catch {}
@@ -315,26 +338,26 @@ export function startBootSocket(hooks) {
     s.setEncoding("utf8"); s.on("error", () => {});
     // A request with an `id` keeps the connection open and its reply carries the id (the gateway's one persistent
     // connection, so per-turn fs probes skip a connect each); without one, reply and close.
-    const reply = (msg, r) => (msg?.id !== undefined ? s.write(JSON.stringify({ ...r, id: msg.id }) + "\n") : s.end(JSON.stringify(r) + "\n"));
+    const reply = (msg: any, r: Record<string, unknown>) => (msg?.id !== undefined ? s.write(JSON.stringify({ ...r, id: msg.id }) + "\n") : s.end(JSON.stringify(r) + "\n"));
     s.on("data", (d) => {
       buf += d; let i;
       while ((i = buf.indexOf("\n")) >= 0) {
         const line = buf.slice(0, i); buf = buf.slice(i + 1);
-        let msg; try { msg = JSON.parse(line); } catch { s.end('{"ok":false,"error":"bad request"}\n'); return; }
+        let msg: any; try { msg = JSON.parse(line); } catch { s.end('{"ok":false,"error":"bad request"}\n'); return; }
         bootOp(hooks, msg).then((r) => { if (!s.destroyed) reply(msg, r); });
       }
     });
   }).listen(path, () => chmodSync(path, 0o666));
 }
-async function bootOp(hooks, msg) {
-  if (msg.op === "info") return { ok: true, info: (await toolManifest().catch(() => ({}))).execInfo || null };
+async function bootOp(hooks: ComputerHooks, msg: any): Promise<Record<string, unknown>> {
+  if (msg.op === "info") return { ok: true, info: (await toolManifest().catch(() => ({}) as Partial<ToolManifest>)).execInfo || null };
   const bot = hooks.getBot(msg.bot);
   if (!bot) return { ok: false, error: "no such crew member" };
   const c = computerFor(bot, hooks);
   if (msg.op === "touch") { c.touch(); return { ok: true }; }
-  if (msg.op === "fs") { let r; try { r = execFs(bot.id, String(msg.method), msg.params || {}); } catch { r = { fallback: true }; } if (c.up) c.touch(); return r; }
+  if (msg.op === "fs") { let r: Record<string, unknown>; try { r = execFs(bot.id, String(msg.method), msg.params || {}); } catch { r = { fallback: true }; } if (c.up) c.touch(); return r; }
   try { const t0 = Date.now(), was = c.up; await c.ensure(); hooks.onComputerBoot?.(bot.id); return { ok: true, host: c.name, bootMs: was ? 0 : Date.now() - t0 }; }
-  catch (e) { return { ok: false, error: e.message }; }
+  catch (e: any) { return { ok: false, error: e.message }; }
 }
 
 // Containers from a previous control-plane process lost their sessions; remove them at boot.
@@ -346,13 +369,13 @@ export async function reapOrphans() {
 }
 
 // Tool manifests for the computer's MCP servers, read once from the image (no desktop needed to list tools).
-let manifest = null;
-export async function toolManifest() {
+let manifest: ToolManifest | null = null;
+export async function toolManifest(): Promise<ToolManifest> {
   if (manifest) return manifest;
   const cache = `${ROOT}/data/tools-manifest.json`;
   const img = (await docker(["image", "inspect", "-f", "{{.Id}}", IMAGE])).out.trim();
   try { const c = JSON.parse(readFileSync(cache, "utf8")); if (c.image === img) return (manifest = c); } catch {}
-  const list = async (args) => {
+  const list = async (args: string[]): Promise<McpTool[]> => {
     const rpc = new Rpc(spawn("docker", ["run", "--rm", "-i", "--network", "none", "--entrypoint", args[0], IMAGE, ...args.slice(1)], { stdio: ["pipe", "pipe", "pipe"] }), { name: "manifest" });
     await rpc.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "pitcrew", version: "1.1" } }, 60000);
     rpc.notify("notifications/initialized", {});
@@ -370,11 +393,11 @@ export async function toolManifest() {
 }
 
 // Library: files the crew made or downloaded, listed from the bot's workspace (bounded walk).
-export function listFiles(id) {
-  const base = `${botDir(id)}/work`, out = [];
-  const walk = (rel, depth) => {
+export function listFiles(id: string) {
+  const base = `${botDir(id)}/work`, out: { path: string; size: number; mtime: number }[] = [];
+  const walk = (rel: string, depth: number) => {
     if (depth > 4 || out.length > 500) return;
-    let ents = [];
+    let ents: import("node:fs").Dirent[] = [];
     try { ents = readdirSync(`${base}/${rel}`, { withFileTypes: true }); } catch { return; }
     for (const e of ents) {
       if (e.name.startsWith(".") || e.name === "node_modules") continue;

@@ -1,19 +1,25 @@
 // Generative UI: the crew emits a declarative surface; Pitcrew renders it with its own components.
 // The catalogue is the allowlist: unknown components or props, raw colours and oversized data are rejected, never degraded.
 
-const str = (max = 2000) => ({ t: "string", max });
-const num = { t: "number" };
-const bool = { t: "boolean" };
-const oneOf = (...v) => ({ t: "enum", v });
-const arr = (of, max) => ({ t: "array", of, max });
-const obj = (props, req = []) => ({ t: "object", props, req });
+// A prop or field spec: what checkValue accepts for one value.
+type Spec =
+  | { t: "string"; max: number } | { t: "number" } | { t: "boolean" } | { t: "enum"; v: string[] } | { t: "int"; min: number; max: number }
+  | { t: "name" } | { t: "url" } | { t: "row" } | { t: "array"; of: Spec; max: number } | { t: "object"; props: Record<string, Spec>; req: string[] };
+interface Component { props: Record<string, Spec>; req?: string[]; children?: true | "fields"; field?: true }
+
+const str = (max = 2000): Spec => ({ t: "string", max });
+const num: Spec = { t: "number" };
+const bool: Spec = { t: "boolean" };
+const oneOf = (...v: string[]): Spec => ({ t: "enum", v });
+const arr = (of: Spec, max: number): Spec => ({ t: "array", of, max });
+const obj = (props: Record<string, Spec>, req: string[] = []): Spec => ({ t: "object", props, req });
 const HUE = oneOf("c1", "c2", "c3", "c5", "c6");
 const TONE = oneOf("default", "muted", "ok", "bad", "blue", "up", "down", "flat");
 const FORMAT = oneOf("text", "number", "money", "date", "percent");
 const OPTION = obj({ value: str(200), label: str(200) }, ["value", "label"]);
-const field = (extra = {}) => ({ props: { name: { t: "name" }, label: str(200), required: bool, help: str(300), ...extra }, req: ["name", "label"], field: true });
+const field = (extra: Record<string, Spec> = {}): Component => ({ props: { name: { t: "name" }, label: str(200), required: bool, help: str(300), ...extra }, req: ["name", "label"], field: true });
 
-export const CATALOGUE = {
+export const CATALOGUE: Record<string, Component> = {
   Section: { props: { title: str(200) }, children: true },
   Stack: { props: { direction: oneOf("row", "column"), gap: oneOf("s", "m", "l") }, children: true },
   Grid: { props: { columns: { t: "int", min: 1, max: 4 } }, children: true },
@@ -49,8 +55,8 @@ export const CATALOGUE = {
 
 const MAX_NODES = 400, MAX_DEPTH = 8;
 
-function checkValue(spec, v, path, errs) {
-  const bad = (m) => errs.push(`${path}: ${m}`);
+function checkValue(spec: Spec, v: any, path: string, errs: string[]): void {
+  const bad = (m: string) => { errs.push(`${path}: ${m}`); };
   switch (spec.t) {
     case "string": if (typeof v !== "string") return bad("must be a string"); if (v.length > spec.max) bad(`longer than ${spec.max} chars`);
       if (/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i.test(v) && /colou?r|background|style/i.test(path)) bad("raw colours are not allowed; use a hue token"); return;
@@ -71,11 +77,11 @@ function checkValue(spec, v, path, errs) {
   }
 }
 
-export function validateSurface(surface) {
-  const errs = [];
+export function validateSurface(surface: any): { ok: boolean; errors: string[]; actions?: string[] } {
+  const errs: string[] = [];
   let nodes = 0;
-  const actions = new Set();
-  const walk = (n, path, depth, inForm) => {
+  const actions = new Set<string>();
+  const walk = (n: any, path: string, depth: number, inForm: boolean): unknown => {
     if (++nodes > MAX_NODES) { if (nodes === MAX_NODES + 1) errs.push(`surface has more than ${MAX_NODES} components`); return; }
     if (depth > MAX_DEPTH) return errs.push(`${path}: nested deeper than ${MAX_DEPTH}`);
     if (!n || typeof n !== "object" || Array.isArray(n)) return errs.push(`${path}: must be a component object`);
@@ -89,7 +95,7 @@ export function validateSurface(surface) {
     if (n.children !== undefined) {
       if (!def.children) return errs.push(`${path}: ${n.type} takes no children`);
       if (!Array.isArray(n.children)) return errs.push(`${path}.children must be an array`);
-      n.children.forEach((c, i) => walk(c, `${path}.children[${i}]`, depth + 1, inForm || def.children === "fields"));
+      n.children.forEach((c: unknown, i: number) => walk(c, `${path}.children[${i}]`, depth + 1, inForm || def.children === "fields"));
     }
   };
   if (!surface || typeof surface !== "object") return { ok: false, errors: ["surface must be an object with title and root"] };
@@ -101,6 +107,6 @@ export function validateSurface(surface) {
 
 // Stable text for the tool description, so the catalogue stays in cached instructions, not in per-turn state.
 export function catalogueDoc() {
-  const fmt = (s) => s.t === "enum" ? s.v.join("|") : s.t === "array" ? `[${fmt(s.of)}]` : s.t === "object" ? `{${Object.entries(s.props).map(([k, v]) => `${k}${s.req.includes(k) ? "" : "?"}:${fmt(v)}`).join(",")}}` : s.t;
+  const fmt = (s: Spec): string => s.t === "enum" ? s.v.join("|") : s.t === "array" ? `[${fmt(s.of)}]` : s.t === "object" ? `{${Object.entries(s.props).map(([k, v]) => `${k}${s.req.includes(k) ? "" : "?"}:${fmt(v)}`).join(",")}}` : s.t;
   return Object.entries(CATALOGUE).map(([name, d]) => `${name}(${Object.entries(d.props).map(([k, v]) => `${k}${(d.req || []).includes(k) ? "" : "?"}:${fmt(v)}`).join(", ")})${d.children ? " [children]" : ""}${d.field ? " [inside Form]" : ""}`).join("\n");
 }
