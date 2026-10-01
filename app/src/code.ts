@@ -7,9 +7,13 @@
 //     that only the control plane joins, so it has no way out (its update check and telemetry just fail).
 // Auth is the 32-char token in the path: a sandboxed frame sends no cookies, so the token is the capability.
 import { randomBytes } from "node:crypto";
-import { request } from "node:http";
+import { request, type IncomingMessage, type ServerResponse } from "node:http";
 import { readdirSync } from "node:fs";
-import { botDir, docker } from "./computer.mjs";
+import { botDir, docker } from "./computer.js";
+
+export interface Project { path: string; name: string; git: boolean; markers: string[] }
+interface Session { token: string; botId: string; path: string; lastUsed: number; open: number; host?: string; port?: number; stop?: () => Promise<unknown> }
+export interface CodeBackend { start(s: Session): Promise<{ host: string; port: number; stop: () => Promise<unknown> }> }
 
 const IMAGE = process.env.PITCREW_CODE_IMAGE || "pitcrew-px0:1";
 const NET = "pc-code";
@@ -20,13 +24,13 @@ const SKIP = new Set(["node_modules", ".venv", "venv", "__pycache__", "dist", "b
 
 // Folders under /bot/work that look like code. Bounded walk (depth 3, 50 results); a project's own subfolders aren't
 // searched for nested projects. Runs when the Projects view opens, not per request.
-export function listProjects(botId) {
-  const base = `${botDir(botId)}/work`, out = [];
-  const walk = (rel, depth) => {
+export function listProjects(botId: string) {
+  const base = `${botDir(botId)}/work`, out: Project[] = [];
+  const walk = (rel: string, depth: number) => {
     if (depth > 3 || out.length >= 50) return;
-    let ents; try { ents = readdirSync(rel ? `${base}/${rel}` : base, { withFileTypes: true }); } catch { return; }
+    let ents: import("node:fs").Dirent[]; try { ents = readdirSync(rel ? `${base}/${rel}` : base, { withFileTypes: true }); } catch { return; }
     const found = MARKERS.filter((m) => ents.some((e) => e.name === m));
-    if (rel && found.length) { out.push({ path: rel, name: rel.split("/").pop(), git: found.includes(".git"), markers: found }); return; }
+    if (rel && found.length) { out.push({ path: rel, name: rel.split("/").pop()!, git: found.includes(".git"), markers: found }); return; }
     for (const e of ents) if (e.isDirectory() && !e.isSymbolicLink() && !e.name.startsWith(".") && !SKIP.has(e.name)) walk(rel ? `${rel}/${e.name}` : e.name, depth + 1);
   };
   walk("", 0);
@@ -34,9 +38,9 @@ export function listProjects(botId) {
 }
 
 // One px0 per crew member at a time; opening another project replaces it.
-const sessions = new Map(); // token → { token, botId, path, host, port, stop, lastUsed, open }
+const sessions = new Map<string, Session>(); // token → { token, botId, path, host, port, stop, lastUsed, open }
 
-const dockerBackend = {
+const dockerBackend: CodeBackend = {
   async start(s) {
     if (!(await docker(["network", "inspect", NET])).ok) await docker(["network", "create", "--internal", "--label", "pitcrew=code", NET]);
     const c = await docker(["network", "connect", NET, APP]);
@@ -53,9 +57,9 @@ const dockerBackend = {
   },
 };
 let backend = dockerBackend;
-export const setCodeBackend = (b) => { backend = b; }; // tests run px0 directly
+export const setCodeBackend = (b: CodeBackend) => { backend = b; }; // tests run px0 directly
 
-export async function openProject(botId, path) {
+export async function openProject(botId: string, path: string) {
   const project = listProjects(botId).find((p) => p.path === path);
   if (!project) throw Object.assign(new Error("Not a project folder"), { status: 404 });
   for (const s of sessions.values()) {
@@ -63,20 +67,20 @@ export async function openProject(botId, path) {
     if (s.path === path) { s.lastUsed = Date.now(); return { url: `/code/${s.token}/`, project }; }
     closeSession(s);
   }
-  const s = { token: randomBytes(24).toString("base64url"), botId, path, lastUsed: Date.now(), open: 0 };
+  const s: Session = { token: randomBytes(24).toString("base64url"), botId, path, lastUsed: Date.now(), open: 0 };
   Object.assign(s, await backend.start(s));
   sessions.set(s.token, s);
   for (let i = 0; i < 40; i++) { if (await probe(s)) return { url: `/code/${s.token}/`, project }; await new Promise((r) => setTimeout(r, 150)); }
   closeSession(s);
   throw new Error("The code view didn't start in time");
 }
-function closeSession(s) { sessions.delete(s.token); s.stop?.().catch?.(() => {}); }
-const probe = (s) => new Promise((res) => request({ host: s.host, port: s.port, path: `/code/${s.token}/api/meta`, timeout: 1000 }, (r) => { r.resume(); res(r.statusCode === 200); }).on("error", () => res(false)).end());
+function closeSession(s: Session) { sessions.delete(s.token); s.stop?.().catch?.(() => {}); }
+const probe = (s: Session) => new Promise<boolean>((res) => request({ host: s.host, port: s.port, path: `/code/${s.token}/api/meta`, timeout: 1000 }, (r) => { r.resume(); res(r.statusCode === 200); }).on("error", () => res(false)).end());
 
 // What the browser may reach. Anything else (git stage/commit/push/pull, agent/*, lsp/*, settings writes, PR posting) is refused.
 const READ_GET = /^(|static\/(?!.*\.\.)[\w./-]+|api\/(meta|metrics|tree|find|file|raw|markdown|diff|gutter|stream|git\/stream|git\/log|search|outline|def|session|settings|agent\/harnesses|agent\/job|pr\/meta))$/;
 const READ_POST = /^api\/(session|close|git\/refresh|reindex)$/;
-export const allowed = (method, sub) => ((method === "GET" || method === "HEAD") && READ_GET.test(sub)) || (method === "POST" && READ_POST.test(sub));
+export const allowed = (method: string | undefined, sub: string) => ((method === "GET" || method === "HEAD") && READ_GET.test(sub)) || (method === "POST" && READ_POST.test(sub));
 
 const CODE_CSP = "sandbox allow-scripts allow-popups allow-downloads; default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'none'";
 
@@ -104,31 +108,31 @@ img[src*="px0.ai/logo"] { display: none; }
 const PITCREW_FONTS = '@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap");\n';
 
 // Per request to /code/…: one map lookup, a regex, and a streamed pipe (px0's event stream stays open).
-export function proxyCode(req, res) {
+export function proxyCode(req: IncomingMessage, res: ServerResponse) {
   // Match and forward the normalised path, never the raw one, so "/static/../api/git/push" can't slip past the list.
-  const u = new URL(req.url, "http://x");
+  const u = new URL(req.url!, "http://x");
   const m = /^\/code\/([\w-]{32})\/(.*)$/.exec(u.pathname);
   const s = m && sessions.get(m[1]);
   res.removeHeader("X-Frame-Options");
   res.setHeader("Content-Security-Policy", CODE_CSP);
   res.setHeader("Access-Control-Allow-Origin", "*"); // the frame's origin is opaque ("null"); the path token is the auth
   res.setHeader("Cache-Control", "no-store");
-  const deny = (status, error) => { res.writeHead(status, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error })); };
+  const deny = (status: number, error: string) => { res.writeHead(status, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error })); };
   if (!s) return deny(404, "This code view has closed. Open the project again from Pitcrew.");
   if (req.method === "OPTIONS") { res.writeHead(204, { "Access-Control-Allow-Headers": "content-type", "Access-Control-Allow-Methods": "GET, POST" }); return res.end(); }
-  if (!allowed(req.method, m[2])) return deny(403, "Read-only in Pitcrew: ask the crew member to make this change.");
+  if (!allowed(req.method, m![2])) return deny(403, "Read-only in Pitcrew: ask the crew member to make this change.");
   s.lastUsed = Date.now(); s.open++;
   const target = `${s.host}:${s.port}`;
   // px0 accepts POSTs only from its own origin; the sandboxed frame says "null", so speak for it.
-  const headers = { ...req.headers, host: target, origin: `http://${target}` };
+  const headers: Record<string, string | string[] | undefined> = { ...req.headers, host: target, origin: `http://${target}` };
   delete headers.cookie; delete headers.authorization;
-  const themed = m[2] === "static/themes.css";
+  const themed = m![2] === "static/themes.css";
   if (themed) delete headers["accept-encoding"];
   const up = request({ host: s.host, port: s.port, method: req.method, path: u.pathname + u.search, headers }, (r) => {
     const h = { ...r.headers }; delete h["set-cookie"]; delete h["content-security-policy"]; delete h["x-frame-options"];
-    if (!themed || r.statusCode !== 200) { res.writeHead(r.statusCode, h); return r.pipe(res); }
+    if (!themed || r.statusCode !== 200) { res.writeHead(r.statusCode!, h); return r.pipe(res); }
     // ~16 KB, once per page load: buffer it to put the font import first and the Pitcrew theme last.
-    const chunks = []; r.on("data", (c) => chunks.push(c));
+    const chunks: Buffer[] = []; r.on("data", (c) => chunks.push(c));
     r.on("end", () => { const body = PITCREW_FONTS + Buffer.concat(chunks).toString("utf8") + PITCREW_THEME; delete h["content-length"]; res.writeHead(200, { ...h, "content-type": "text/css; charset=utf-8" }); res.end(body); });
   });
   const done = () => { s.open = Math.max(0, s.open - 1); s.lastUsed = Date.now(); };

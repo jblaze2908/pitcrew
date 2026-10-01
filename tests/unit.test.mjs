@@ -6,10 +6,10 @@ import { tmpdir } from "node:os";
 
 const root = mkdtempSync(`${tmpdir()}/pitcrew-test-`);
 mkdirSync(`${root}/data`); process.env.PITCREW_ROOT = root; process.env.PITCREW_DATA = `${root}/data`;
-const { validateSurface } = await import("../app/src/surfaces.mjs");
-const { diffLines } = await import("../app/web/diff.js");
-const { nextRun } = await import("../app/src/runtime.mjs");
-const { execFs } = await import("../app/src/execfs.mjs");
+const { validateSurface } = await import("../app/dist/src/surfaces.js");
+const { diffLines } = await import("../app/dist/shared/diff.js");
+const { nextRun } = await import("../app/dist/src/runtime/index.js");
+const { execFs } = await import("../app/dist/src/execfs.js");
 
 test("surface validator rejects off-catalogue and unsafe specs", () => {
   const bad = [
@@ -54,8 +54,8 @@ test("exec gateway fs never leaves the bot's own folder", () => {
   assert.equal(execFs("b1", "fs/getMetadata", { path: "file:///.git" }).error.code, -32004);
 });
 
-const R = await import("../app/src/runtime.mjs");
-const { run, one, all, json } = await import("../app/src/db.mjs");
+const R = await import("../app/dist/src/runtime/index.js");
+const { run, one, all, json } = await import("../app/dist/src/db.js");
 
 test("untitled threads are named from their first message", () => {
   assert.equal(R.titleFrom("can you access the computer?"), "Can you access the computer?");
@@ -128,7 +128,7 @@ test("find_threads ranks own threads by title and transcript, never another memb
 });
 
 test("code view allows px0's reads and refuses every write", async () => {
-  const { allowed, listProjects } = await import("../app/src/code.mjs");
+  const { allowed, listProjects } = await import("../app/dist/src/code.js");
   for (const [m, p] of [["GET", ""], ["GET", "static/app.js"], ["GET", "api/tree"], ["GET", "api/file"], ["GET", "api/stream"], ["GET", "api/git/log"], ["POST", "api/session"], ["HEAD", ""]]) assert.equal(allowed(m, p), true, `${m} ${p}`);
   for (const [m, p] of [["POST", "api/git/commit"], ["POST", "api/git/push"], ["POST", "api/git/stage"], ["POST", "api/git/pull"], ["POST", "api/agent/edit"], ["POST", "api/settings"], ["POST", "api/lsp/install"], ["GET", "api/lsp/setup"], ["POST", "api/pr/submit"], ["GET", "static/../api/git/push"], ["PUT", "api/session"]])
     assert.equal(allowed(m, p), false, `${m} ${p}`);
@@ -140,7 +140,7 @@ test("code view allows px0's reads and refuses every write", async () => {
 });
 
 test("shared screenshots come from the tool result or Playwright's own output dir, nowhere else", async () => {
-  const { imageFrom, saveShot, SHOT_NAME } = await import("../app/src/shots.mjs");
+  const { imageFrom, saveShot, SHOT_NAME } = await import("../app/dist/src/shots.js");
   const jpg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
   assert.deepEqual(imageFrom({ contentItems: [{ type: "inputText", text: "ok" }, { type: "inputImage", imageUrl: `data:image/jpeg;base64,${jpg.toString("base64")}` }] }, "b_shot"), jpg);
   mkdirSync(`${root}/bots/b_shot/run/playwright`, { recursive: true }); writeFileSync(`${root}/bots/b_shot/run/playwright/page.jpeg`, jpg);
@@ -157,7 +157,7 @@ test("shared screenshots come from the tool result or Playwright's own output di
 });
 
 // Synthetic shapes of the jev-bound calls seen in production (no real data); expected effect, or null = still goes to jev.
-const J = await import("../app/src/jev.mjs");
+const J = await import("../app/dist/src/jev.js");
 const el = (element, ref = "e1") => ({ page_url: "https://example.com/form", grounded_elements: [{ ref, element }] });
 const click = (element) => ({ kind: "mcp", server: "browser", tool: "browser_click", arguments: { target: "e1", ...el(element) } });
 const fill = (fields, extra = {}) => ({ kind: "mcp", server: "browser", tool: "browser_fill_form", arguments: { fields: fields.map(([name, value], i) => ({ name, target: `e${i}`, type: "textbox", value })), page_url: "https://example.com/form", grounded_elements: fields.map(([name], i) => ({ ref: `e${i}`, element: `textbox "${name}"` })), ...extra } });
@@ -236,7 +236,7 @@ test("stored calls never carry secret values", () => {
 });
 
 test("every gate decision is labelled; pit stop answers fill the label in; old labels are pruned", async () => {
-  const { pruneLabels, LABEL_DAYS } = await import("../app/src/db.mjs");
+  const { pruneLabels, LABEL_DAYS } = await import("../app/dist/src/db.js");
   run("INSERT INTO bots(id,name,created_at) VALUES('b_lab','Labeller',0)");
   const v = { decision: "ask", effect: "signin", reason: "effect=signin p=0.97", by: "jev:typesafe/jev-1", ms: 120, answers: { effect: { choice: "signin" } }, probabilities: { signin: 0.97 } };
   const call = fill([["Password", "hunter2"]]);
@@ -263,7 +263,7 @@ test("every gate decision is labelled; pit stop answers fill the label in; old l
 });
 
 test("static files negotiate br/gzip, carry a strong ETag per encoding and revalidate to 304", async () => {
-  const { serveFile, negotiate, send } = await import("../app/src/delivery.mjs");
+  const { serveFile, negotiate, send } = await import("../app/dist/src/delivery.js");
   const { createServer, request } = await import("node:http");
   const { brotliDecompressSync, gunzipSync } = await import("node:zlib");
   const { utimesSync } = await import("node:fs");
@@ -324,11 +324,11 @@ test("SSE: transcript events reach only that thread's watchers, pit stops carry 
 test("the snapshot manifest survives a restart; the usage log is read from where the turn started", async () => {
   const { utimesSync, statSync, appendFileSync } = await import("node:fs");
   const w = `${root}/bots/b_snap/work`; mkdirSync(w, { recursive: true }); writeFileSync(`${w}/a.txt`, "one"); utimesSync(`${w}/a.txt`, 1e9, 1e9);
-  const S1 = await import("../app/src/snapshot.mjs?first");
+  const S1 = await import("../app/dist/src/snapshot.js?first");
   const h1 = S1.snapshot("b_snap").files["a.txt"].hash;
   // Same size and mtime, new bytes: only a remembered manifest keeps the old hash.
   writeFileSync(`${w}/a.txt`, "two"); utimesSync(`${w}/a.txt`, 1e9, 1e9);
-  const S2 = await import("../app/src/snapshot.mjs?restarted");
+  const S2 = await import("../app/dist/src/snapshot.js?restarted");
   assert.equal(S2.snapshot("b_snap").files["a.txt"].hash, h1);
   mkdirSync(`${root}/brains/_usage`, { recursive: true });
   const log = `${root}/brains/_usage/b_use.jsonl`, line = (turn, cost) => `${JSON.stringify({ turn, input: 10, cached: 0, output: 2, cost })}\n`;
@@ -339,7 +339,7 @@ test("the snapshot manifest survives a restart; the usage log is read from where
 });
 
 test("store runs WAL with synchronous=NORMAL", async () => {
-  const { db } = await import("../app/src/db.mjs");
+  const { db } = await import("../app/dist/src/db.js");
   assert.equal(db.prepare("PRAGMA journal_mode").get().journal_mode, "wal");
   assert.equal(db.prepare("PRAGMA synchronous").get().synchronous, 1);
 });
@@ -435,7 +435,7 @@ test("tool results deliver images as images, never base64 in text; exec scripts 
 });
 
 test("the model sees the browser tools it uses, with honest descriptions", async () => {
-  const { dynamicTools, instructions, FILES_URL } = await import("../app/src/crew.mjs");
+  const { dynamicTools, instructions, FILES_URL } = await import("../app/dist/src/crew.js");
   const t = (name, schema = {}) => ({ name, description: `pw ${name}`, inputSchema: { type: "object", properties: schema } });
   const manifest = { browser: ["browser_click", "browser_snapshot", "browser_evaluate", "browser_run_code_unsafe", "browser_emulate_media", "browser_resize", "browser_network_request", "browser_network_requests", "browser_close", "browser_drag", "browser_hover", "browser_take_screenshot"].map((n) => t(n)),
     computer: ["screenshot", "click", "double_click", "type", "key"].map((n) => t(n)) };
@@ -455,7 +455,7 @@ test("the model sees the browser tools it uses, with honest descriptions", async
 });
 
 test("a shared screenshot can also come from Playwright's relative link", async () => {
-  const { imageFrom } = await import("../app/src/shots.mjs");
+  const { imageFrom } = await import("../app/dist/src/shots.js");
   const jpg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 9]);
   mkdirSync(`${root}/bots/b_rel/run/playwright`, { recursive: true }); writeFileSync(`${root}/bots/b_rel/run/playwright/page-1.jpeg`, jpg); writeFileSync(`${root}/bots/b_rel/x.jpg`, jpg);
   const said = (t) => ({ contentItems: [{ type: "inputText", text: t }] });
@@ -464,7 +464,7 @@ test("a shared screenshot can also come from Playwright's relative link", async 
 });
 
 test("ChatGPT plan limits keep the codex bucket and the other window's last reading", async () => {
-  const { recordChatgptLimits, chatgptLimits } = await import("../app/src/providers.mjs");
+  const { recordChatgptLimits, chatgptLimits } = await import("../app/dist/src/providers.js");
   recordChatgptLimits({ limitId: "codex", planType: "pro", primary: { usedPercent: 40, windowDurationMins: 300, resetsAt: 1900000000 }, secondary: { usedPercent: 12, windowDurationMins: 10080, resetsAt: 1900500000 } });
   recordChatgptLimits({ limitId: "other", primary: { usedPercent: 99 } });
   recordChatgptLimits({ primary: { usedPercent: 55, windowDurationMins: 300, resetsAt: 1900001000 } });
@@ -475,7 +475,7 @@ test("ChatGPT plan limits keep the codex bucket and the other window's last read
 });
 
 test("front-door router falls back to the Crew Chief and describes each member by job", async () => {
-  const { routeMessage, routeCriteria } = await import("../app/src/router.mjs");
+  const { routeMessage, routeCriteria } = await import("../app/dist/src/router.js");
   const crew = [{ id: "c", kind: "chief", name: "Crew Chief", job: "" }, { id: "h", kind: "specialist", name: "Health", job: "Reads Apple Watch data and advises on sleep" }];
   assert.deepEqual(routeCriteria(crew).h, { what: "Health: Reads Apple Watch data and advises on sleep" });
   assert.equal((await routeMessage("how did I sleep", crew, { apiKey: null })).botId, "c");
@@ -483,7 +483,7 @@ test("front-door router falls back to the Crew Chief and describes each member b
 });
 
 test("plan handoffs split a member's reply into answer, data, assumptions and gaps", async () => {
-  const { parseHandoff } = await import("../app/src/runtime.mjs");
+  const { parseHandoff } = await import("../app/dist/src/runtime/index.js");
   const r = parseHandoff("12–16 Dec fits.\n\n**From my data:** budget Rs 34,400\n**Assumed:** nothing\n**Couldn't check:** taxes");
   assert.equal(r.answer, "12–16 Dec fits.");
   assert.equal(r.data, "budget Rs 34,400");
@@ -493,14 +493,14 @@ test("plan handoffs split a member's reply into answer, data, assumptions and ga
 });
 
 test("plan handoffs carry other options the member knows of", async () => {
-  const { parseHandoff } = await import("../app/src/runtime.mjs");
+  const { parseHandoff } = await import("../app/dist/src/runtime/index.js");
   const r = parseHandoff("IndiGo Rs 14,500.\nFrom my data: fares checked today\nAssumed: nothing\nCouldn't check: nothing\nOther options: Air India Rs 12,900, 05:40 out");
   assert.equal(r.options, "Air India Rs 12,900, 05:40 out");
   assert.equal(r.unchecked, "nothing");
 });
 
 test("front door finds members named in the sentence as whole words", async () => {
-  const { namedMembers } = await import("../app/src/router.mjs");
+  const { namedMembers } = await import("../app/dist/src/router.js");
   const crew = [{ id: "c", kind: "chief", name: "Crew Chief" }, { id: "t", name: "Travel" }, { id: "k", name: "Tickets" }, { id: "f", name: "Finance" }];
   assert.deepEqual(namedMembers("Travel finds days, then @tickets checks and Finance confirms", crew).map((b) => b.id), ["t", "k", "f"]);
   assert.deepEqual(namedMembers("I'm travelling soon; ask the crew chief", crew), []);

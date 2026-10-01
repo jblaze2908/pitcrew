@@ -78,7 +78,8 @@ export type AskResult = { threadId: string; botId: string } | { choose: string[]
 export interface Ask {
   id: string; botId: string; title: string; status: ThreadStatus; running: boolean; updatedAt: number;
   origin: Origin; answer: string | null;
-  plan: { status: PlanStatus; members: string[]; done: number; total: number } | null;
+  /** Absent when the thread never ran a plan. */
+  plan?: { status: PlanStatus; members: string[]; done: number; total: number } | null;
 }
 
 // ---------- delegation and plans ----------

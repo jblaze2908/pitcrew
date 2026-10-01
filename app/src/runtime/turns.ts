@@ -1,0 +1,188 @@
+// Turns on a member's brain: sending a message, starting and finishing a run, steering, interrupting, compacting.
+import { readFileSync } from "node:fs";
+import { one, all, run, now, uid, json, getSetting } from "../db.js";
+import { getBot, instructions, dynamicTools } from "../crew.js";
+import { botDir, toolManifest } from "../computer.js";
+import { providerReady, estimateCost } from "../providers.js";
+import { snapshot, changes } from "../snapshot.js";
+import { bus } from "./bus.js";
+import { active, byCodex, queues, turnWaiters, wakeFor, type TurnEnd } from "./state.js";
+import { getThread, addEvent, setThreadStatus, nameThread } from "./threads.js";
+import { brain, computer } from "./machines.js";
+import { weekSpend, logSize, billedUsage } from "./spend.js";
+import { activePlan, planLog, emitPlan, planRow } from "./planStore.js";
+import type { Bot } from "../../shared/types.js";
+
+export const isRunning = (threadId: string) => active.has(threadId);
+
+export interface Message { text?: unknown; attachments?: string[]; mode?: string; trigger?: string; display?: string | null }
+export async function sendMessage(threadId: string, { text: given, attachments = [], mode = "auto", trigger = "driver", display = null }: Message) {
+  const t = getThread(threadId);
+  if (!t) throw Object.assign(new Error("No such thread"), { status: 404 });
+  const text = String(given || "").slice(0, 20000);
+  if (!text.trim() && !attachments.length) throw Object.assign(new Error("Say something"), { status: 400 });
+  nameThread(t, text, attachments);
+  addEvent(threadId, null, "user", { text, attachments, via: trigger, ...(display ? { display } : {}) });
+  const a = active.get(threadId);
+  if (a) {
+    if (mode === "queue") { (queues.get(threadId) || queues.set(threadId, []).get(threadId)!).push({ text, attachments, trigger }); addEvent(threadId, null, "system", { text: "Queued for after this run." }); return { queued: true }; }
+    await brain(getBot(t.bot_id)!).request("turn/steer", { threadId: t.codex_id, expectedTurnId: a.codexTurnId, input: toInput(t.bot_id, text, attachments) });
+    return { steered: true };
+  }
+  startTurn(threadId, text, attachments, trigger).catch((e) => {
+    if (e.silent) return;
+    addEvent(threadId, null, "error", { text: e.message });
+    setThreadStatus(threadId, "idle");
+  });
+  return { started: true };
+}
+
+// Images are read here and sent inline: the brain can't see the computer's disk.
+function toInput(botId: string, text: string, attachments: string[]) {
+  const input: Record<string, unknown>[] = [];
+  const isImg = (f: string) => /\.(png|jpe?g|webp|gif)$/i.test(f);
+  const body = attachments.length ? `${text}\n\nAttached files (in /bot/work on your computer): ${attachments.join(", ")}` : text;
+  if (body.trim()) input.push({ type: "text", text: body, text_elements: [] });
+  for (const f of attachments.filter(isImg)) {
+    try {
+      const buf = readFileSync(`${botDir(botId)}/work/${f}`);
+      if (buf.length < 8 << 20) input.push({ type: "image", url: `data:image/${f.split(".").pop()!.toLowerCase().replace("jpg", "jpeg")};base64,${buf.toString("base64")}` });
+    } catch {}
+  }
+  return input;
+}
+
+const ENVS = [{ environmentId: "computer", cwd: "/bot/work" }];
+// Why a member can't start a run now, or null. Delegation checks it first, so the Chief gets a reason instead of a wait.
+export function blockedReason(b: Bot) {
+  if (getSetting("paused") === "1") return "The crew is stopped (kill switch). Resume the crew in Settings first.";
+  if (weekSpend(b.id) >= b.weekly_cap_usd) return `${b.name} has reached this week's cap ($${b.weekly_cap_usd.toFixed(2)}). Raise the cap to continue.`;
+  if (!providerReady(b.provider)) return `${b.name} uses ${b.provider === "openai" ? "the ChatGPT plan" : b.provider}, which isn't connected. Add it in Settings → Providers.`;
+  return null;
+}
+export async function startTurn(threadId: string, text: string, attachments: string[], trigger: string) {
+  const t = getThread(threadId)!, b = getBot(t.bot_id)!;
+  const why = blockedReason(b);
+  if (why) throw new Error(why);
+  const warm = warmPlan(threadId);
+  if (warm) computer(b).prewarm(warm.desktop);
+  const turnId = uid("tu");
+  active.set(threadId, { turnId, codexTurnId: null, base: null, total: null, last: null, usageFrom: logSize(b.id) });
+  run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,provider,model,started_at) VALUES(?,?,?,?,?,?,?,?)", turnId, threadId, b.id, "starting", trigger, b.provider, b.model, now());
+  setThreadStatus(threadId, "running");
+  try {
+    const c = brain(b);
+    await c.ensure();
+    const mems = all<{ id: string; text: string }>("SELECT id,text FROM memory WHERE bot_id=? AND forgotten_at IS NULL ORDER BY created_at LIMIT 60", b.id);
+    const common = { model: b.model, modelProvider: b.provider, cwd: "/bot/work", developerInstructions: instructions(b, mems) };
+    let codexId = t.codex_id;
+    if (!codexId) {
+      const st = await c.request("thread/start", { ...common, sandbox: "danger-full-access", approvalPolicy: "untrusted", environments: ENVS, dynamicTools: dynamicTools(b, await toolManifest()) }, 120000);
+      codexId = st.thread.id as string;
+      run("UPDATE threads SET codex_id=? WHERE id=?", codexId, threadId);
+      c.loaded.add(codexId);
+    } else if (!c.loaded.has(codexId)) {
+      await c.request("thread/resume", { threadId: codexId, ...common, sandbox: "danger-full-access", approvalPolicy: "untrusted", excludeTurns: true }, 120000);
+      c.loaded.add(codexId);
+    }
+    // Developer instructions reach Codex only at start/resume (which just sent the current list); memories saved since
+    // go in as turn context, persisted in the thread's history.
+    if (!c.mems.has(codexId)) c.mems.set(codexId, memMap(mems));
+    const memDelta = memoryDelta(c.mems.get(codexId), mems);
+    byCodex.set(codexId, threadId);
+    const a0 = active.get(threadId);
+    if (a0) try { a0.snap = snapshot(b.id); } catch {}
+    const carry = getThread(threadId)!.carry;
+    if (carry) run("UPDATE threads SET carry=NULL WHERE id=?", threadId);
+    // Every turn names the computer environment, so commands never run in the brain itself.
+    const r = await c.request("turn/start", { threadId: codexId, environments: ENVS, input: toInput(b.id, carry ? `${carry}\n\n---\n\n${text}` : text, attachments), responsesapiClientMetadata: { pitcrew_turn: turnId },
+      ...(memDelta ? { additionalContext: { pitcrew_memory: { kind: "application", value: memDelta } } } : {}) }, 120000);
+    if (memDelta) c.mems.set(codexId, memMap(mems));
+    const a = active.get(threadId);
+    if (a) a.codexTurnId = r.turn.id;
+    run("UPDATE turns SET codex_turn_id=?, status='running' WHERE id=?", r.turn.id, turnId);
+  } catch (e: any) {
+    finishTurn(threadId, "failed", e.message);
+    throw Object.assign(new Error(e.message), { silent: true });
+  }
+}
+
+const memMap = (mems: { id: string; text: string }[]) => new Map(mems.map((m) => [m.id, m.text]));
+// What changed in a member's memory since this thread was last told, or null. Rendered by Codex as a developer
+// message (<pitcrew_memory>) at that point in the thread, so the cached prefix stays intact.
+export function memoryDelta(seen: Map<string, string> | undefined, mems: { id: string; text: string }[]) {
+  if (!seen) return null;
+  const changed = mems.filter((m) => seen.get(m.id) !== m.text).map((m) => `- [${m.id}] ${m.text}`);
+  const ids = new Set(mems.map((m) => m.id)), gone = [...seen.keys()].filter((id) => !ids.has(id));
+  if (!changed.length && !gone.length) return null;
+  return [`Your memory changed since this thread was told (this replaces older entries with the same id):`, ...changed, ...(gone.length ? [`Forgotten: ${gone.map((id) => `[${id}]`).join(", ")}`] : [])].join("\n");
+}
+
+// Which stage of the computer the next turn likely needs, from the thread's last 3 turns: stage 1 (exec-server, ~20 MiB)
+// if any ran a command or used the browser/screen, the desktop (~470 MiB) only if the last one did. One indexed query per turn.
+const EXEC_TOOLS = new Set(["commandExecution", "browser", "computer"]);
+export function warmPlan(threadId: string) {
+  const recent = all<{ id: string }>("SELECT id FROM turns WHERE thread_id=? ORDER BY started_at DESC LIMIT 3", threadId).map((t) => t.id);
+  if (!recent.length) return null;
+  const used = all<{ turn_id: string; type: string }>(`SELECT turn_id, json_extract(data,'$.type') type FROM events WHERE thread_id=? AND kind='tool' AND turn_id IN (${recent.map(() => "?").join(",")})`, threadId, ...recent);
+  if (!used.some((u) => EXEC_TOOLS.has(u.type))) return null;
+  return { desktop: used.some((u) => u.turn_id === recent[0] && (u.type === "browser" || u.type === "computer")) };
+}
+
+// Opening a thread in the UI starts its member's brain (~0.3-0.6 s cold), so the first message doesn't wait on it.
+export function prewarmBrain(threadId: string) {
+  const t = getThread(threadId), b = t && getBot(t.bot_id);
+  if (b && !b.archived && getSetting("paused") !== "1") brain(b).prewarm();
+}
+
+export async function finishTurn(threadId: string, status: string, error?: string | null) {
+  const a = active.get(threadId);
+  if (!a) return;
+  active.delete(threadId);
+  const t = getThread(threadId)!, b = getBot(t.bot_id)!;
+  const u = a.total && a.base ? { input: a.total.inputTokens - a.base.inputTokens, cached: a.total.cachedInputTokens - a.base.cachedInputTokens, output: a.total.outputTokens - a.base.outputTokens } : { input: 0, cached: 0, output: 0 };
+  const billed = billedUsage(b.id, a.turnId, a.usageFrom);
+  if (billed) Object.assign(u, { input: billed.input, cached: billed.cached, output: billed.output });
+  const cost = billed?.cost != null ? { usd: billed.cost, basis: "billed" } : await estimateCost(b.provider, b.model, u).catch(() => ({ usd: 0, basis: "unknown" }));
+  run("UPDATE turns SET status=?, error=?, ended_at=?, input_tokens=?, cached_tokens=?, output_tokens=?, cost_usd=?, cost_basis=? WHERE id=?",
+    status, error || null, now(), u.input, u.cached, u.output, cost.usd, cost.basis, a.turnId);
+  if (error) addEvent(threadId, a.turnId, "error", { text: error });
+  // What changed on disk during this turn, however it was changed.
+  if (a.snap) try {
+    const ch = changes(b.id, a.snap, snapshot(b.id));
+    if (ch.length) {
+      run("UPDATE turns SET changes=? WHERE id=?", JSON.stringify(ch), a.turnId);
+      addEvent(threadId, a.turnId, "changes", { turnId: a.turnId, botId: b.id, count: ch.length, files: ch.slice(0, 12).map((c) => ({ path: c.path, status: c.status, lines: c.lines })) });
+    }
+  } catch {}
+  setThreadStatus(threadId, "idle");
+  bus.emit("turn", { threadId, turnId: a.turnId, status, cost: cost.usd, botId: b.id });
+  if (wakeFor.has(threadId)) { const p = activePlan(threadId); if (p) { planLog(p.id, `Looked after ${wakeFor.get(threadId)}: no change`); emitPlan(planRow(p.id)!); } wakeFor.delete(threadId); }
+  for (const w of turnWaiters.get(threadId)?.splice(0) || []) w({ turnId: a.turnId, status, cost: cost.usd });
+  const next = queues.get(threadId)?.shift();
+  if (next) startTurn(threadId, next.text, next.attachments, next.trigger).catch((e) => { if (!e.silent) addEvent(threadId, null, "error", { text: e.message }); });
+}
+
+export async function interrupt(threadId: string) {
+  const t = getThread(threadId), a = active.get(threadId);
+  if (!t || !a) return false;
+  const c = brain(getBot(t.bot_id)!);
+  if (a.codexTurnId && c.up) await c.request("turn/interrupt", { threadId: t.codex_id, turnId: a.codexTurnId }).catch(() => {});
+  else finishTurn(threadId, "interrupted");
+  return true;
+}
+export async function compact(threadId: string) {
+  const t = getThread(threadId);
+  if (!t?.codex_id) throw Object.assign(new Error("Nothing to compact yet"), { status: 400 });
+  if (active.has(threadId)) throw Object.assign(new Error("Wait for the run to finish"), { status: 409 });
+  const b = getBot(t.bot_id)!, c = brain(b);
+  await c.ensure();
+  if (!c.loaded.has(t.codex_id)) { await c.request("thread/resume", { threadId: t.codex_id, model: b.model, modelProvider: b.provider, excludeTurns: true }); c.loaded.add(t.codex_id); }
+  byCodex.set(t.codex_id, threadId);
+  await c.request("thread/compact/start", { threadId: t.codex_id });
+  addEvent(threadId, null, "system", { text: "Compacting the thread…" });
+}
+
+// The next run to finish on a thread, for whoever asked it something (delegation, plans).
+export const nextTurn = (threadId: string) => new Promise<TurnEnd>((resolve) => (turnWaiters.get(threadId) || turnWaiters.set(threadId, []).get(threadId)!).push(resolve));
+export const lastAgentText = (threadId: string, turnId: string): string => json(one<{ data: string }>("SELECT data FROM events WHERE thread_id=? AND turn_id=? AND kind='agent' ORDER BY id DESC LIMIT 1", threadId, turnId)?.data, {}).text || "";

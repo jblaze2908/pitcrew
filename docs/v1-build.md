@@ -6,7 +6,7 @@ Goal (Jai, 2026-10-01): complete v1 and deploy it on the host at `https://pitcre
 
 | Part | What | Where |
 |---|---|---|
-| Control plane | Node 22, zero npm deps (`node:sqlite`, `node:http`, `node:crypto`). Auth, crew, threads, pit stops, jev, telemetry, generative UI, scheduler, live-view bridge. Runs as a container with the Docker socket. | `app/` |
+| Control plane | Node 22, TypeScript on Hono + zod over `node:http`, with `node:sqlite` and `node:crypto`; tsc builds it to `app/dist`. Auth, crew, threads, pit stops, jev, telemetry, generative UI, scheduler, live-view bridge. Runs as a container with the Docker socket. | `app/` |
 | Computer | One per crew member, started on demand, stopped when idle (`--rm`, nothing persistent runs). Xvfb + openbox + Chromium (CDP on localhost) + x11vnc on a unix socket + Codex app-server + Playwright MCP (driving the visible Chromium) + pixel computer MCP. | `computer/` |
 | Web | Static SPA in the Pitcrew design system (theme + `pc-*` components exported from Draft). | `app/web/` |
 | Deploy | `deploy/deploy.sh`: rsync to the host, build both images, run the control plane on `172.17.0.1:8330`, Traefik file-provider router for the host. | `deploy/` |

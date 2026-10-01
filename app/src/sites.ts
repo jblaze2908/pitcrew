@@ -12,20 +12,21 @@ const SUFFIX = new Set(("co.uk org.uk ac.uk gov.uk me.uk ltd.uk plc.uk net.uk sc
   "s3.amazonaws.com onrender.com fly.dev glitch.me repl.co replit.app ngrok.io ngrok.app ngrok-free.app trycloudflare.com wixsite.com webflow.io notion.site framer.app " +
   "myshopify.com wordpress.com substack.com").split(" "));
 
-export const normHost = (h) => String(h || "").toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
-export const hostOf = (url) => { try { return normHost(new URL(url).hostname); } catch { return ""; } };
+export const normHost = (h: unknown) => String(h || "").toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+export const hostOf = (url: string) => { try { return normHost(new URL(url).hostname); } catch { return ""; } };
 
 // Address class of a literal host, without DNS: "loopback" | "private" | "public", or null for a name.
 // WHATWG URL parsing already turned decimal/hex/octal IPv4 forms into dotted quads.
 const V4_PRIVATE = [[0, 8], [10 << 24, 8], [100 << 24 | 64 << 16, 10], [169 << 24 | 254 << 16, 16], [172 << 24 | 16 << 16, 12], [192 << 24, 24], [192 << 24 | 168 << 16, 16], [198 << 24 | 18 << 16, 15], [224 << 24, 4], [240 << 24, 4]];
-function v4Kind(s) {
+export type IpKind = "loopback" | "private" | "public";
+function v4Kind(s: string): IpKind | null {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
   if (!m || m.slice(1).some((x) => +x > 255)) return null;
   const n = m.slice(1).reduce((a, x) => (a << 8) | +x, 0);
   if (+m[1] === 127) return "loopback";
   return V4_PRIVATE.some(([net, bits]) => ((n ^ net) >>> (32 - bits)) === 0) ? "private" : "public";
 }
-export function ipKind(host) {
+export function ipKind(host: string): IpKind | null {
   const h = normHost(host);
   if (h === "localhost" || h.endsWith(".localhost")) return "loopback";
   if (!h.includes(":")) return v4Kind(h);
@@ -36,23 +37,23 @@ export function ipKind(host) {
 }
 
 // eTLD+1 from SUFFIX; IPs and single-label names are their own domain.
-export function registrable(host) {
+export function registrable(host: string) {
   const h = normHost(host);
   if (!h || ipKind(h) || !h.includes(".")) return h;
   const p = h.split(".");
   for (const n of [3, 2]) if (p.length > n && SUFFIX.has(p.slice(-n).join("."))) return p.slice(-n - 1).join(".");
   return p.slice(-2).join(".");
 }
-const labelOf = (domain) => domain.split(".")[0];
+const labelOf = (domain: string) => domain.split(".")[0];
 // The host and each parent down to its registrable domain, most specific first.
-export function domainChain(host) {
+export function domainChain(host: string) {
   const h = normHost(host), d = registrable(h), out = [h];
   for (let x = h; x !== d && x.includes("."); ) { x = x.slice(x.indexOf(".") + 1); out.push(x); }
   return [...new Set(out)];
 }
 
 // Popular sign-in and payment targets; a member's own approved and visited domains are compared too.
-export const BRANDS = Object.fromEntries(`google.com Google|google.co.in Google|gmail.com Gmail|youtube.com YouTube|facebook.com Facebook|instagram.com Instagram|whatsapp.com WhatsApp
+export const BRANDS: Record<string, string> = Object.fromEntries(`google.com Google|google.co.in Google|gmail.com Gmail|youtube.com YouTube|facebook.com Facebook|instagram.com Instagram|whatsapp.com WhatsApp
 twitter.com Twitter|x.com X|linkedin.com LinkedIn|microsoft.com Microsoft|live.com Microsoft|outlook.com Outlook|office.com Microsoft|apple.com Apple|icloud.com iCloud
 amazon.com Amazon|amazon.in Amazon|amazon.co.uk Amazon|paypal.com PayPal|netflix.com Netflix|github.com GitHub|gitlab.com GitLab|dropbox.com Dropbox|yahoo.com Yahoo
 wikipedia.org Wikipedia|reddit.com Reddit|ebay.com eBay|flipkart.com Flipkart|paytm.com Paytm|phonepe.com PhonePe|razorpay.com Razorpay|stripe.com Stripe
@@ -63,11 +64,11 @@ uber.com Uber|swiggy.com Swiggy|zomato.com Zomato|myntra.com Myntra|irctc.co.in 
 docusign.com DocuSign|wise.com Wise|revolut.com Revolut|venmo.com Venmo|steamcommunity.com Steam|roblox.com Roblox|excalidraw.com Excalidraw`.split(/[|\n]/).map((x) => [x.slice(0, x.indexOf(" ")), x.slice(x.indexOf(" ") + 1)]));
 
 // Cyrillic/Greek letters that render as Latin ones, then digit and letter-pair swaps (paypa1, rnicrosoft).
-const CONFUSE = { а: "a", е: "e", ё: "e", о: "o", р: "p", с: "c", у: "y", х: "x", і: "i", ї: "i", ј: "j", ԁ: "d", ɡ: "g", һ: "h", ӏ: "l", ѕ: "s", ԛ: "q", ԝ: "w", к: "k", м: "m", н: "h", т: "t", в: "b", ԍ: "g",
+const CONFUSE: Record<string, string> = { а: "a", е: "e", ё: "e", о: "o", р: "p", с: "c", у: "y", х: "x", і: "i", ї: "i", ј: "j", ԁ: "d", ɡ: "g", һ: "h", ӏ: "l", ѕ: "s", ԛ: "q", ԝ: "w", к: "k", м: "m", н: "h", т: "t", в: "b", ԍ: "g",
   ν: "v", ο: "o", α: "a", ρ: "p", τ: "t", κ: "k", ι: "i", υ: "u", ɑ: "a", ı: "i", ℓ: "l", ɩ: "i", ǀ: "l" };
-const DIGIT = { 0: "o", 1: "l", 3: "e", 4: "a", 5: "s", 7: "t", 8: "b", 9: "g" };
-export const skeleton = (label) => [...String(label).normalize("NFD").replace(/\p{M}/gu, "")].map((c) => CONFUSE[c] ?? DIGIT[c] ?? c).join("").replace(/rn/g, "m").replace(/vv/g, "w").replace(/-/g, "");
-export function damerau(a, b) {
+const DIGIT: Record<string, string> = { 0: "o", 1: "l", 3: "e", 4: "a", 5: "s", 7: "t", 8: "b", 9: "g" };
+export const skeleton = (label: string) => [...String(label).normalize("NFD").replace(/\p{M}/gu, "")].map((c) => CONFUSE[c] ?? DIGIT[c] ?? c).join("").replace(/rn/g, "m").replace(/vv/g, "w").replace(/-/g, "");
+export function damerau(a: string, b: string) {
   const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
   for (let j = 1; j <= b.length; j++) d[0][j] = j;
   for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) {
@@ -76,9 +77,10 @@ export function damerau(a, b) {
   }
   return d[a.length][b.length];
 }
-const SCRIPTS = ["Latin", "Cyrillic", "Greek", "Armenian", "Georgian", "Cherokee", "Arabic", "Hebrew", "Devanagari", "Thai", "Hangul"].map((s) => [s, new RegExp(`\\p{Script=${s}}`, "u")]);
+const SCRIPTS: [string, RegExp][] = ["Latin", "Cyrillic", "Greek", "Armenian", "Georgian", "Cherokee", "Arabic", "Hebrew", "Devanagari", "Thai", "Hangul"].map((s) => [s, new RegExp(`\\p{Script=${s}}`, "u")]);
 // Punycode labels that mix scripts, or whose letters render like a Latin brand. Pure non-Latin names pass.
-export function homograph(host) {
+export interface Homograph { unicode: string; why: string; brand?: string; domain?: string }
+export function homograph(host: string): Homograph | null {
   const h = normHost(host), uni = domainToUnicode(h) || h;
   if (uni === h && !/[^\x00-\x7f]/.test(h)) return null;
   for (const label of uni.split(".")) {
@@ -90,7 +92,8 @@ export function homograph(host) {
   return d ? { unicode: uni, why: `renders like ${d}`, brand: BRANDS[d], domain: d } : null;
 }
 // "This looks like <brand>" for a domain that isn't the brand's (or a known domain's) own.
-export function lookalike(host, known = []) {
+export interface Lookalike { brand: string; domain: string; why: string }
+export function lookalike(host: string, known: Iterable<string> = []): Lookalike | null {
   const h = normHost(host), d = registrable(h);
   if (!d || ipKind(h)) return null;
   const refs = new Map(Object.entries(BRANDS));
@@ -111,8 +114,10 @@ export function lookalike(host, known = []) {
 
 // What a URL is, for the gate: scheme, host, registrable domain, https, address class; look-alike warnings only when
 // known (the domains to compare against) is given, which the gate does only for a domain it is about to ask about.
-export function siteOf(url, known = null) {
-  let u; try { u = new URL(url); } catch { return null; }
+// lookalike/homograph are filled in by the gate (domains.ts) when it asks about a new domain.
+export interface Site { url: string; scheme: string; host: string; domain: string; https: boolean; ip: IpKind | null; lookalike: Lookalike | null; homograph: Homograph | null }
+export function siteOf(url: string, known: string[] | null = null): Site | null {
+  let u: URL; try { u = new URL(url); } catch { return null; }
   const host = normHost(u.hostname), scheme = u.protocol.replace(/:$/, "");
   const web = scheme === "http" || scheme === "https";
   return { url: String(url), scheme, host, domain: web ? registrable(host) : "", https: scheme === "https", ip: web ? ipKind(host) : null,
@@ -126,19 +131,19 @@ const PAY_HOSTS = new Set(["stripe.com", "razorpay.com", "paypal.com", "paytm.co
   "authorize.net", "worldpay.com", "mollie.com", "paddle.com", "chargebee.com", "recurly.com", "paystack.com", "flutterwave.com", "pay.google.com", "pay.amazon.com", "payments.amazon.in"]);
 const CARD_FIELD = /\b(card ?number|credit card|debit card|cvv2?|cvc|csc|security code|expiry|expiration|exp\.? date|mm ?\/ ?yy|upi( id)?|vpa|name on card|cardholder)\b/i;
 const FIELD_ROLE = /^\s*-\s*(textbox|combobox|spinbutton|iframe)\b/;
-const words = (s) => String(s || "").toLowerCase().split(/[^a-z0-9-]+/).flatMap((w) => [w, ...w.split("-")]);
-export const payHost = (host) => { const h = normHost(host); return PAY_HOSTS.has(h) || PAY_HOSTS.has(registrable(h)); };
+const words = (s: unknown) => String(s || "").toLowerCase().split(/[^a-z0-9-]+/).flatMap((w) => [w, ...w.split("-")]);
+export const payHost = (host: string) => { const h = normHost(host); return PAY_HOSTS.has(h) || PAY_HOSTS.has(registrable(h)); };
 // Why a page looks like checkout or payment, or null. Path and title words, card/CVV/UPI fields, payment providers.
-export function checkoutWhy({ url = null, title = null, lines = null } = {}) {
-  let u = null; try { u = url ? new URL(url) : null; } catch {}
+export function checkoutWhy({ url = null, title = null, lines = null }: { url?: string | null; title?: string | null; lines?: string[] | null } = {}): string | null {
+  let u: URL | null = null; try { u = url ? new URL(url) : null; } catch {}
   if (u && payHost(u.hostname)) return `payment provider ${registrable(normHost(u.hostname))}`;
   const pw = u && words(decodeURIComponent(u.pathname)).find((w) => CHECKOUT_WORDS.has(w));
   if (pw) return `"${pw}" in the address`;
   const tw = words(title).find((w) => CHECKOUT_WORDS.has(w));
   if (tw) return `"${tw}" in the page title`;
   const field = (lines || []).find((l) => FIELD_ROLE.test(l) && CARD_FIELD.test(l));
-  return field ? `payment field ${CARD_FIELD.exec(field)[0]}` : null;
+  return field ? `payment field ${CARD_FIELD.exec(field)![0]}` : null;
 }
 const CONFIRMED = /\b(order (has been |was )?(placed|confirmed|received|successful)|payment (was |has been )?(successful|received|completed?|confirmed)|thank(s| you) for (your )?(order|purchase|payment)|order (number|no\.?|id|#)\s*[:#]?\s*[A-Z0-9][A-Z0-9-]{3,}|(your )?receipt (number|no\.?|#)|transaction (id|successful|completed?)|booking (is )?confirmed|you('ve| have) been charged|purchase (complete|successful))/i;
 // The phrase that makes a page read like an order or payment confirmation, or null. O(text); text is capped by the caller.
-export const confirmationOf = (text) => CONFIRMED.exec(String(text || ""))?.[0] ?? null;
+export const confirmationOf = (text: unknown) => CONFIRMED.exec(String(text || ""))?.[0] ?? null;
