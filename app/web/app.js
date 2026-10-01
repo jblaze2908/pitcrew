@@ -69,7 +69,6 @@ async function boot() {
   const s = await fetch("/api/session").then((r) => r.json());
   if (!s.authed) return s.setup ? loginScreen() : setupScreen();
   S = await api("GET", "/api/state");
-  connectStream();
   window.addEventListener("hashchange", route);
   route();
   setInterval(() => { const c = $(".pc-bar .clock"); if (c) c.textContent = clock(); }, 20000);
@@ -91,19 +90,32 @@ function loginScreen() {
 }
 
 // ---------- live stream ----------
-let es;
-function connectStream() {
-  es?.close();
-  es = new EventSource("/api/stream");
-  const refresh = () => { clearTimeout(rerenderTimer); rerenderTimer = setTimeout(async () => { S = await api("GET", "/api/state", undefined, { quiet: true }).catch(() => S); renderChrome(); if (current.name !== "thread" && current.name !== "live" && current.name !== "hire" && current.name !== "settings" && !$(".threadq")?.value) renderView(); }, 250); };
-  for (const t of ["thread", "turn", "pitstop", "computer", "paused", "lease"]) es.addEventListener(t, (e) => { refresh(); threadHook(t, JSON.parse(e.data)); });
-  es.addEventListener("event", (e) => threadHook("event", JSON.parse(e.data)));
-  es.addEventListener("delta", (e) => threadHook("delta", JSON.parse(e.data)));
-  es.addEventListener("activity", (e) => threadHook("activity", JSON.parse(e.data)));
-  es.addEventListener("context", (e) => threadHook("context", JSON.parse(e.data)));
+// One stream per tab. The open thread rides on ?thread=, so its transcript events reach only the tab showing it.
+let es, esThread = null;
+function connectStream(thread = esThread) {
+  es?.close(); esThread = thread;
+  es = new EventSource(thread ? `/api/stream?thread=${encodeURIComponent(thread)}` : "/api/stream");
+  for (const t of ["thread", "turn", "pitstop", "computer", "paused", "lease"]) es.addEventListener(t, (e) => { const x = JSON.parse(e.data); refresh(t, x); threadHook(t, x); });
+  for (const t of ["event", "delta", "activity", "context"]) es.addEventListener(t, (e) => threadHook(t, JSON.parse(e.data)));
   es.onerror = () => { setTimeout(() => { if (es.readyState === 2) connectStream(); }, 3000); };
 }
 let threadHook = () => {};
+// Chrome and the wall draw from /api/state, so they follow every global event. Views that fetch their own data
+// redraw only on events that touch it (debounced, scroll kept); forms, the thread, files and the live view never do.
+const LIVE = {
+  crew: (t, x, [id, tab = "threads"]) => x.botId === id && (tab === "threads" ? ["thread", "turn", "pitstop"].includes(t) : tab === "computer" && ["computer", "lease"].includes(t)),
+  pitstops: (t) => t === "pitstop",
+  telemetry: (t) => t === "turn",
+  library: (t) => t === "turn",
+};
+let viewTimer = null;
+function refresh(t, x) {
+  clearTimeout(rerenderTimer);
+  rerenderTimer = setTimeout(async () => { S = await api("GET", "/api/state", undefined, { quiet: true }).catch(() => S); renderChrome(); if (current.name === "wall") renderView({ keepScroll: true }); }, 250);
+  if (!LIVE[current.name]?.(t, x, current.args) || $(".threadq")?.value) return;
+  const at = here; clearTimeout(viewTimer);
+  viewTimer = setTimeout(() => { if (here === at && !$(".threadq")?.value) renderView({ keepScroll: true }); }, current.name === "telemetry" || current.name === "library" ? 2000 : 600);
+}
 
 // ---------- shell ----------
 let here = "", backTo = null; // where the live view's Back returns to
@@ -113,6 +125,8 @@ function route() {
   current = { name: name || "wall", args };
   if (current.name === "live" && prev && !prev.startsWith("#/live")) backTo = prev;
   threadHook = () => {};
+  const watch = current.name === "t" ? current.args[0] || null : null;
+  if (!es || watch !== esThread) connectStream(watch); // before the view fetches, so less lands between the two
   renderChrome(); renderView();
 }
 function renderChrome() {
@@ -132,16 +146,24 @@ function renderChrome() {
     h("p", { class: "pc-lab" }, "Crew"),
     h("div", { class: "crewlist" }, S.bots.map((b) => {
       const [label, cls] = MOOD_LABEL[b.mood] || [""];
-      const on = (current.name === "crew" && current.args[0] === b.id) || (current.name === "t" && S.bots.find((x) => x.threads.some((t) => t.id === current.args[0]))?.id === b.id);
+      const on = (current.name === "crew" && current.args[0] === b.id) || (current.name === "t" && (current.botId ?? S.bots.find((x) => x.threads.some((t) => t.id === current.args[0]))?.id) === b.id);
       return h("a", { class: `pc-tile ${on ? "on" : ""}`, style: `--hue:var(--${b.hue})`, href: `#/crew/${b.id}` }, face(b), h("b", {}, b.name), b.mood === "working" ? h("pc-loader", {}) : h("small", { class: cls }, label));
     })),
     h("div", { class: "foot" }, h("a", { class: "pc-pill o s", href: "#/hire" }, "+ New crew member")));
 }
-function renderView() {
+// A slower, older render never replaces a newer one; a live redraw keeps where you'd scrolled to.
+let viewSeq = 0;
+function renderView({ keepScroll = false } = {}) {
   const main = $("#view");
   if (!main) return;
   const v = { wall: wallView, crew: crewView, t: threadView, pitstops: pitstopsView, telemetry: telemetryView, library: libraryView, settings: settingsView, hire: hireView, live: liveView }[current.name] || wallView;
-  Promise.resolve(v(...current.args)).then((el) => { if (el) main.replaceChildren(el); }).catch((e) => main.replaceChildren(h("div", { class: "page" }, h("p", { class: "badc" }, e.message))));
+  const seq = ++viewSeq;
+  Promise.resolve(v(...current.args)).then((el) => {
+    if (!el || seq !== viewSeq) return;
+    const y = keepScroll && [main.scrollTop, scrollY];
+    main.replaceChildren(el);
+    if (y) { main.scrollTop = y[0]; scrollTo(0, y[1]); }
+  }).catch((e) => seq === viewSeq && main.replaceChildren(h("div", { class: "page" }, h("p", { class: "badc" }, e.message))));
 }
 
 // ---------- pit stop card ----------
@@ -149,13 +171,14 @@ function pitCard(p, { onDone } = {}) {
   const b = bot(p.bot_id), d = p.detail || {}, j = p.jev || {};
   const done = p.status !== "pending";
   const note = h("input", { placeholder: "Note for the crew (optional)", class: "small" });
-  const decide = async (decision, scope) => { await api("POST", `/api/pitstops/${p.id}/decide`, { decision, scope, note: note.value }); toast(decision === "approve" ? "Approved" : "Denied"); onDone?.(); };
+  // The decided card replaces itself in place; nothing around it needs a refetch.
+  const decide = async (decision, scope) => { const r = await api("POST", `/api/pitstops/${p.id}/decide`, { decision, scope, note: note.value }); toast(decision === "approve" ? "Approved" : "Denied"); if (r?.id && el.isConnected) el.replaceWith(pitCard(r, { onDone })); onDone?.(r); };
   const body = p.kind === "command" ? h("pre", {}, String(d.command || "").replace(/^\/bin\/(ba)?sh -l?c /, ""))
     : p.kind === "mcp" ? h("pre", {}, `${d.server || ""}.${d.tool || ""}\n${JSON.stringify(d.args || d.message || {}, null, 1).slice(0, 1200)}`)
     : p.kind === "file" ? h("pre", {}, (d.paths || []).join("\n"))
     : p.kind === "hire" ? hireSummary(d.spec || {}) : null;
   const noAlways = ["pay", "delete", "share"].includes(p.effect) || p.kind === "hire";
-  return h("div", { class: `pit ${done ? "done" : ""}` },
+  const el = h("div", { class: `pit ${done ? "done" : ""}` },
     h("div", { class: "spread" }, h("div", { class: "row" }, face(b, "sm", done ? "idle" : "needs"), h("b", {}, b?.name || p.bot_id), effectChip(p.effect)),
       h("span", { class: "pc-m small faint" }, done ? `${p.status} ${ago(p.decided_at)}` : `expires ${when(p.expires_at)}`)),
     h("p", { class: "t" }, p.title), body,
@@ -171,6 +194,7 @@ function pitCard(p, { onDone } = {}) {
       h("button", { class: "pc-pill o s", onclick: () => decide("deny") }, "Deny"),
       p.thread_id && h("a", { class: "small faint", href: `#/t/${p.thread_id}`, style: "margin-left:auto" }, "Open thread"))],
     done && p.note && h("p", { class: "small faint" }, p.note));
+  return el;
 }
 function hireSummary(s) {
   const p = s.personality || {};
@@ -374,7 +398,9 @@ async function threadView(id) {
   if (!id) { location.hash = "#/"; return null; }
   const d = await api("GET", `/api/threads/${id}`);
   const b = { ...d.bot, ...(bot(d.bot.id) || {}) };
+  if (current.name === "t" && current.args[0] === id && current.botId !== b.id) { current.botId = b.id; renderChrome(); }
   const pits = new Map(d.pitstops.map((p) => [p.id, p]));
+  const cards = new Map(); // pit stop id → its slot in the stream, patched in place when it's decided
   const surfaces = new Map(d.surfaces.map((s) => [s.id, s]));
   const stream = h("div", { class: "stream" });
   const nearBottom = () => stream.scrollHeight - stream.scrollTop - stream.clientHeight < 160;
@@ -400,7 +426,7 @@ async function threadView(id) {
       case "error": return h("p", { class: "err" }, e.data.text);
       case "changes": return h("div", { class: "changes" }, h("div", { class: "spread" }, h("b", { class: "small" }, `Changed ${e.data.count} file${e.data.count === 1 ? "" : "s"}`), h("a", { class: "small faint", href: `#/crew/${e.data.botId}/files/${e.data.turnId}` }, "Review changes")),
         e.data.files.map((f) => h("a", { class: "cf", href: `#/crew/${e.data.botId}/files/${e.data.turnId}/${encodeURIComponent(f.path)}` }, h("span", { class: `pc-chip ${f.status === "added" ? "ok" : f.status === "deleted" ? "bad" : "blue"}` }, f.status[0].toUpperCase()), h("span", { class: "pc-m small" }, f.path), f.lines ? h("span", { class: `pc-m small ${f.lines > 0 ? "okc" : "badc"}` }, `${f.lines > 0 ? "+" : ""}${f.lines} lines`) : null)));
-      case "pitstop": { const p = pits.get(e.data.id); return p ? h("div", { style: "margin-left:40px;max-width:760px" }, pitCard(p, { onDone: () => renderView() })) : null; }
+      case "pitstop": { const p = pits.get(e.data.id); if (!p) return null; const slot = h("div", { style: "margin-left:40px;max-width:760px" }, pitCard(p)); cards.set(p.id, slot); return slot; }
       case "surface": {
         const s = surfaces.get(e.data.id);
         if (!s) return null;
@@ -492,22 +518,25 @@ async function threadView(id) {
         h("div", { class: "bar" }, h("button", { class: "attach", title: "Attach files or paste an image", onclick: () => file.click() }, "+ Attach"), file, h("span", { class: "small faint hint" }, "Enter to send · Shift+Enter for a new line"), h("span", { style: "flex:1" }), modeSeg, stopBtn, sendBtn)))),
     panel);
 
+  // Tokens land many times a frame: buffer them and write (and measure the scroll) once per animation frame.
+  let frame = 0;
+  const flush = () => { frame = 0; if (!streaming) return; const stick = nearBottom(); streaming.el.lastChild.textContent = streaming.text; if (stick) stream.scrollTop = 1e9; };
   threadHook = async (type, x) => {
     if (x.threadId !== id && !(type === "pitstop" && x.botId === b.id) && type !== "lease") return;
     if (type === "lease" && x.botId === b.id) leaseBack.classList.toggle("hidden", !x.held);
     if (type === "delta") {
-      if (!streaming || streaming.itemId !== x.itemId) { streaming = { itemId: x.itemId, text: "", el: h("div", { class: "msg bot" }, face(b, "sm", "working"), h("div", { class: "md" })) }; liveLine.before(streaming.el); }
-      streaming.text += x.text; streaming.el.lastChild.textContent = streaming.text; scroll();
+      if (!streaming || streaming.itemId !== x.itemId) { if (streaming) streaming.el.lastChild.textContent = streaming.text; streaming = { itemId: x.itemId, text: "", el: h("div", { class: "msg bot" }, face(b, "sm", "working"), h("div", { class: "md" })) }; liveLine.before(streaming.el); }
+      streaming.text += x.text; frame ||= requestAnimationFrame(flush);
     } else if (type === "event") {
       if (x.kind === "agent" && streaming) { streaming.el.remove(); streaming = null; }
-      if (x.kind === "pitstop") { const all = await api("GET", "/api/pitstops?status=pending", undefined, { quiet: true }).catch(() => []); for (const p of all) pits.set(p.id, p); }
-      if (x.kind === "surface") { const fresh = await api("GET", `/api/threads/${id}`, undefined, { quiet: true }).catch(() => null); for (const s of fresh?.surfaces || []) surfaces.set(s.id, s); }
+      if (x.kind === "pitstop") { if (x.pitstop) pits.set(x.pitstop.id, x.pitstop); else if (!pits.has(x.data.id)) for (const p of await api("GET", "/api/pitstops?status=pending", undefined, { quiet: true }).catch(() => [])) pits.set(p.id, p); }
+      if (x.kind === "surface") { if (x.surface) surfaces.set(x.surface.id, x.surface); else if (!surfaces.has(x.data.id)) { const fresh = await api("GET", `/api/threads/${id}`, undefined, { quiet: true }).catch(() => null); for (const s of fresh?.surfaces || []) surfaces.set(s.id, s); } }
       const el = renderEvent(x); if (el) { place(x, el, liveLine); scroll(x.kind === "user"); }
     } else if (type === "activity") { liveLine.lastChild.textContent = x.text; }
     else if (type === "context") setCtx(x.tokens, x.window);
     else if (type === "thread") { setRunning(x.status === "running" || x.status === "needs"); if (x.title && title.isConnected) { d.thread.title = x.title; title.textContent = x.title; } }
     else if (type === "turn") { setRunning(false); if (streaming) { streaming.el.remove(); streaming = null; } stream.querySelectorAll("details.steps[open]").forEach((x) => (x.open = false)); }
-    else if (type === "pitstop" && x.status !== "pending") { const all = await api("GET", `/api/threads/${id}`, undefined, { quiet: true }).catch(() => null); if (all) { for (const p of all.pitstops) pits.set(p.id, p); stream.querySelectorAll(".pit").forEach(() => {}); } }
+    else if (type === "pitstop" && x.pitstop) { pits.set(x.id, x.pitstop); const slot = cards.get(x.id); if (slot?.isConnected && x.status !== "pending") slot.replaceChildren(pitCard(x.pitstop)); }
   };
   setTimeout(() => scroll(true), 30);
   return page;
@@ -520,7 +549,7 @@ async function pitstopsView() {
   const batch = async (decision) => { if (!picks.size) return toast("Pick some pit stops first"); await api("POST", "/api/pitstops/batch", { ids: [...picks], decision }); toast(`${decision === "approve" ? "Approved" : "Denied"} ${picks.size}`); renderView(); };
   return h("div", { class: "page" },
     h("div", { class: "spread" }, h("h1", { class: "pc-h2" }, "Pit stops"), pending.length > 1 && h("div", { class: "row" }, h("button", { class: "pc-pill sig s", onclick: () => batch("approve") }, "Approve selected"), h("button", { class: "pc-pill o s", onclick: () => batch("deny") }, "Deny selected"))),
-    pending.length ? h("div", { class: "col" }, pending.map((p) => h("div", { class: "row", style: "align-items:flex-start;flex-wrap:nowrap" }, p.kind !== "hire" ? h("input", { type: "checkbox", style: "margin-top:22px", onchange: (e) => (e.target.checked ? picks.add(p.id) : picks.delete(p.id)) }) : h("span", { style: "width:13px" }), h("div", { style: "flex:1" }, pitCard(p, { onDone: () => renderView() })))))
+    pending.length ? h("div", { class: "col" }, pending.map((p) => h("div", { class: "row", style: "align-items:flex-start;flex-wrap:nowrap" }, p.kind !== "hire" ? h("input", { type: "checkbox", style: "margin-top:22px", onchange: (e) => (e.target.checked ? picks.add(p.id) : picks.delete(p.id)) }) : h("span", { style: "width:13px" }), h("div", { style: "flex:1" }, pitCard(p)))))
       : h("div", { class: "pc-card empty" }, h("pc-bot", { size: "lg", hue: "c3", mood: "done" }), h("p", { style: "margin-top:12px" }, "Nothing waiting. Ignored pit stops expire after 30 minutes and nothing happens.")),
     h("p", { class: "pc-lab" }, "Standing approvals"), rulesList(rules, () => renderView()),
     h("p", { class: "pc-lab" }, "Learned"), learnedList(learned, () => renderView()),

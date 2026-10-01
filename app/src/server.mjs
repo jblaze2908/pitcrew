@@ -11,6 +11,7 @@ import * as R from "./runtime.mjs";
 import { getBot, listBots, ensureChief, updateBot, normaliseSpec, createBot } from "./crew.mjs";
 import { objectText } from "./snapshot.mjs";
 import { serveShot, SHOT_NAME } from "./shots.mjs";
+import { send, serveFile as serveCached, warm } from "./delivery.mjs";
 import { listProjects, openProject, proxyCode, startCodeSweeper, reapCode } from "./code.mjs";
 import { botDir, listFiles, reapOrphans, startIdleSweeper, allComputers, allBrains, startBootSocket, toolManifest } from "./computer.mjs";
 
@@ -18,16 +19,10 @@ const PORT = Number(process.env.PORT || 8330);
 const WEB = new URL("../web/", import.meta.url).pathname;
 const NOVNC = process.env.NOVNC_DIR || "/usr/share/novnc";
 const HOST = process.env.PITCREW_HOST || "pitcrew.example.com";
-const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json", ".ico": "image/x-icon", ".woff2": "font/woff2" };
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
 const cookie = (req, name) => (req.headers.cookie || "").split(/;\s*/).map((c) => c.split("=")).find(([k]) => k === name)?.[1];
 const authed = (req) => A.sessionValid(cookie(req, "pc_s"));
-function send(res, status, body, headers = {}) {
-  const data = typeof body === "string" || Buffer.isBuffer(body) ? body : JSON.stringify(body);
-  res.writeHead(status, { "Content-Type": typeof body === "string" ? "text/plain; charset=utf-8" : "application/json", "Cache-Control": "no-store", ...headers });
-  res.end(data);
-}
 async function body(req, limit = 1 << 20) {
   const chunks = []; let n = 0;
   for await (const c of req) { n += c.length; if (n > limit) throw A.httpErr(413, "Too large"); chunks.push(c); }
@@ -45,12 +40,13 @@ function mood(b, threads, pending, up) {
   if (!up) return "sleep";
   return last === "completed" ? "done" : "idle";
 }
-function botCard(b, pending) {
-  const threads = all("SELECT id,title,status,created_at,updated_at,pinned FROM threads WHERE bot_id=? AND archived=0 ORDER BY pinned DESC, updated_at DESC", b.id);
+// /api/state needs at most 9 threads a member (wall, sidebar, thread panel); the crew view asks for all of them.
+function botCard(b, pending, limit = -1) {
+  const threads = all("SELECT id,title,status,created_at,updated_at,pinned FROM threads WHERE bot_id=? AND archived=0 ORDER BY pinned DESC, updated_at DESC LIMIT ?", b.id, limit);
   const c = allComputers().find((x) => x.bot.id === b.id), br = allBrains().find((x) => x.bot.id === b.id);
   return { ...b, threads, mood: mood(b, threads, pending, !!c?.up || !!br?.up), spend: R.weekSpend(b.id), computer: { up: !!c?.up, desktop: !!c?.desktopUp, startedAt: c?.startedAt ?? null, lease: R.leaseHeld(b.id) } };
 }
-const pitRow = (p) => p && { ...p, detail: json(p.detail, {}), jev: json(p.jev, {}), learn: p.status === "pending" ? R.learnProgress(p) : null };
+const pitRow = R.pitRow;
 const LEARNED = `SELECT l.rowid id, l.*, ${R.LEARN_AFTER} need, b.name bot_name FROM learned l JOIN bots b ON b.id=l.bot_id`;
 // A learned pattern only acts while the member's policy allows its effect; hide the ones a policy change switched off.
 const liveLearned = (rows) => rows.filter((l) => getBot(l.bot_id)?.policy[l.effect] === "allow");
@@ -59,7 +55,7 @@ function state() {
   const dayStart = (() => { const d = new Date(now() + 330 * 60000); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - 330 * 60000; })();
   return {
     driverName: getSetting("driver_name", "Driver"), paused: getSetting("paused") === "1", defaultProvider: getSetting("default_provider", "openrouter"), plainVoice: getSetting("plain_voice") === "1",
-    bots: listBots().map((b) => botCard(b, pending)), pitstops: pending, providers: P.providerStatus(),
+    bots: listBots().map((b) => botCard(b, pending, 12)), pitstops: pending, providers: P.providerStatus(),
     today: one("SELECT COALESCE(SUM(cost_usd),0) usd, COUNT(*) runs FROM turns WHERE started_at>=?", dayStart),
     week: one("SELECT COALESCE(SUM(cost_usd),0) usd, COUNT(*) runs FROM turns WHERE started_at>=?", R.weekStart()),
     weekCap: one("SELECT COALESCE(SUM(weekly_cap_usd),0) c FROM bots WHERE archived=0").c,
@@ -106,9 +102,11 @@ route("POST", "/api/password", async (req) => { const b = await jbody(req); A.ch
 function login(res) { res.setHeader("Set-Cookie", `pc_s=${A.newSession()}; Path=/; Max-Age=${30 * 86400}; HttpOnly; Secure; SameSite=Strict`); }
 
 route("GET", "/api/state", () => state());
+// ?thread=<id> also subscribes to that thread's transcript (events, deltas, activity, context); the rest is global.
 route("GET", "/api/stream", (req, res) => {
+  const thread = new URL(req.url, "http://x").searchParams.get("thread");
   res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", Connection: "keep-alive", "X-Accel-Buffering": "no" });
-  res.write(": hi\n\n"); R.bus.add(res); return null;
+  res.write(": hi\n\n"); R.bus.add(res, /^[\w-]{1,64}$/.test(thread || "") ? thread : null); return null;
 });
 route("PATCH", "/api/settings", async (req) => {
   const b = await jbody(req);
@@ -291,15 +289,14 @@ function serveFile(req, res, botId, rel) {
   createReadStream(full).pipe(res);
 }
 
+// App files revalidate on every load (no-cache + ETag, so a deploy shows at once); vendored noVNC keeps a day.
 function serveStatic(req, res, path) {
   let root = WEB, rel = path;
   if (path.startsWith("/novnc/")) { root = NOVNC; rel = path.slice(6); }
   if (!/^\/[\w./-]*$/.test(rel) || rel.includes("..")) return send(res, 404, "Not found");
   let full = join(root, rel);
   if (root === WEB && (rel === "/" || !existsSync(full) || !extname(rel))) full = join(WEB, "index.html");
-  if (!existsSync(full) || !statSync(full).isFile()) return send(res, 404, "Not found");
-  res.writeHead(200, { "Content-Type": TYPES[extname(full)] || "application/octet-stream", "Cache-Control": root === NOVNC ? "public, max-age=86400" : "no-cache" });
-  createReadStream(full).pipe(res);
+  if (!serveCached(req, res, full, root === NOVNC ? "public, max-age=86400" : "no-cache")) send(res, 404, "Not found");
 }
 
 const server = createServer(async (req, res) => {
@@ -384,4 +381,4 @@ startCodeSweeper();
 startIdleSweeper(R.isBusy, R.isThinking);
 startBootSocket(R.computerHooks);
 toolManifest().then((m) => console.log(`tool manifest: ${m.browser.length} browser, ${m.computer.length} pixel`)).catch((e) => console.error("tool manifest failed:", e.message));
-server.listen(PORT, () => console.log(`pitcrew control plane on :${PORT} (${HOST})`));
+server.listen(PORT, () => { console.log(`pitcrew control plane on :${PORT} (${HOST})`); for (const f of readdirSync(WEB, { recursive: true })) warm(join(WEB, f)); });
