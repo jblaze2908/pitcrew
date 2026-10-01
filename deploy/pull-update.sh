@@ -41,6 +41,10 @@ if [[ "$(cat "$STATE_DIR/failed-commit" 2>/dev/null || true)" == "$target_commit
 reject() { echo "$target_commit" >"$STATE_DIR/failed-commit"; notify "❌ $short rejected: $1"; echo "rejected: $1" >&2; exit 1; }
 
 git checkout --detach "$target_commit"
+# Bash is still reading the pre-checkout copy of this script; rerun the new one so a release that changes the deploy steps gets them.
+if [[ -z "${PITCREW_REEXEC:-}" ]] && ! git diff --quiet "${deployed_commit:-$target_commit}" "$target_commit" -- deploy/pull-update.sh; then
+  PITCREW_REEXEC=1 exec bash "$DEPLOY_DIR/deploy/pull-update.sh"
+fi
 prev_computer="$(sed -n 's/^PITCREW_COMPUTER_TAG=//p' "$RELEASE" 2>/dev/null || true)"
 computer_tag="$prev_computer"
 if [[ -z "$deployed_commit" || -z "$prev_computer" ]] || ! docker image inspect "pitcrew-computer:$prev_computer" >/dev/null 2>&1 \
