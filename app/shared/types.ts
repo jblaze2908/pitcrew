@@ -102,3 +102,60 @@ export interface PlanSnapshot {
   log: { at: number; text: string }[]; sweep: { who: string; text: string; found: boolean }[] | null;
   items: PlanItemView[];
 }
+
+// ---------- other endpoints the web app reads ----------
+export interface Session { setup: boolean; authed: boolean }
+export interface Memory { id: string; bot_id: string; text: string; source: string; created_at: number; updated_at: number }
+export interface Schedule { id: string; bot_id: string; thread_id: string | null; spec: string; prompt: string; enabled: number; next_run: number | null; created_at: number }
+export interface Rule { id: string; bot_id: string; bot_name?: string; label: string; effect: string; created_at: number }
+export interface Learned { id: number; bot_id: string; bot_name?: string; label: string; effect: string; streak: number; need: number; approvals: number; denials: number }
+/** GET /api/bots/:id */
+export interface BotDetail { bot: BotCard; memory: Memory[]; schedules: Schedule[]; rules: Rule[]; learned: Learned[] }
+/** A row of BotCard.threads, or of GET /api/bots/:id/threads?q= (which adds archived and a snippet). */
+export interface ThreadRow { id: string; title: string; status?: ThreadStatus; pinned?: number; archived?: number; snippet?: string; created_at: number; updated_at: number }
+
+export type SiteMode = "allowed" | "read" | "blocked";
+export interface SiteRow { scope: string; domain: string; mode: SiteMode; overrides: Record<string, Decision>; by: string; created_at: number; updated_at: number }
+export interface SitesView { scope: string; modes: SiteMode[]; sites: SiteRow[] }
+
+export interface ModelInfo { id: string; name: string; price?: { in: number; out: number } | null }
+
+export interface FileChange { path: string; status: "added" | "modified" | "deleted" | string; lines?: number; before?: string | null; after?: string | null }
+export interface ChangeRun { id: string; thread_id: string; started_at: number; thread_title: string; changes: FileChange[] }
+export interface FileDiff extends FileChange { text?: boolean; size?: number; beforeText: string; afterText: string }
+export interface FsEntry { name: string; dir: boolean; size: number; mtime: number }
+export type FsNode = { type: "dir"; path: string; entries: FsEntry[] } | { type: "file"; path: string; size: number; mtime: number; image: boolean; text?: string };
+export interface Project { path: string; git?: boolean }
+
+export interface Run {
+  id: string; thread_id: string; bot_id: string; bot_name: string; thread_title: string; trigger: string; status: string; error: string | null;
+  started_at: number; input_tokens: number | null; output_tokens: number | null; cost_usd: number | null; cost_basis: string;
+}
+export interface OpenRouterUsage { balance?: number | null; limit?: number | null; limit_remaining?: number | null; limit_reset?: string | null; usage?: number; usage_daily?: number; usage_weekly?: number }
+export interface PlanWindow { usedPercent: number; windowMins?: number; resetsAt?: number | null }
+export interface PlanLimits { connected?: boolean; plan?: string; reached?: boolean; primary?: PlanWindow | null; secondary?: PlanWindow | null; credits?: { has: boolean; unlimited?: boolean; balance?: string | number | null } | null; at?: number }
+export interface Telemetry {
+  bots: { id: string; name: string; hue: Hue; shape: Shape; cap: number; spend: number; runs: number; failed: number }[];
+  runs: Run[]; handled: number;
+  pitstops: { total: number; approved: number | null; denied: number | null; expired: number | null; wait_ms: number } | null;
+  byModel: { provider: string; model: string; runs: number; usd: number | null; input: number | null; output: number | null }[];
+  openrouter: OpenRouterUsage | null; chatgpt: PlanLimits | null;
+}
+export interface LibraryBot { id: string; name: string; hue: Hue; shape: Shape; files: { path: string; size: number; mtime: number }[] }
+export interface Surface { id: string; title: string; spec: any; saved?: number }
+export interface KeptSurface extends Surface { thread_id: string; bot_id: string; bot_name: string; hue: Hue; created_at: number }
+
+/** Server-sent events on /api/stream. The thread-only kinds (event, delta, activity, context) arrive only with ?thread=. */
+export interface StreamEvents {
+  thread: { id: string; botId?: string; status: ThreadStatus; title?: string };
+  turn: { threadId: string; turnId: string; status: string; cost?: number; botId: string };
+  pitstop: { id: string; botId: string; threadId: string | null; status: PitStop["status"]; pitstop?: PitStop };
+  computer: { botId: string; up: boolean; desktop: boolean; startedAt: number | null };
+  paused: { paused: boolean };
+  lease: { botId: string; held: boolean };
+  event: { id: number; threadId: string; turnId: string | null; kind: EventKind; data: Record<string, any>; ts: number; pitstop?: PitStop; surface?: Surface };
+  delta: { threadId: string; itemId: string; text: string };
+  activity: { threadId: string; botId?: string; text: string };
+  context: { threadId: string; tokens: number; window: number };
+}
+export type StreamType = keyof StreamEvents;
