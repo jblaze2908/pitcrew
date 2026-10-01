@@ -62,6 +62,23 @@ Measured on the live instance (`deploy/e2e.mjs --only=browser --probe`, temporar
 
 Known: Codex's `aggregatedOutput` on remote commands can miss the first lines (the model's own copy is complete; UI cosmetic). `fill_form` sometimes escalates to a pit stop on jev's "leaves machine" signal (over-ask, not unsafe).
 
+## 2026-10-01 — front door, delegation, plans, new stack
+
+- **Stack:** server is TypeScript + Hono (runtime split into modules under `app/src/runtime/`, zod-checked bodies,
+  same API); web app is Vite + React 19 + TypeScript; both typed by `app/shared/types.ts`. TypeScript 7 (the Go
+  compiler). Docker build stage runs `npm ci && npm run build`. Lockfile must use registry.npmjs.org URLs (CI checks).
+- **Provider limits** on Telemetry: OpenRouter credits/key cap; ChatGPT plan 5-hour and weekly windows read from
+  OpenAI via a one-shot Codex app-server (`account/rateLimits/read`), so they include use outside Pitcrew.
+- **Front door:** Pit wall composer routes each message with one jev `choice` over member jobs (dry-run on a
+  hypothetical 5-member crew: 11/12 right, ~350–700 ms); names in the sentence route directly (2+ → the Chief plans);
+  under 55% it asks; header pill moves a message; Your asks shows live state.
+- **Delegation:** `ask_crew_member` (Chief only); private members can't be asked.
+- **Plans** (Settings → General → Crew plans, on by default): the Chief edits a living todo; Pitcrew runs items, hands
+  results on, wakes the Chief per item, asks every contributor for alternatives before finish; limits ask the driver.
+  Gate 3 on the Goa scenario passed (117 s, 5 Chief runs, $0.24 on members' caps). Details: Obsidian
+  "Research - orchestration".
+- Designs: Draft canvas "Pitcrew — Screens", boards 20–22.
+
 ## Status — deployed 2026-10-01
 
 Live at https://pitcrew.example.com (Traefik file-provider router → `172.17.0.1:8330`, Let's Encrypt cert issued on first request). First-run setup (setup token → password) is left for Jai.
