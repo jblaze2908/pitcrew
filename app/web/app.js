@@ -194,7 +194,9 @@ function pitCard(p, { onDone } = {}) {
       h("button", { class: "pc-pill o s", onclick: () => decide("approve", "full") }, "Allow site fully"),
       h("button", { class: "pc-pill o s", onclick: () => decide("deny", "block") }, "Block site"),
       p.thread_id && h("a", { class: "small faint", href: `#/t/${p.thread_id}`, style: "margin-left:auto" }, "Open thread"))],
-    !done && !["hire", "lease", "site"].includes(p.kind) && [note, h("div", { class: "acts" },
+    !done && p.kind === "plan" && h("div", { class: "acts" }, h("button", { class: "pc-pill sig s", onclick: () => decide("approve", "once") }, p.effect === "browse" ? "Allow for this plan" : "Allow"),
+      h("button", { class: "pc-pill o s", onclick: () => decide("deny") }, p.effect === "browse" ? "Use what they know" : "Finish with what it has"), p.thread_id && h("a", { class: "small faint", href: `#/t/${p.thread_id}`, style: "margin-left:auto" }, "Open plan")),
+    !done && !["hire", "lease", "site", "plan"].includes(p.kind) && [note, h("div", { class: "acts" },
       h("button", { class: "pc-pill sig s", onclick: () => decide("approve", "once") }, "Approve once"),
       p.thread_id && h("button", { class: "pc-pill o s", onclick: () => decide("approve", "thread") }, "For this thread"),
       !noAlways && h("button", { class: "pc-pill o s", onclick: () => decide("approve", "always") }, "Always for this member"),
@@ -228,6 +230,7 @@ function wallView() {
     h("div", { class: "spread" }, h("h1", { class: "pc-hello" }, `${greet}, ${S.driverName}. `, n ? h("em", {}, `${n} pit stop${n > 1 ? "s" : ""} need${n > 1 ? "" : "s"} you.`) : "All quiet."),
     ),
     askBox(),
+    (asksEl = h("section", { class: "pc-card asks hidden" }), setTimeout(refreshAsks), asksEl),
     !connected && h("div", { class: "pc-card row" }, h("pc-bot", { size: "md", hue: "c1", mood: "sleep" }), h("div", { class: "col", style: "flex:1;gap:2px" }, h("b", { class: "pc-h3" }, "Connect a model provider to start"), h("p", { class: "muted small" }, "Add an OpenRouter or AI Gateway key, or sign in with ChatGPT. The crew runs on whichever you pick.")), h("a", { class: "pc-pill s", href: "#/settings" }, "Providers")),
     S.paused && h("div", { class: "pc-card row" }, h("b", { class: "sig", style: "flex:1" }, "The crew is stopped. Nothing runs until you resume."), h("button", { class: "pc-pill s", onclick: async () => { S = await api("POST", "/api/resume"); renderChrome(); renderView(); } }, "Resume the crew")),
     n > 0 && h("section", { class: "col" }, h("div", { class: "spread" }, h("p", { class: "pc-lab" }, "Box, box: waiting on you"), n > 1 && h("a", { class: "small faint", href: "#/pitstops" }, "Batch decide")), h("div", { class: "grid2" }, S.pitstops.slice(0, 6).map((p) => pitCard(p)))),
@@ -237,39 +240,162 @@ function wallView() {
       h("div", { class: "pc-card col" }, h("p", { class: "pc-lab" }, "Computers"), h("span", { class: "big num" }, String(S.computersUp)), h("p", { class: "small muted" }, "up now. Idle computers go back to the garage after 10 minutes."))),
     h("section", { class: "col" }, h("p", { class: "pc-lab" }, "The crew"), h("div", { class: "grid3" }, S.bots.map(crewCard), h("a", { class: "pc-card crewcard", href: "#/hire", style: "justify-content:center;align-items:center;border-style:dashed" }, h("b", { class: "pc-h3" }, "+ New crew member"), h("p", { class: "small faint" }, "Every hire is reviewed by you.")))));
 }
-// One way in: Pitcrew picks the member whose job covers the message (or asks when unsure); "to" overrides it.
-function askBox() {
-  const text = h("textarea", { placeholder: "Ask your crew anything. Pitcrew picks who takes it.", rows: 1 });
-  const to = h("select", { class: "to", title: "Who takes it" }, h("option", { value: "" }, "Auto"), S.bots.map((b) => h("option", { value: b.id }, b.name)));
-  const sendBtn = h("button", { class: "pc-pill s" }, "Send");
-  const choose = h("div", { class: "row choose hidden" });
-  const grow = () => { text.style.height = "auto"; text.style.height = `${Math.min(220, text.scrollHeight)}px`; };
-  const go = async (botId = to.value) => {
-    if (!text.value.trim() || sendBtn.disabled) return;
-    sendBtn.disabled = true; sendBtn.textContent = botId ? "Sending…" : "Routing…";
-    try {
-      const r = await api("POST", "/api/ask", { text: text.value, ...(botId ? { botId } : {}) });
-      if (r.choose) {
-        choose.replaceChildren(h("span", { class: "small muted" }, "Who's this for?"), ...r.choose.map(bot).filter(Boolean).map((b) => h("button", { class: "pc-pill o s", onclick: () => go(b.id) }, face(b, "xs"), b.name)));
-        choose.classList.remove("hidden"); return;
-      }
-      text.value = ""; location.hash = `#/t/${r.threadId}`;
-    } finally { sendBtn.disabled = false; sendBtn.textContent = "Send"; }
-  };
-  sendBtn.addEventListener("click", () => go());
-  text.addEventListener("input", () => { grow(); choose.classList.add("hidden"); });
-  text.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); go(); } });
-  return h("div", { class: "composer askbox" }, h("div", { class: "box" }, text, h("div", { class: "bar" }, h("span", { class: "small faint hint" }, "Enter to send"), h("span", { style: "flex:1" }), to, sendBtn)), choose);
+// ---------- member menu ----------
+// One menu for the composer pill, @ in the text and the thread header: face, name, a one-line job, number keys.
+let openMenu = null;
+const closeMenu = () => { openMenu?.el.remove(); openMenu = null; };
+document.addEventListener("mousedown", (e) => { if (openMenu && !openMenu.el.contains(e.target) && !openMenu.anchor.contains(e.target)) closeMenu(); });
+const jobLine = (b) => (b.kind === "chief" ? "Anything else; can ask the others" : b.job || "");
+const chev = () => h("span", { class: "chev" });
+function memberMenu(anchor, { onPick, auto = true, filter = null, current = null, exclude = null }) {
+  closeMenu();
+  const q = (filter || "").toLowerCase();
+  const list = [...(auto && filter == null ? [{ id: "", name: "Auto", auto: true }] : []), ...S.bots.filter((b) => b.id !== exclude && (!q || b.name.toLowerCase().includes(q)))];
+  if (!list.length) return null;
+  let at = Math.max(0, list.findIndex((b) => b.id === (current ?? "")));
+  const pick = (i) => { const b = list[i]; closeMenu(); onPick(b.id || null); };
+  const rows = list.map((b, i) => h("button", { class: "mi", onmousedown: (e) => { e.preventDefault(); pick(i); } },
+    b.auto ? h("span", { class: "dot" }, "A") : face(b, "sm"),
+    h("span", { class: "col", style: "gap:2px;min-width:0;text-align:left" }, h("b", {}, b.name), h("span", { class: "small faint ell" }, b.auto ? "Pitcrew picks from each member's job" : jobLine(b))),
+    b.private ? h("span", { class: "pc-chip" }, "Private") : b.id && b.id === current ? h("span", { class: "pc-chip" }, "Picked") : filter == null && i < 10 ? h("span", { class: "kbd" }, String(i)) : h("span", {})));
+  const el = h("div", { class: "menu" }, rows);
+  const paint = () => rows.forEach((r, i) => r.classList.toggle("on", i === at));
+  paint();
+  const r = anchor.getBoundingClientRect();
+  el.style.left = `${Math.min(r.left, innerWidth - 400)}px`; el.style.top = `${r.bottom + 6}px`;
+  document.body.append(el);
+  openMenu = { el, anchor, mention: filter != null, key: (e) => {
+    if (e.key === "ArrowDown") at = (at + 1) % list.length; else if (e.key === "ArrowUp") at = (at - 1 + list.length) % list.length;
+    else if (e.key === "Enter" || e.key === "Tab") { pick(at); return true; } else if (e.key === "Escape") { closeMenu(); return true; }
+    else if (filter == null && /^[0-9]$/.test(e.key) && list[+e.key]) { pick(+e.key); return true; } else return false;
+    paint(); return true;
+  } };
+  return openMenu;
 }
-// Where a thread came from: routed by the front door (with "change") or asked by another member.
+
+// ---------- the front door ----------
+// One box for everything. Who takes the message shows in the box before sending: a member you picked (pill or @), the
+// members you named (two or more → a plan for the Crew Chief), or the router's guess. The guess asks the server 600 ms
+// after typing stops: one jev call per pause, none when a member is picked or named.
+const ROUTE_SURE = 0.55;
+const escRe = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const namedIn = (t) => S.bots.filter((b) => b.kind !== "chief" && new RegExp(`(^|[^\\p{L}])@?${escRe(b.name)}(?![\\p{L}])`, "iu").test(t));
+const plainText = (t) => String(t || "").replace(/[*_#`>|]/g, "").replace(/\s+/g, " ").trim();
+function askBox() {
+  const connected = Object.values(S.providers).some((p) => p.connected);
+  if (S.paused || !connected) return h("div", { class: "ask off" }, h("div", { class: "row", style: "gap:12px;opacity:.55" }, h("span", { class: "to auto" }, "Auto"), h("p", { class: "q ph" }, S.paused ? "The crew is stopped. Resume to send." : "Connect a provider to start.")),
+    h("div", { class: "bar" }, h("span", { style: "flex:1" }), S.paused ? h("button", { class: "pc-pill s", onclick: async () => { S = await api("POST", "/api/resume"); renderChrome(); renderView(); } }, "Resume the crew") : h("a", { class: "pc-pill s", href: "#/settings" }, "Connect a provider")));
+  let to = null, guess = null, pending = false, seq = 0, timer = null;
+  const text = h("textarea", { placeholder: "Ask your crew anything…", rows: 1 });
+  const hl = h("div", { class: "hl", "aria-hidden": "true" });
+  const pill = h("button", { class: "to auto", title: "Who takes it" });
+  const label = h("span", { class: "pc-lab ell" });
+  const sendBtn = h("button", { class: "pc-pill s" }, "Send");
+  const extra = h("div", { class: "extra" });
+  const sure = () => guess && (guess.confidence == null || guess.confidence >= ROUTE_SURE || !guess.alternatives?.length);
+  const grow = () => { text.style.height = "auto"; text.style.height = `${Math.min(240, text.scrollHeight)}px`; };
+  const paintHl = () => {
+    const t = text.value, names = S.bots.filter((b) => b.kind !== "chief").sort((a, b) => b.name.length - a.name.length);
+    const re = names.length ? new RegExp(`(^|[^\\p{L}])(@?(?:${names.map((b) => escRe(b.name)).join("|")}))(?![\\p{L}])`, "giu") : null;
+    const parts = []; let last = 0, m;
+    while (re && (m = re.exec(t))) { const s0 = m.index + m[1].length; parts.push(t.slice(last, s0)); const b = names.find((x) => x.name.toLowerCase() === m[2].replace(/^@/, "").toLowerCase()); parts.push(h("mark", { style: `--hue:var(--${b?.hue || "c1"})` }, m[2])); last = s0 + m[2].length; }
+    parts.push(t.slice(last) + "\n");
+    hl.replaceChildren(...parts); hl.scrollTop = text.scrollTop;
+  };
+  const render = () => {
+    const named = namedIn(text.value), multi = named.length > 1 && !to;
+    const chief = S.bots.find((b) => b.kind === "chief");
+    const m = to ? bot(to) : multi ? chief : named.length === 1 ? named[0] : !pending && sure() ? bot(guess.botId) : null;
+    const unsure = !to && !multi && named.length !== 1 && !pending && guess && !sure();
+    pill.className = `to${m ? "" : " auto"}`; pill.style.cssText = m ? `--hue:var(--${m.hue})` : "";
+    pill.replaceChildren(...(pending && !m ? [h("pc-loader", {}), "Finding who…"] : m ? [face(m, "xs"), m.name, chev()] : ["Auto", chev()]));
+    label.textContent = to ? `You picked${m?.private ? " · private" : ""}` : multi ? `${named.length} members · the Crew Chief plans it` : named.length === 1 ? `You named ${m.name}${m.private ? " · private" : ""}`
+      : m ? `Picked by Pitcrew${m.private ? " · private" : jobLine(m) ? ` · ${jobLine(m).toLowerCase()}` : ""}` : unsure ? "Who's this for?" : "";
+    const unknown = /\b([a-z]+)\s+bot\b/i.exec(text.value), stranger = unknown && !S.bots.some((b) => b.name.toLowerCase() === unknown[1].toLowerCase()) && unknown[1];
+    extra.replaceChildren(
+      unsure ? h("div", { class: "row", style: "gap:8px;flex-wrap:wrap" }, [guess.botId, ...guess.alternatives.map((a) => a.botId)].map(bot).filter(Boolean).map((b) => h("button", { class: "to alt", style: `--hue:var(--${b.hue})`, onclick: () => { to = b.id; render(); text.focus(); } }, face(b, "xs"), b.name))) : "",
+      stranger ? h("div", { class: "pc-quote small row", style: "gap:10px" }, h("span", { style: "flex:1" }, `No one on the crew is called ${stranger[0].toUpperCase() + stranger.slice(1)}.`), h("button", { class: "pc-pill o s", onclick: () => pickWho() }, "Pick someone"), h("a", { class: "pc-pill o s", href: "#/hire" }, `Hire ${stranger}`)) : "",
+      m?.private ? h("div", { class: "pc-quote small row", style: "gap:10px" }, h("span", { class: "pc-chip" }, "Private"), h("span", {}, `Only ${m.name} sees this and its answer. The Crew Chief can't ask ${m.name}.`)) : "",
+      multi && named.some((b) => b.private) ? h("div", { class: "pc-quote small row", style: "gap:10px" }, h("span", { class: "pc-chip" }, "Private"), h("span", {}, `${named.filter((b) => b.private).map((b) => b.name).join(", ")} is private, so the plan can't use it.`)) : "");
+    sendBtn.textContent = unsure ? "Pick one" : multi ? "Plan it" : m ? `Send to ${m.name}` : "Send";
+    sendBtn.disabled = unsure || !text.value.trim();
+    paintHl();
+  };
+  const pickWho = () => memberMenu(pill, { current: to, onPick: (id) => { to = id; render(); text.focus(); } });
+  pill.addEventListener("click", pickWho);
+  const guessNow = async () => {
+    const t = text.value.trim(), my = ++seq;
+    if (to || t.length < 8 || namedIn(t).length) { pending = false; render(); return; }
+    pending = true; render();
+    const r = await api("POST", "/api/ask", { text: t, dry: true }, { quiet: true }).catch(() => null);
+    if (my !== seq) return;
+    guess = r; pending = false; render();
+  };
+  // @ at the start sets the pill; anywhere else it becomes the member's name in the text, which names them.
+  const mention = () => {
+    const caret = text.selectionStart, before = text.value.slice(0, caret), mm = /(^|\s)@([\p{L}\d]*)$/u.exec(before);
+    if (!mm) { if (openMenu?.mention) closeMenu(); return; }
+    const start = caret - mm[2].length - 1;
+    memberMenu(text, { auto: false, filter: mm[2], onPick: (id) => {
+      const b = bot(id); if (!b) return;
+      if (!text.value.slice(0, start).trim()) { text.value = text.value.slice(caret).replace(/^\s+/, ""); to = id; }
+      else { text.value = `${text.value.slice(0, start)}${b.name} ${text.value.slice(caret)}`; text.selectionStart = text.selectionEnd = start + b.name.length + 1; }
+      grow(); render(); text.focus();
+    } });
+  };
+  const send = async () => {
+    const t = text.value.trim();
+    if (!t || sendBtn.disabled) return;
+    const named = namedIn(t), botId = to || (named.length ? null : !pending && sure() ? guess.botId : null);
+    sendBtn.disabled = true;
+    try {
+      const r = await api("POST", "/api/ask", { text: t, ...(botId ? { botId } : {}) });
+      if (r.choose) { guess = { botId: r.choose[0], confidence: 0, alternatives: r.choose.slice(1).map((x) => ({ botId: x })) }; return; }
+      text.value = ""; to = null; guess = null; grow();
+      toast(`Sent to ${bot(r.botId)?.name || "the crew"}`); refreshAsks();
+    } finally { render(); }
+  };
+  text.addEventListener("input", () => { grow(); clearTimeout(timer); seq++; pending = false; timer = setTimeout(guessNow, 600); mention(); render(); });
+  text.addEventListener("scroll", () => { hl.scrollTop = text.scrollTop; });
+  text.addEventListener("keydown", (e) => { if (openMenu && openMenu.key(e)) { e.preventDefault(); return; } if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
+  sendBtn.addEventListener("click", send);
+  const sugg = S.bots.length > 1
+    ? S.bots.filter((b) => b.kind !== "chief").slice(0, 4).map((b) => h("button", { class: "sug", onclick: () => { to = b.id; render(); text.focus(); } }, face(b, "xs"), h("span", { class: "who" }, b.name), plainText(b.job).slice(0, 48) || "Ask"))
+    : ["Pay this month's electricity bill", "Compare my health-insurance renewal", "Watch BLR → GOI fares for 14 Dec"].map((x) => h("button", { class: "sug", onclick: () => { text.value = x; grow(); render(); text.focus(); } }, x));
+  render();
+  return h("section", { class: "col askwrap" },
+    h("div", { class: "ask" }, h("div", { class: "row top" }, pill, h("div", { class: "field" }, hl, text)),
+      h("div", { class: "bar" }, label, h("span", { style: "flex:1" }), h("span", { class: "small faint hint" }, "@ to pick · Enter to send"), sendBtn), extra),
+    h("div", { class: "row sugs" }, sugg));
+}
+// Your asks: the latest front-door threads with their live state and short answers, so most asks need no click.
+let asksEl = null;
+async function refreshAsks() {
+  const el = asksEl; if (!el) return;
+  const list = await api("GET", "/api/asks", undefined, { quiet: true }).catch(() => []);
+  if (el !== asksEl) return;
+  el.replaceChildren(...(list.length ? [h("div", { class: "spread asks-h" }, h("p", { class: "pc-lab" }, "Your asks"), h("span", { class: "small faint" }, "Each one has its own thread")), ...list.map(askRow)] : []));
+  el.classList.toggle("hidden", !list.length);
+}
+function askRow(a) {
+  const b = bot(a.botId) || { name: "?", hue: "c1" }, members = (a.plan?.members || []).map(bot).filter(Boolean);
+  const pit = a.status === "needs" || S.pitstops.some((p) => p.thread_id === a.id);
+  const sub = pit ? "Waiting on you" : a.answer ? plainText(a.answer) : a.plan ? `Plan: ${a.plan.done} of ${a.plan.total} done` : a.running ? "Starting…" : "";
+  const state = pit ? h("span", { class: "pc-chip hot" }, "Pit stop") : a.running || a.plan?.status === "running" ? h("span", { class: "row", style: "gap:6px" }, h("pc-loader", {}), h("span", { class: "pc-m small faint" }, a.plan ? `${a.plan.done} OF ${a.plan.total}` : "ON TRACK"))
+    : h("span", { class: "pc-m small faint" }, `${a.answer ? "ANSWERED" : "DONE"} · ${ago(a.updatedAt).toUpperCase()}`);
+  return h("a", { class: "askrow", href: `#/t/${a.id}` },
+    h("span", { class: "faces" }, face(b, "sm", a.running ? "working" : pit ? "needs" : "idle"), ...members.slice(0, 3).map((x) => face(x, "sm"))),
+    h("span", { class: "col", style: "gap:2px;min-width:0" }, h("span", { class: "t ell" }, a.title), h("span", { class: "small faint ell" }, sub)),
+    h("span", { class: "pc-chip" }, `→ ${b.name}${a.origin?.by === "driver" ? " · you picked" : ""}`), state);
+}
+// Where a thread came from: routed by the front door (its pill changes who takes it) or asked by another member.
 function originChip(d, b) {
   const o = d.thread.origin ? JSON.parse(d.thread.origin) : null;
-  if (o?.kind === "delegated") { const f = bot(o.fromBot); return h("a", { class: "pc-chip blue", href: `#/t/${o.fromThread}`, title: "Open the thread that asked" }, `Asked by ${f?.name || "another member"}`); }
+  if (o?.kind === "delegated") { const f = bot(o.fromBot); return h("a", { class: "pc-chip blue", href: `#/t/${o.fromThread}`, title: "Open the thread that asked" }, o.planId ? `Plan step for ${f?.name || "another member"}` : `Asked by ${f?.name || "another member"}`); }
   if (o?.kind !== "routed") return null;
-  const others = S.bots.filter((x) => x.id !== b.id);
-  const sel = h("select", { class: "to", title: "Move this message to another member" }, h("option", { value: "" }, o.by === "driver" ? "Change" : "Not right? Change"), others.map((x) => h("option", { value: x.id }, x.name)));
-  sel.addEventListener("change", async () => { if (!sel.value) return; const r = await api("POST", `/api/threads/${d.thread.id}/reroute`, { botId: sel.value }); toast(`Moved to ${bot(r.botId)?.name}`); location.hash = `#/t/${r.threadId}`; });
-  return h("span", { class: "row", style: "gap:6px;flex:none" }, h("span", { class: "pc-chip", title: o.confidence != null ? `Routed with ${(o.confidence * 100).toFixed(0)}% confidence` : "" }, o.by === "driver" ? `→ ${b.name}` : `Routed → ${b.name}`), sel);
+  const pill = h("button", { class: "to alt", style: `--hue:var(--${b.hue})`, title: o.confidence != null ? `Routed with ${(o.confidence * 100).toFixed(0)}% confidence. Pick someone else to move this message.` : "Pick someone else to move this message" }, face(b, "xs"), b.name, chev());
+  pill.addEventListener("click", () => memberMenu(pill, { auto: false, exclude: b.id, onPick: async (id) => { if (!id) return; const r = await api("POST", `/api/threads/${d.thread.id}/reroute`, { botId: id }); toast(`Moved to ${bot(r.botId)?.name}`); location.hash = `#/t/${r.threadId}`; } }));
+  return h("span", { class: "row", style: "gap:6px;flex:none" }, h("span", { class: "pc-lab" }, o.by === "driver" ? "You picked" : o.by === "names" ? "You named several" : "Routed"), pill);
 }
 
 function crewCard(b) {
@@ -558,18 +684,25 @@ async function threadView(id) {
       }
       case "plan": {
         const old = delegs.get(e.data.id), P = e.data;
-        const st = { todo: ["to do", ""], doing: ["on track", "blue"], done: ["done", "ok"], failed: ["didn't finish", "bad"], cancelled: ["cancelled", ""] };
-        const el = h("div", { class: "deleg plan pc-card col" },
-          h("div", { class: "spread" }, h("b", { class: "pc-h3" }, P.status === "done" ? "Plan · done" : P.status === "stopped" ? "Plan · stopped" : "Plan"), h("div", { class: "row", style: "gap:8px" }, h("span", { class: "pc-m small faint" }, `${usd(P.spend)} of ${usd(P.budget)}`),
-            P.status === "running" && h("button", { class: "pc-pill o s", onclick: async (ev) => { if (!confirmInline(ev.target, "Stop?")) return; await api("POST", `/api/plans/${P.id}/stop`); } }, "Stop plan"))),
-          h("p", { class: "small muted" }, P.goal),
-          P.constraints?.length > 0 && h("div", { class: "col", style: "gap:2px" }, P.constraints.map((c) => { const k = P.checks?.find((x) => x.text.trim().toLowerCase() === c.trim().toLowerCase()); return h("p", { class: "small" }, h("span", { class: `pc-chip ${k?.status === "met" ? "ok" : k?.status === "unmet" ? "bad" : ""}` }, k?.status || "constraint"), " ", c, k?.note ? h("span", { class: "faint" }, ` · ${k.note}`) : null); })),
-          h("div", { class: "col", style: "gap:0" }, P.items.map((i) => { const who = bot(i.owner) || { name: i.ownerName }; const [lab, cls] = st[i.status] || [i.status, ""];
-            return h("div", { class: "pitem" }, h("div", { class: "spread" }, h("div", { class: "row", style: "gap:8px;min-width:0" }, face(who, "xs", i.status === "doing" ? "working" : "idle"), h("b", { class: "small" }, who.name), h("span", { class: "pc-m small faint" }, i.key), i.reopened ? h("span", { class: "pc-chip" }, `reopened ×${i.reopened}`) : null),
-              h("div", { class: "row", style: "gap:8px" }, i.cost ? h("span", { class: "pc-m small faint" }, usd(i.cost)) : null, h("span", { class: `pc-chip ${cls}` }, lab), i.toThread && h("a", { class: "small faint", href: `#/t/${i.toThread}` }, "Open"))),
-              h("p", { class: "small muted" }, i.task), i.why && h("p", { class: "small faint" }, `Why again: ${i.why}`),
-              i.result?.answer && h("p", { class: "small" }, i.result.answer), i.result?.assumed && !/^nothing\.?$/i.test(i.result.assumed) && h("p", { class: "small", style: "color:var(--warn)" }, `Assumed: ${i.result.assumed}`)); })),
-          P.answer && h("div", { class: "col", style: "gap:4px" }, h("p", { class: "pc-lab" }, "Answer"), md(P.answer)));
+        const grade = (c) => P.checks?.find((x) => x.text.trim().toLowerCase() === c.trim().toLowerCase());
+        const box = (i) => h("span", { class: `box ${i.status === "done" ? "done" : i.status === "doing" ? "doing" : i.reopened && i.status === "todo" ? "re" : ""}` });
+        const stLab = { todo: "waits", doing: "on track", done: "done", failed: "didn't finish", cancelled: "cancelled" };
+        const nothing = (x) => !x || /^nothing\.?$/i.test(x.trim());
+        const el = h("div", { class: "deleg plan pc-card" },
+          h("div", { class: "ph" }, face(bot(S.bots.find((b) => b.kind === "chief")?.id) || {}, "xs", P.status === "running" ? "working" : "idle"), h("b", { class: "pc-h3", style: "flex:1;min-width:0" }, P.goal),
+            h("span", { class: "pc-m small faint" }, P.status === "done" ? `DONE · ${usd(P.spend)}` : P.status === "stopped" ? "STOPPED BY YOU" : `${usd(P.spend)} OF ${usd(P.budget)}`),
+            P.status === "running" && h("button", { class: "pc-pill o s", onclick: async (ev) => { if (!confirmInline(ev.target, "Stop?")) return; await api("POST", `/api/plans/${P.id}/stop`); } }, "Stop plan")),
+          P.constraints?.length > 0 && h("div", { class: "cons" }, h("p", { class: "pc-lab" }, "Your constraints"), P.constraints.map((c) => { const k = grade(c); return h("div", { class: "con" }, h("span", { class: `pc-chip ${k?.status === "met" ? "ok" : k?.status === "unmet" ? "bad" : ""}` }, k?.status || "open"), h("span", {}, c, k?.note ? h("span", { class: "faint" }, ` · ${k.note}`) : null)); })),
+          P.status === "done" && P.answer && h("div", { class: "pans" }, md(P.answer)),
+          P.items.map((i) => { const who = bot(i.owner) || { name: i.ownerName }; const r = i.result || {};
+            return h("div", { class: `it ${["todo", "cancelled"].includes(i.status) ? "dim" : ""}` }, box(i), face(who, "sm", i.status === "doing" ? "working" : i.status === "done" ? "done" : i.status === "failed" ? "failed" : "idle"),
+              h("div", { class: "col", style: "gap:3px;min-width:0" }, h("b", { class: "small" }, who.name, h("span", { class: "k" }, `${i.key}${i.after?.length ? ` · after ${i.after.join(", ")}` : ""}${i.reopened ? " · again" : ""}`)),
+                h("p", { class: "small muted" }, i.task), i.why && h("p", { class: "why" }, `Why again: ${i.why} · run ${i.runs} of ${i.allowed}`),
+                r.answer && h("p", { class: "small ans" }, plainText(r.answer).slice(0, 320)), !nothing(r.assumed) && h("p", { class: "small", style: "color:var(--warn)" }, `Assumed: ${r.assumed}`),
+                !nothing(r.options) && h("p", { class: "small", style: "color:var(--data)" }, `Other options: ${r.options}`)),
+              h("span", { class: "col", style: "gap:4px;align-items:flex-end" }, h("span", { class: `st ${i.status === "done" ? "ok" : ""}` }, i.status === "doing" ? h("pc-loader", {}) : null, stLab[i.status] || i.status, i.cost ? ` · ${usd(i.cost)}` : ""), i.toThread && h("a", { class: "small faint", href: `#/t/${i.toThread}` }, "Open"))); }),
+          P.sweep && h("div", { class: "sweep" }, h("p", { class: "pc-lab" }, "Alternatives check"), P.sweep.map((x) => h("p", { class: "small" }, h("b", {}, `${x.who}: `), h("span", { style: x.found ? "color:var(--data)" : "" }, plainText(x.text).slice(0, 260))))),
+          P.log?.length > 0 && h("div", { class: "plog" }, P.log.slice(-4).map((l) => h("p", {}, `Chief · ${l.text}`))));
         if (old) { old.replaceWith(el); delegs.set(e.data.id, el); return null; }
         delegs.set(e.data.id, el); return el;
       }
@@ -835,6 +968,7 @@ async function settingsView(tab = "general") {
   const name = h("input", { value: S.driverName, onchange: () => saveSettings({ driverName: name.value }) });
   const defProv = h("select", { onchange: () => saveSettings({ defaultProvider: defProv.value }) }, Object.entries(prov).map(([k, p]) => h("option", { value: k, selected: k === S.defaultProvider }, p.label)));
   const plain = h("input", { type: "checkbox", checked: S.plainVoice, onchange: () => saveSettings({ plainVoice: plain.checked }) });
+  const plans = h("input", { type: "checkbox", checked: S.plans, onchange: () => saveSettings({ plans: plans.checked }) });
   const theme = h("div", { class: "seg" }, ["dark", "light"].map((t) => h("button", { class: document.documentElement.dataset.theme === t ? "on" : "", onclick: (e) => { document.documentElement.dataset.theme = t; try { localStorage.setItem("pc-theme", t); } catch {} theme.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === e.target)); } }, t)));
   const cur = h("input", { type: "password", placeholder: "Current password", autocomplete: "current-password" }), nxt = h("input", { type: "password", placeholder: "New password (12+)", autocomplete: "new-password" });
   const anyKey = Object.values(prov).some((p) => p.connected);
@@ -843,7 +977,9 @@ async function settingsView(tab = "general") {
   const tabs = h("div", { class: "tabs" }, TABS.map(([k, l, dot]) => h("a", { href: `#/settings/${k}`, class: tab === k ? "on" : "" }, l, dot ? h("i", { class: "dot" }) : null)));
   const body = {
     general: () => h("div", { class: "pc-card col", style: "max-width:640px" }, lab("Your name", name), lab("Default provider for new crew members", defProv),
-      h("label", { class: "row small" }, plain, "Plain voice for the whole crew"), h("div", { class: "field" }, h("label", {}, "Theme"), theme)),
+      h("label", { class: "row small" }, plain, "Plain voice for the whole crew"),
+      h("label", { class: "row small", style: "align-items:flex-start" }, plans, h("span", { class: "col", style: "gap:2px" }, "Crew plans", h("span", { class: "faint" }, "When a message needs several members, the Crew Chief runs it as a todo list. New Chief threads pick this up."))),
+      h("div", { class: "field" }, h("label", {}, "Theme"), theme)),
     models: () => h("div", { class: "col" }, h("div", { class: "grid3" }, keyCard("openrouter", "sk-or-…"), keyCard("aigateway", "AI Gateway key"), chatgpt),
       h("p", { class: "small faint" }, "jev (the pit-stop decider) runs on TypeSafe Jev through your OpenRouter key. Without one, every consequential action becomes a pit stop.")),
     sites: async () => sitesEditor("global", "Every crew member gets these. A member's own entry wins, except a crew-wide block. Loopback (the crew's own file server) is always allowed; private network addresses never are."),
