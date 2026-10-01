@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, chownSync, chmodSync, writeFileSync, existsSync, lstatSync, symlinkSync, unlinkSync, copyFileSync, statSync, readdirSync, readFileSync, renameSync } from "node:fs";
 import { getSecret } from "./auth.mjs";
 import { execFs } from "./execfs.mjs";
+import { policyMount } from "./domains.mjs";
 
 export const ROOT = process.env.PITCREW_ROOT || "/srv/pitcrew";
 export const IMAGE = process.env.PITCREW_COMPUTER_IMAGE || "pitcrew-computer:1";
@@ -204,7 +205,7 @@ export class Computer {
     const r = await docker(["run", "-d", "--rm", "--name", this.name, "--hostname", id.slice(0, 20).replace(/[^a-z0-9-]/gi, "-"), "--label", "pitcrew=computer",
       "--cpus", "1.5", "--memory", "2g", "--pids-limit", "768", "--shm-size", "512m",
       "--read-only", "--tmpfs", "/tmp:size=768m,mode=1777", "--tmpfs", `/home/crew:size=128m,uid=${CREW_UID},gid=${CREW_UID},mode=700`,
-      "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--network", net, "-v", `${botDir(id)}:/bot`,
+      "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--network", net, "-v", `${botDir(id)}:/bot`, ...policyMount(id),
       "-e", `PITCREW_HUE=${HEX[b.hue] || HEX.c1}`, "-e", `PITCREW_NAME=${b.name.replace(/[^\w .'-]/g, "")}`, IMAGE]);
     if (!r.ok) throw new Error(`Couldn't start the computer: ${r.err.trim().slice(0, 200)}`);
     // The brain joins this bot's network to reach its exec-server; nothing else is on it.

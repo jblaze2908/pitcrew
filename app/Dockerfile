@@ -8,6 +8,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 # noVNC client files for the live view, from the same package the computers run.
 COPY --from=computer /usr/share/novnc /usr/share/novnc
+# The computers' managed Chrome policy, so the control plane can add each member's blocked domains (domains.mjs).
+COPY --from=computer /etc/opt/chrome_for_testing/policies/managed/pitcrew.json /app/chrome-policy.json
 WORKDIR /app
 COPY package.json ./
 COPY src ./src

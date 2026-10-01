@@ -13,6 +13,7 @@ import { objectText } from "./snapshot.mjs";
 import { serveShot, SHOT_NAME } from "./shots.mjs";
 import { send, serveFile as serveCached, warm } from "./delivery.mjs";
 import { listProjects, openProject, proxyCode, startCodeSweeper, reapCode } from "./code.mjs";
+import { listSites, setSite, removeSite, MODES } from "./domains.mjs";
 import { botDir, listFiles, reapOrphans, startIdleSweeper, allComputers, allBrains, startBootSocket, toolManifest } from "./computer.mjs";
 
 const PORT = Number(process.env.PORT || 8330);
@@ -197,7 +198,7 @@ route("GET", "/api/pitstops", (req) => {
   const st = new URL(req.url, "http://x").searchParams.get("status");
   return st === "pending" ? all("SELECT * FROM pitstops WHERE status='pending' ORDER BY created_at").map(pitRow) : all("SELECT * FROM pitstops ORDER BY created_at DESC LIMIT 200").map(pitRow);
 });
-route("POST", "/api/pitstops/:id/decide", async (req, res, { id }) => { const b = await jbody(req); return pitRow(await R.decide(id, b.decision === "approve" ? "approve" : "deny", { scope: ["once", "thread", "always"].includes(b.scope) ? b.scope : "once", note: b.note || "", spec: b.spec || null })); });
+route("POST", "/api/pitstops/:id/decide", async (req, res, { id }) => { const b = await jbody(req); return pitRow(await R.decide(id, b.decision === "approve" ? "approve" : "deny", { scope: ["once", "thread", "always", "site", "full", "block"].includes(b.scope) ? b.scope : "once", note: b.note || "", spec: b.spec || null })); });
 route("POST", "/api/pitstops/batch", async (req) => {
   const b = await jbody(req);
   const out = [];
@@ -207,6 +208,11 @@ route("POST", "/api/pitstops/batch", async (req) => {
   }
   return { decided: out.length };
 });
+// Sites: per-domain policy, global (scope=global) or per crew member (scope=<bot id>).
+const siteScope = (scope) => { if (scope === "global" || getBot(String(scope || ""))) return String(scope); throw A.httpErr(400, "scope is global or a crew member id"); };
+route("GET", "/api/sites", (req) => { const scope = siteScope(new URL(req.url, "http://x").searchParams.get("scope")); return { scope, modes: MODES, sites: listSites(scope) }; });
+route("PUT", "/api/sites", async (req) => { const b = await jbody(req); return setSite(siteScope(b.scope), b.domain, b.mode, b.overrides); });
+route("DELETE", "/api/sites", (req) => { const q = new URL(req.url, "http://x").searchParams; return removeSite(siteScope(q.get("scope")), String(q.get("domain") || "")); });
 route("GET", "/api/rules", () => all("SELECT r.*, b.name bot_name FROM rules r JOIN bots b ON b.id=r.bot_id WHERE r.revoked_at IS NULL ORDER BY r.created_at DESC"));
 route("POST", "/api/rules/:id/revoke", (req, res, { id }) => { run("UPDATE rules SET revoked_at=? WHERE id=?", now(), id); audit("driver", "rule.revoked", { id }); return { ok: true }; });
 route("GET", "/api/learned", () => liveLearned(all(`${LEARNED} ORDER BY l.updated_at DESC LIMIT 200`)));

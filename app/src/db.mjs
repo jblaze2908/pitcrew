@@ -65,10 +65,17 @@ CREATE INDEX IF NOT EXISTS turns_bot ON turns(bot_id, started_at);
 CREATE INDEX IF NOT EXISTS turns_started ON turns(started_at);
 CREATE INDEX IF NOT EXISTS threads_bot ON threads(bot_id, archived, pinned, updated_at);
 CREATE INDEX IF NOT EXISTS rules_match ON rules(bot_id, match, effect);
+-- Per-domain policy: scope is 'global' or a bot id; domain is a registrable domain or a more specific host.
+CREATE TABLE IF NOT EXISTS sites (
+  scope TEXT NOT NULL, domain TEXT NOT NULL, mode TEXT NOT NULL CHECK (mode IN ('allowed','read','blocked')), overrides TEXT NOT NULL DEFAULT '{}',
+  by TEXT NOT NULL DEFAULT 'driver', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (scope, domain));
+-- Registrable domains a crew member has landed on with the driver's say-so; look-alike checks compare against them.
+CREATE TABLE IF NOT EXISTS known_hosts (
+  bot_id TEXT NOT NULL, domain TEXT NOT NULL, visits INTEGER NOT NULL DEFAULT 1, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL, PRIMARY KEY (bot_id, domain));
 `);
 
 // Columns added after v1 shipped; ALTER fails harmlessly once they exist.
-for (const sql of ["ALTER TABLE turns ADD COLUMN changes TEXT"]) { try { db.exec(sql); } catch {} }
+for (const sql of ["ALTER TABLE turns ADD COLUMN changes TEXT", "ALTER TABLE jev_labels ADD COLUMN shadow TEXT"]) { try { db.exec(sql); } catch {} }
 
 export const now = () => Date.now();
 export const uid = (p) => `${p}_${randomBytes(9).toString("base64url")}`;
