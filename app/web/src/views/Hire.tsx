@@ -1,0 +1,107 @@
+// Hiring: a blank form, or the Crew Chief's proposal (a hire pit stop) to review. Nothing joins without your click.
+import { useRef, useState } from "react";
+import type { Hue, PitStop, Shape } from "../../../shared/types";
+import { ModelPicker } from "../components/ModelPicker";
+import { HireSummary, type HireSpec } from "../components/PitCard";
+import { Face, Field, hueStyle } from "../components/ui";
+import { api } from "../lib/api";
+import { go } from "../lib/router";
+import { useStore } from "../lib/store";
+import { toast } from "../lib/toast";
+import { useFetch } from "../lib/useFetch";
+import { DIALS, splitQuirks } from "./crew/ProfileTab";
+
+const HUES: Hue[] = ["c1", "c2", "c3", "c5", "c6"];
+const SHAPES: Shape[] = ["square", "round", "blob"];
+
+export function Hire({ psId }: { psId?: string }) {
+  const proposal = useFetch(async () => ({ ps: psId ? (await api.get<PitStop[]>("/api/pitstops?status=pending")).find((p) => p.id === psId) ?? null : null }), [psId]);
+  if (!proposal.data) return proposal.error ? <div className="page"><p className="badc">{proposal.error}</p></div> : null;
+  if (psId && !proposal.data.ps) return <div className="page"><p className="muted">That proposal was already decided.</p><a className="pc-pill s" href="#/pitstops">Pit stops</a></div>;
+  return <HireForm ps={proposal.data.ps} />;
+}
+
+function HireForm({ ps }: { ps: PitStop | null }) {
+  const { S, refresh } = useStore();
+  const spec = (ps?.detail.spec || {}) as HireSpec & Record<string, any>;
+  const p = spec.personality || {};
+  const [f, setF] = useState(() => ({
+    name: spec.name || "", job: spec.job || "", role: p.role || "", quirks: (p.quirks || []).join("; "), signoff: p.signoff || "", callMe: p.callMe || "",
+    cap: String(spec.weekly_cap_usd ?? 5), sSpec: spec.schedule?.spec || "", sPrompt: spec.schedule?.prompt || "",
+    provider: (spec.provider || S.defaultProvider) as string, model: spec.model || "",
+    hue: (spec.hue || ["c2", "c3", "c5", "c6"][Math.floor(Math.random() * 4)]) as Hue, shape: (spec.shape || "round") as Shape,
+    warmth: p.warmth || 3, talk: p.talk || 3, humour: p.humour || 3,
+  }));
+  const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((x) => ({ ...x, [k]: v }));
+  const [review, setReview] = useState<ReturnType<typeof collect> | null>(null);
+  const reviewEl = useRef<HTMLDivElement>(null);
+
+  function collect() {
+    return {
+      name: f.name, job: f.job, hue: f.hue, shape: f.shape, provider: f.provider, model: f.model.trim(), weekly_cap_usd: +f.cap,
+      personality: { role: f.role, warmth: f.warmth, talk: f.talk, humour: f.humour, quirks: splitQuirks(f.quirks), signoff: f.signoff, callMe: f.callMe },
+      schedule: f.sSpec.trim() ? { spec: f.sSpec.trim(), prompt: f.sPrompt.trim() } : null, reason: spec.reason || "",
+    };
+  }
+  const toReview = () => {
+    const s = collect();
+    if (!s.name.trim() || !s.job.trim()) return toast("Give them a name and a job", true);
+    setReview(s);
+    requestAnimationFrame(() => reviewEl.current?.scrollIntoView({ behavior: "smooth" }));
+  };
+  const hire = async (s: ReturnType<typeof collect>) => {
+    if (ps) await api.post(`/api/pitstops/${ps.id}/decide`, { decision: "approve", spec: s });
+    else await api.post("/api/hire", s);
+    toast(`${s.name} is on the crew`); await refresh(); go("#/");
+  };
+
+  return (
+    <div className="page">
+      <div className="col" style={{ gap: 6 }}>
+        <h1 className="pc-h2">{ps ? "The Crew Chief proposes a crew member" : "New crew member"}</h1>
+        {ps && spec.reason && <p className="pc-quote">{spec.reason}</p>}
+      </div>
+      <div className="grid2">
+        <div className="pc-card col">
+          <div className="row" style={{ gap: 18 }}>
+            <Face b={f} size="xl" mood="idle" />
+            <div className="col"><p className="pc-lab">Face</p>
+              <div className="swatches">{HUES.map((c) => <button key={c} className={`swatch ${c === f.hue ? "on" : ""}`} style={hueStyle(c)} title={c} onClick={() => set("hue", c)} />)}</div>
+              <div className="shapes">{SHAPES.map((s) => <button key={s} className={s === f.shape ? "on" : ""} onClick={() => set("shape", s)}><Face b={{ hue: "c1", shape: s }} size="sm" /></button>)}</div>
+            </div>
+          </div>
+          <Field label="Name"><input value={f.name} placeholder="e.g. Bills" onChange={(e) => set("name", e.target.value)} /></Field>
+          <Field label="Job"><textarea value={f.job} placeholder="What this crew member does, in a sentence or two" onChange={(e) => set("job", e.target.value)} /></Field>
+          <ModelPicker provider={f.provider} model={f.model} onProvider={(v) => set("provider", v)} onModel={(v) => set("model", v)} />
+          <Field label="Weekly cap (USD)"><input type="number" min={0} step="0.5" value={f.cap} onChange={(e) => set("cap", e.target.value)} /></Field>
+          <div className="grid2">
+            <Field label="Schedule"><input value={f.sSpec} placeholder="Optional: daily 09:00" onChange={(e) => set("sSpec", e.target.value)} /></Field>
+            <Field label="Scheduled task"><input value={f.sPrompt} placeholder="What to do on schedule" onChange={(e) => set("sPrompt", e.target.value)} /></Field>
+          </div>
+        </div>
+        <div className="pc-card col">
+          <p className="pc-lab">Personality (voice only)</p>
+          <Field label="Role line"><input value={f.role} placeholder="Role line, e.g. Unflappable accountant" onChange={(e) => set("role", e.target.value)} /></Field>
+          {DIALS.map((k) => (
+            <div key={k} className="dial"><span className="muted">{k[0].toUpperCase() + k.slice(1)}</span>
+              <input type="range" min={1} max={5} value={f[k]} onChange={(e) => set(k, +e.target.value)} /><span className="pc-m faint">{f[k]}</span></div>))}
+          <Field label="Quirks"><input value={f.quirks} placeholder="Up to 3 quirks, separated by ;" onChange={(e) => set("quirks", e.target.value)} /></Field>
+          <Field label="Sign-off"><input value={f.signoff} onChange={(e) => set("signoff", e.target.value)} /></Field>
+          <Field label="Calls you" help={`Default: ${S.driverName}`}><input value={f.callMe} onChange={(e) => set("callMe", e.target.value)} /></Field>
+        </div>
+      </div>
+      <div className="row"><button className="pc-pill" onClick={toReview}>Review</button></div>
+      {review && (
+        <div ref={reviewEl} className="pc-card col">
+          <p className="pc-lab">Review &amp; hire</p>
+          <HireSummary s={review} />
+          <p className="small muted">Starts with read, draft and browse allowed. Sign-in, install, send and pay ask first. Delete and share always ask. It gets its own computer, browser profile and network.</p>
+          <div className="row">
+            <button className="pc-pill sig" onClick={() => hire(review)}>{`Hire ${review.name}`}</button>
+            <button className="pc-pill o" onClick={() => setReview(null)}>Back to edit</button>
+            {ps && <button className="pc-pill o" onClick={async () => { await api.post(`/api/pitstops/${ps.id}/decide`, { decision: "deny" }); go("#/"); }}>Decline proposal</button>}
+          </div>
+        </div>)}
+    </div>
+  );
+}
