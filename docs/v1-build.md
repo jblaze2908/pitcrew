@@ -139,6 +139,8 @@ tested (`GET /link/inbox`) before it is saved, encrypted like provider keys. Pri
   asks for a public link, which Engram holds for the driver (a pit stop here). The instructions tell members to
   publish what the driver will read, keep or share, and leave working files alone. Library files are no longer sent
   on their own (not by the journal, not by "Move memories"); the journal links what a session published.
+  Live 2026-10-02 at https://artifacts.example.com: a Crew Chief turn wrote a file and published it with
+  `public: true` in 16 s; it got a private `/a/<id>` link and the share request showed up as an `engram` pit stop.
 - `brain/` (the Codex harness image) is now `harness/`; image and container stay `pitcrew-brain`, data stays in
   `/srv/pitcrew/brains`.
 
