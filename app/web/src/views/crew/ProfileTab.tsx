@@ -13,17 +13,17 @@ export const SCOPE_LABEL: Record<EngramScope, string> = { personal: "Personal", 
 export const splitQuirks = (s: string) => s.split(";").map((x) => x.trim()).filter(Boolean);
 
 export function ProfileTab({ b }: { b: BotCard }) {
-  const { refresh } = useStore();
+  const { S, refresh } = useStore();
   const p = b.personality || {};
   const [f, setF] = useState({
     name: b.name, job: b.job, role: p.role || "", quirks: (p.quirks || []).join("; "), signoff: p.signoff || "", callMe: p.callMe || "",
-    cap: String(b.weekly_cap_usd), plain: !!p.plain, priv: !!b.private, scope: b.engram_scope, provider: b.provider as string, model: b.model,
+    cap: String(b.weekly_cap_usd), plain: !!p.plain, priv: !!b.private, scope: b.engram_scope, household: !!b.engram_household, provider: b.provider as string, model: b.model,
     warmth: p.warmth || 3, talk: p.talk || 3, humour: p.humour || 3,
   });
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((x) => ({ ...x, [k]: v }));
   const save = async () => {
     await api.patch(`/api/bots/${b.id}`, {
-      name: f.name, job: f.job, weekly_cap_usd: +f.cap, provider: f.provider, model: f.model.trim(), private: f.priv, engram_scope: f.scope,
+      name: f.name, job: f.job, weekly_cap_usd: +f.cap, provider: f.provider, model: f.model.trim(), private: f.priv, engram_scope: f.scope, engram_household: f.household,
       personality: { role: f.role, quirks: splitQuirks(f.quirks), signoff: f.signoff, callMe: f.callMe, plain: f.plain, warmth: f.warmth, talk: f.talk, humour: f.humour },
     });
     toast("Saved. New threads use it; running computers pick it up at next start.");
@@ -48,6 +48,7 @@ export function ProfileTab({ b }: { b: BotCard }) {
             {(Object.keys(SCOPE_LABEL) as EngramScope[]).map((k) => <option key={k} value={k}>{SCOPE_LABEL[k]}</option>)}
           </select>
         </Field>
+        {S.engram.linked && <HouseholdBox checked={f.household} onChange={(v) => set("household", v)} />}
         {!chief && <ConfirmButton className="pc-pill o s" ask="Retire?" onConfirm={async () => { await api.post(`/api/bots/${b.id}/archive`); toast(`${b.name} retired`); await refresh(); go("#/"); }}>Retire crew member</ConfirmButton>}
       </div>
       <div className="pc-card col">
@@ -69,6 +70,15 @@ export function ProfileTab({ b }: { b: BotCard }) {
 }
 
 // Plain-language effects, in rising order of consequence. Each toggle saves on its own: there's no half-edited policy.
+export function HouseholdBox({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="row" style={{ gap: 8, alignItems: "flex-start" }}>
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span className="col" style={{ gap: 2 }}><b className="small">Household facts</b><span className="small faint">Reads Engram's household facts: addresses, account last-4s, family. Off unless you tick it.</span></span>
+    </label>
+  );
+}
+
 const EFFECTS: [string, string][] = [["read", "Look at files and data"], ["browse", "Open and read web pages"], ["draft", "Fill in forms and write drafts, without sending"],
   ["write_workspace", "Create and edit files in its own workspace"], ["signin", "Log in, or enter passwords and one-time codes"], ["install", "Install software"],
   ["send", "Send messages, post, or submit forms"], ["exec_untrusted", "Run downloaded or unknown code"], ["delete", "Delete things outside its workspace"],

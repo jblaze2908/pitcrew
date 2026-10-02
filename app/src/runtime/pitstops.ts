@@ -36,7 +36,8 @@ export async function decide(id: string, decision: string, { scope = "once", not
   if (!ps || ps.status !== "pending") return ps;
   const status = decision === "approve" || decision === "approved" ? "approved" : decision === "expired" ? "expired" : "denied";
   if (ps.kind === "hire" && status === "approved") {
-    const s = normaliseSpec({ ...json(ps.detail, {}).spec, ...(spec || {}) });
+    // Household access is the driver's grant: only the approving form's spec can turn it on, never the Chief's proposal.
+    const s = normaliseSpec({ ...json(ps.detail, {}).spec, engram_household: false, ...(spec || {}) });
     const bot = createBot(s);
     if (s.schedule?.spec && s.schedule.prompt) { try { addSchedule(bot.id, null, s.schedule.spec, s.schedule.prompt); } catch {} }
     note = `Hired ${bot.name}`;

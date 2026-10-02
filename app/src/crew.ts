@@ -16,7 +16,7 @@ const CONN_ID = /^[a-z0-9][a-z0-9-]{0,11}$/;
 // New crew members start with read/draft allowed; sign-in, pay and send ask first; delete and share always ask.
 export const STARTING_POLICY = { ...DEFAULT_POLICY };
 
-const row = (b: BotRow | undefined): Bot | undefined => b && ({ ...b, personality: json(b.personality, {}), policy: { ...STARTING_POLICY, ...json(b.policy, {}) }, mcp: json(b.mcp, []), archived: !!b.archived, private: !!b.private, engram_scope: ENGRAM_SCOPES.includes(b.engram_scope as EngramScope) ? b.engram_scope : "personal" } as Bot);
+const row = (b: BotRow | undefined): Bot | undefined => b && ({ ...b, personality: json(b.personality, {}), policy: { ...STARTING_POLICY, ...json(b.policy, {}) }, mcp: json(b.mcp, []), archived: !!b.archived, private: !!b.private, engram_scope: ENGRAM_SCOPES.includes(b.engram_scope as EngramScope) ? b.engram_scope : "personal", engram_household: !!b.engram_household } as Bot);
 export const getBot = (id: string | null | undefined) => row(one<BotRow>("SELECT * FROM bots WHERE id=?", id));
 export const listBots = () => all<BotRow>("SELECT * FROM bots WHERE archived=0 ORDER BY kind='chief' DESC, created_at").map(row) as Bot[];
 
@@ -40,7 +40,7 @@ export interface Spec {
   name: string; job: string; hue: Hue; shape: Shape; personality: Personality; provider: ProviderId; model: string;
   weekly_cap_usd: number; schedule: { spec: string; prompt: string } | null; reason: string;
   // Engram: where its memories live, and the connections it may read (granted once, when its Engram agent is made).
-  engram_scope: EngramScope; engram_connections: string[];
+  engram_scope: EngramScope; engram_connections: string[]; engram_household: boolean;
 }
 export function normaliseSpec(s: HireSpec = {}): Spec {
   const provider = (["openrouter", "aigateway", "openai"].includes(s.provider) ? s.provider : getSetting("default_provider", "openrouter")) as ProviderId;
@@ -60,6 +60,7 @@ export function normaliseSpec(s: HireSpec = {}): Spec {
     schedule: s.schedule && typeof s.schedule === "object" ? { spec: text(s.schedule.spec, 60), prompt: text(s.schedule.prompt, 1000) } : null,
     reason: text(s.reason, 600),
     engram_scope: ENGRAM_SCOPES.includes(s.engram_scope) ? s.engram_scope : "personal",
+    engram_household: s.engram_household === true,
     engram_connections: (Array.isArray(s.engram_connections) ? s.engram_connections : []).filter((c: unknown) => typeof c === "string" && CONN_ID.test(c)).slice(0, 20),
   };
 }
@@ -68,8 +69,8 @@ export function createBot(spec: Spec) {
   const base = spec.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24) || "crew";
   let id = base, i = 2;
   while (one("SELECT 1 FROM bots WHERE id=?", id)) id = `${base}-${i++}`;
-  run(`INSERT INTO bots(id,name,job,kind,hue,shape,personality,provider,model,weekly_cap_usd,policy,engram_scope,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    id, spec.name, spec.job, "specialist", spec.hue, spec.shape, JSON.stringify(spec.personality), spec.provider, spec.model, spec.weekly_cap_usd, "{}", spec.engram_scope, now());
+  run(`INSERT INTO bots(id,name,job,kind,hue,shape,personality,provider,model,weekly_cap_usd,policy,engram_scope,engram_household,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    id, spec.name, spec.job, "specialist", spec.hue, spec.shape, JSON.stringify(spec.personality), spec.provider, spec.model, spec.weekly_cap_usd, "{}", spec.engram_scope, spec.engram_household ? 1 : 0, now());
   // Read by the member's first Engram link (engram.ts linkMember), then dropped.
   if (spec.engram_connections.length) setSetting(`engram_hire:${id}`, JSON.stringify(spec.engram_connections));
   run("INSERT INTO threads(id,bot_id,title,pinned,created_at,updated_at) VALUES(?,?,?,?,?,?)", uid("th"), id, `${spec.name} · pinned`, 1, now(), now());
@@ -89,6 +90,7 @@ export function updateBot(id: string, patch: HireSpec) {
     b.kind === "chief" ? b.name : n.name, n.job, n.hue, n.shape, JSON.stringify(n.personality), n.provider, n.model, n.weekly_cap_usd, JSON.stringify(policy), JSON.stringify(mcp), id);
   if (patch.private !== undefined && b.kind !== "chief") run("UPDATE bots SET private=? WHERE id=?", patch.private ? 1 : 0, id);
   if (patch.engram_scope !== undefined) run("UPDATE bots SET engram_scope=? WHERE id=?", n.engram_scope, id);
+  if (patch.engram_household !== undefined) run("UPDATE bots SET engram_household=? WHERE id=?", n.engram_household ? 1 : 0, id);
   audit("driver", "crew.updated", { id, fields: Object.keys(patch) });
   return getBot(id);
 }
