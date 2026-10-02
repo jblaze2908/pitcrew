@@ -91,7 +91,11 @@ CREATE TABLE IF NOT EXISTS engram_sent (bot_id TEXT NOT NULL, kind TEXT NOT NULL
 -- Journal entries: per thread, the end time of the last turn already sent to Engram.
 CREATE TABLE IF NOT EXISTS engram_episodes (thread_id TEXT PRIMARY KEY, upto INTEGER NOT NULL);
 -- Threads that received untrusted Engram content: outbound effects ask until at + 10 min (runtime/taint.ts).
-CREATE TABLE IF NOT EXISTS thread_taint (thread_id TEXT PRIMARY KEY, at INTEGER NOT NULL)`);
+CREATE TABLE IF NOT EXISTS thread_taint (thread_id TEXT PRIMARY KEY, at INTEGER NOT NULL);
+-- What each turn remembered, for its "Learned this run" card (runtime/learned.ts).
+CREATE TABLE IF NOT EXISTS turn_memories (
+  turn_id TEXT NOT NULL, memory_id TEXT NOT NULL, thread_id TEXT NOT NULL, bot_id TEXT NOT NULL, text TEXT NOT NULL,
+  state TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (turn_id, memory_id))`);
 // Columns added after v1 shipped; ALTER fails harmlessly once they exist.
 for (const sql of ["ALTER TABLE turns ADD COLUMN changes TEXT", "ALTER TABLE jev_labels ADD COLUMN shadow TEXT",
   "ALTER TABLE threads ADD COLUMN origin TEXT", "ALTER TABLE bots ADD COLUMN private INTEGER NOT NULL DEFAULT 0",

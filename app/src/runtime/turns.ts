@@ -15,6 +15,7 @@ import { ensureMemberToken, threadContext, skillsIndex, engramMemories } from ".
 import { memberLinked } from "../engramStore.js";
 import { setRollout } from "./scripts.js";
 import { taint, tainted } from "./taint.js";
+import { postLearned } from "./learned.js";
 import type { Bot } from "../../shared/types.js";
 
 export const isRunning = (threadId: string) => active.has(threadId);
@@ -190,6 +191,7 @@ export async function finishTurn(threadId: string, status: string, error?: strin
       addEvent(threadId, a.turnId, "changes", { turnId: a.turnId, botId: b.id, count: ch.length, files: ch.slice(0, 12).map((c) => ({ path: c.path, status: c.status, lines: c.lines })) });
     }
   } catch {}
+  postLearned(threadId, a.turnId, b.id);
   // A delegated thread's answer carries what it read, so untrusted content also taints the thread that asked.
   const from = tainted(threadId) && t.origin ? json<{ fromThread?: string }>(t.origin, {}).fromThread : null;
   if (from && taint(from)) addEvent(from, null, "system", { text: `${b.name}'s answer came from a thread with untrusted content. For the next 10 minutes, sending, paying, signing in, sharing and deleting ask you first.` });

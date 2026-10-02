@@ -15,6 +15,7 @@ import { planTool } from "./plans.js";
 import { runtimeTool, type ToolCall } from "./browser.js";
 import { IST, say } from "./util.js";
 import { remember, forget, publishFile } from "../engram.js";
+import { noteLearned } from "./learned.js";
 import { memberLinked } from "../engramStore.js";
 
 export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Promise<ToolResult> {
@@ -44,13 +45,14 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
       return say("Shared with the driver in this chat.");
     }
     case "remember": {
-      const text = String(a.text || "").trim().slice(0, 500);
+      const turnId = active.get(threadId)?.turnId, text = String(a.text || "").trim().slice(0, 500);
       if (!text) return say("Nothing to remember", false);
       const until = /^\d{4}-\d{2}-\d{2}$/.test(String(a.valid_until || "")) ? String(a.valid_until) : null;
       if (a.valid_until && !until) return say("valid_until must be a date as YYYY-MM-DD", false);
       if (memberLinked(b)) {
         try {
           const r = await remember(b, text, { id: a.id ? String(a.id) : null, threadId, validUntil: until });
+          noteLearned(turnId, threadId, b.id, r.id, text, r.status !== "accepted" ? "held" : r.known ? "known" : r.replaced ? "replaced" : "saved");
           if (r.status === "accepted") {
             if (r.replaced) c.mems.get(p.threadId)?.delete(r.replaced);
             c.mems.get(p.threadId)?.set(r.id, text);
@@ -64,6 +66,7 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
       // Pitcrew's own table has no expiry column, so the date goes in the text.
       const local = until ? `${text} (valid until ${until})` : text;
       const id = a.id && one("SELECT 1 FROM memory WHERE id=? AND bot_id=?", a.id, b.id) ? a.id : uid("me");
+      noteLearned(turnId, threadId, b.id, id, local, id === a.id ? "replaced" : "saved");
       if (id === a.id) run("UPDATE memory SET text=?, updated_at=? WHERE id=?", local, now(), id);
       else run("INSERT INTO memory(id,bot_id,text,source,created_at,updated_at) VALUES(?,?,?,?,?,?)", id, b.id, local, `thread:${threadId}`, now(), now());
       c.mems.get(p.threadId)?.set(id, local); // this thread already knows; other threads get it on their next turn

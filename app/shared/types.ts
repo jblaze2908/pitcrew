@@ -67,7 +67,7 @@ export interface Thread {
   origin: string | null; created_at: number; updated_at: number; running: boolean;
 }
 
-export type EventKind = "user" | "agent" | "tool" | "system" | "error" | "shot" | "changes" | "pitstop" | "surface" | "delegation" | "plan";
+export type EventKind = "user" | "agent" | "tool" | "system" | "error" | "shot" | "changes" | "pitstop" | "surface" | "delegation" | "plan" | "learned";
 export interface ThreadEvent<D = Record<string, any>> { id: number; thread_id: string; turn_id: string | null; kind: EventKind; data: D; ts: number }
 
 export interface ThreadView { thread: Thread; bot: Bot; events: ThreadEvent[]; pitstops: PitStop[]; surfaces: { id: string; title: string; spec: any; saved: number }[] }

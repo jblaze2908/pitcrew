@@ -148,6 +148,11 @@ tested (`GET /link/inbox`) before it is saved, encrypted like provider keys. Pri
   toggle; rows show member, title (opens the private link), version, size, updated, link state and thread; 40 a page with
   Show more. Filters live in the hash (`#/library/published?member=bills&status=waiting`). Engram filters and pages, one
   `GET /link/artifacts` per view or filter change; if Engram is down only that tab says so.
+- **Learned this run** (2026-10-03). Every `remember` in a turn is recorded per turn (`turn_memories`: saved, held,
+  known, replaced, undone); a turn that saved anything ends with one card in the thread listing each fact and its state.
+  Undo on a plain new save forgets it (Engram's forget for a linked member, Pitcrew's table otherwise). A held one says
+  "waiting for you" (its pit stop decides it); a restatement Engram already had, or a replacement, has no Undo, since
+  forgetting it would drop a fact the turn didn't add. The card reads `GET /api/turns/:id/learned`, so it survives a reload.
 - `brain/` (the Codex harness image) is now `harness/`; image and container stay `pitcrew-brain`, data stays in
   `/srv/pitcrew/brains`.
 

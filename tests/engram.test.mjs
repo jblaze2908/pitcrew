@@ -316,6 +316,48 @@ test("a linked member's memories live in Engram: synced at thread start, remembe
   assert.equal(chiefView.body.memoryIn, "pitcrew");
 });
 
+test("learned this run: a turn's memories become one card; a plain new one can be undone, others can't", async () => {
+  const { dynamicTool } = await import("../app/dist/src/runtime/tools.js");
+  const { active } = await import("../app/dist/src/runtime/state.js");
+  const L = await import("../app/dist/src/runtime/learned.js");
+  const remember = (botId, th, args) => dynamicTool({ bot: { id: botId }, mems: new Map() }, th, { tool: "remember", arguments: args, threadId: th });
+  for (const [th, bot] of [["th_learn", "bills"], ["th_learn_local", "diary"]]) {
+    run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES(?,?,?,?,?)", th, bot, "Learn", now(), now());
+    run("INSERT INTO turns(id,thread_id,bot_id,status,started_at) VALUES(?,?,?,'running',?)", `tu_${th}`, th, bot, now());
+    active.set(th, { turnId: `tu_${th}` });
+  }
+  await remember("bills", "th_learn", { text: "Broadband is Airtel" });
+  const saved = all("SELECT memory_id FROM turn_memories WHERE turn_id='tu_th_learn'")[0].memory_id;
+  await remember("bills", "th_learn", { text: "Broadband is Airtel Xstream", id: saved });
+  E.hold = true; await remember("bills", "th_learn", { text: "Rent goes to a new account" }); E.hold = false;
+  await remember("bills", "th_learn", { text: "Gas is Indane" });
+  L.postLearned("th_learn", "tu_th_learn", "bills");
+  const card = one("SELECT * FROM events WHERE thread_id='th_learn' AND kind='learned'");
+  assert.deepEqual(JSON.parse(card.data), { turnId: "tu_th_learn", botId: "bills", count: 4 });
+  L.postLearned("th_learn", "tu_none", "bills");
+  assert.equal(all("SELECT 1 FROM events WHERE kind='learned'").length, 1, "a turn that saved nothing gets no card");
+
+  const items = (await req("GET", "/api/turns/tu_th_learn/learned")).body.items;
+  assert.deepEqual(items.map((m) => m.state), ["saved", "replaced", "held", "saved"]);
+  const held = items[2], gas = items[3];
+  assert.equal((await req("POST", `/api/turns/tu_th_learn/learned/${held.memory_id}/undo`)).status, 409, "a held one waits for you in Engram");
+  assert.equal((await req("POST", `/api/turns/tu_th_learn/learned/${items[1].memory_id}/undo`)).status, 409, "a replacement isn't undone here");
+  const undo = await req("POST", `/api/turns/tu_th_learn/learned/${gas.memory_id}/undo`);
+  assert.equal(undo.status, 200);
+  assert.deepEqual(E.forgot.at(-1), { id: gas.memory_id, pitcrew_id: "bills" });
+  assert.equal(undo.body.items.find((m) => m.memory_id === gas.memory_id).state, "undone");
+  assert.equal((await req("POST", `/api/turns/tu_th_learn/learned/${gas.memory_id}/undo`)).status, 409, "undone once");
+  assert.equal((await req("POST", "/api/turns/tu_th_learn/learned/m_nope/undo")).status, 404);
+
+  // An unlinked member: Pitcrew's own table, same card and undo.
+  await remember("diary", "th_learn_local", { text: "Therapist is on Tuesdays" });
+  const local = (await req("GET", "/api/turns/tu_th_learn_local/learned")).body.items[0];
+  assert.equal(local.state, "saved");
+  assert.equal((await req("POST", `/api/turns/tu_th_learn_local/learned/${local.memory_id}/undo`)).status, 200);
+  assert.ok(one("SELECT forgotten_at FROM memory WHERE id=?", local.memory_id).forgotten_at);
+  for (const th of ["th_learn", "th_learn_local"]) active.delete(th);
+});
+
 test("linked members are told what to send to Engram; unlinked ones keep the plain remember rule", async () => {
   const ctx = { profile: null, skills: "" };
   const linked = C.instructions(C.getBot("bills"), [{ id: "m_1", text: "Gas is Indane" }], ctx);
