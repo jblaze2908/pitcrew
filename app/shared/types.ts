@@ -148,6 +148,11 @@ export interface Telemetry {
   openrouter: OpenRouterUsage | null; chatgpt: PlanLimits | null;
 }
 export interface LibraryBot { id: string; name: string; hue: Hue; shape: Shape; files: { path: string; size: number; mtime: number }[] }
+/** A file a crew member published to Engram (an artifact), as the Library lists it. thread_id: where it was published. */
+export interface PublishedArtifact {
+  id: string; title: string; kind: string; version: number; mime: string | null; size: number | null; url: string; public_url: string | null;
+  share_pending: boolean; created_at: number; updated_at: number; bot_id: string; bot_name: string; hue: Hue | null; shape: Shape | null; thread_id: string | null;
+}
 export interface Surface { id: string; title: string; spec: any; saved?: number }
 export interface KeptSurface extends Surface { thread_id: string; bot_id: string; bot_name: string; hue: Hue; created_at: number }
 
