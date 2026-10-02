@@ -151,8 +151,11 @@ export interface LibraryBot { id: string; name: string; hue: Hue; shape: Shape; 
 /** A file a crew member published to Engram (an artifact), as the Library lists it. thread_id: where it was published. */
 export interface PublishedArtifact {
   id: string; title: string; kind: string; version: number; mime: string | null; size: number | null; url: string; public_url: string | null;
-  share_pending: boolean; created_at: number; updated_at: number; bot_id: string; bot_name: string; hue: Hue | null; shape: Shape | null; thread_id: string | null;
+  share_pending: boolean; imported: boolean; created_at: number; updated_at: number; bot_id: string; bot_name: string; hue: Hue | null; shape: Shape | null; thread_id: string | null;
 }
+export interface ArtifactFilter { q?: string; member?: string; status?: "public" | "waiting" | "private"; kind?: "page" | "pdf" | "image" | "other"; imported?: "1"; cursor?: string; limit?: number }
+/** counts cover every member and filter: total (published from threads), waiting (a public link waits for you), imported. */
+export interface PublishedPage { items: PublishedArtifact[]; next: string | null; counts: { total: number; waiting: number; imported: number } }
 export interface Surface { id: string; title: string; spec: any; saved?: number }
 export interface KeptSurface extends Surface { thread_id: string; bot_id: string; bot_name: string; hue: Hue; created_at: number }
 

@@ -142,8 +142,11 @@ tested (`GET /link/inbox`) before it is saved, encrypted like provider keys. Pri
   Live 2026-10-02 at https://artifacts.example.com: a Crew Chief turn wrote a file and published it with
   `public: true` in 16 s; it got a private `/a/<id>` link and the share request showed up as an `engram` pit stop.
   Approving that pit stop shows the public link on the card and posts it to the member's thread (Engram's decide answer carries `public_url`).
-  The Library's **Published** list shows every artifact the crew published: member, title (opens the private link), version,
-  public link or "waits for you", updated, and its thread. One `GET /link/artifacts` per view; if Engram is down only that list says so.
+  The Library has three tabs: **Published** (default), **Surfaces** (shown once any exist) and **Files** (one folded row per
+  member). Published: search (titles and text), status (All / Waiting · n / Public / Private), member, type and an Imported
+  toggle; rows show member, title (opens the private link), version, size, updated, link state and thread; 40 a page with
+  Show more. Filters live in the hash (`#/library/published?member=bills&status=waiting`). Engram filters and pages, one
+  `GET /link/artifacts` per view or filter change; if Engram is down only that tab says so.
 - `brain/` (the Codex harness image) is now `harness/`; image and container stay `pitcrew-brain`, data stays in
   `/srv/pitcrew/brains`.
 
