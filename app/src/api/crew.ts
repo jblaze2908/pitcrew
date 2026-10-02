@@ -8,6 +8,7 @@ import { getBot, updateBot, normaliseSpec, createBot } from "../crew.js";
 import { listProjects, openProject } from "../code.js";
 import { memberChanged, listMemories, remember, forget } from "../engram.js";
 import { memberLinked } from "../engramStore.js";
+import { learnedFor, undoLearned } from "../runtime/learned.js";
 import { signedIn, type Env } from "../http/guard.js";
 import { readJson, jsonBody, raw, text, trimmed, flag, field } from "../http/body.js";
 import { botCard, LEARNED, liveLearned } from "./views.js";
@@ -61,6 +62,9 @@ export const crewRoutes = new Hono<Env>()
     if (memberLinked(b)) { await forget(b, mid, "driver"); return c.json({ ok: true }); }
     run("UPDATE memory SET forgotten_at=? WHERE id=? AND bot_id=?", now(), mid, id); audit("driver", "memory.forgotten", { id: mid }); return c.json({ ok: true });
   })
+  // "Learned this run" card: what a turn remembered, and undoing a new one.
+  .get("/api/turns/:id/learned", signedIn, (c) => c.json({ items: learnedFor(c.req.param("id")) }))
+  .post("/api/turns/:id/learned/:mid/undo", signedIn, async (c) => c.json({ items: await undoLearned(c.req.param("id"), c.req.param("mid")) }))
   .post("/api/bots/:id/memory/forget-source", signedIn, async (c) => { const id = c.req.param("id"), b = await jsonBody(c, ForgetSource); const r = run("UPDATE memory SET forgotten_at=? WHERE bot_id=? AND source=? AND forgotten_at IS NULL", now(), id, String(b.source)); audit("driver", "memory.forgot_source", { id, source: b.source }); return c.json({ forgotten: Number(r.changes) }); })
   .post("/api/bots/:id/schedules", signedIn, async (c) => { const b = await jsonBody(c, Schedule); try { return c.json(R.addSchedule(c.req.param("id"), b.threadId as string | null, b.spec, b.prompt)); } catch (e: any) { throw httpErr(400, e.message); } })
   .patch("/api/schedules/:id", signedIn, async (c) => { const id = c.req.param("id"), b = await jsonBody(c, Toggle); run("UPDATE schedules SET enabled=? WHERE id=?", b.enabled ? 1 : 0, id); audit("driver", "schedule.toggled", { id, enabled: b.enabled }); return c.json({ ok: true }); })

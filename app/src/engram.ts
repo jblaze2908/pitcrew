@@ -356,10 +356,12 @@ export async function remember(b: Bot, text: string, { id = null, threadId = nul
   const cache = memCache.get(b.id), supersedes = id && cache?.has(id) ? id : null;
   const res = shape(RememberZ, await call("/link/memories", { method: "POST", body: { pitcrew_id: b.id, text, supersedes,
     ...(threadId ? { ref: `pitcrew:thread:${threadId}` } : {}), ...(validUntil ? { valid_until: validUntil } : {}), untrusted: tainted(threadId), by } }), "memory result");
+  // Engram answers a restatement with the existing id; known marks it so "Learned this run" won't offer to undo it.
+  const known = res.status === "accepted" && !supersedes && !!cache?.has(res.id);
   if (res.status === "accepted" && cache) { if (supersedes) cache.delete(supersedes); cache.set(res.id, text); }
   else if (res.status !== "accepted") mirrorInbox().catch(() => {});
   audit(by === "driver" ? "driver" : b.id, `engram.remember.${res.status}`, { botId: b.id, id: res.id, threadId });
-  return { ...res, replaced: res.status === "accepted" ? supersedes : null };
+  return { ...res, replaced: res.status === "accepted" ? supersedes : null, known };
 }
 export async function forget(b: Bot, id: string, by = "member") {
   if (!/^[\w-]{1,100}$/.test(id)) throw httpErr(400, "No such memory");

@@ -264,6 +264,9 @@ main{overflow:auto;min-width:0;scrollbar-gutter:stable}
 .changes{margin-left:40px;max-width:760px;display:flex;flex-direction:column;gap:6px;padding:12px 14px;border-radius:var(--radius-sm);background:var(--surface);border:1px solid var(--line)}
 .changes .cf{display:flex;align-items:center;gap:8px}
 .changes .cf:hover .pc-m{color:var(--ink)}
+.learned .cf{align-items:baseline}
+.learned .cf .pc-chip{flex:none}
+.learned .cf button{margin-left:auto;flex:none}
 
 /* Tables */
 .tbl{width:100%;border-collapse:collapse;font-size:13px}

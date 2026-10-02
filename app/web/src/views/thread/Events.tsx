@@ -4,10 +4,12 @@ import type { Bot, DelegationCard as Deleg, PitStop, PlanSnapshot, ThreadEvent }
 import { DelegationCard } from "../../components/DelegationCard";
 import { PitCard } from "../../components/PitCard";
 import { PlanCard } from "../../components/PlanCard";
-import { Face, Md } from "../../components/ui";
+import { BusyButton, Face, Md } from "../../components/ui";
 import { tidyTitle } from "../../lib/format";
 import { stepView } from "../../lib/steps";
 import { StepIcon } from "../../components/StepIcon";
+import { api } from "../../lib/api";
+import { useFetch } from "../../lib/useFetch";
 
 export const stepOk = (e: ThreadEvent) => e.data.status === "completed" && (e.data.exitCode == null || e.data.exitCode === 0);
 const isImg = (p: string) => /\.(png|jpe?g|webp|gif)$/i.test(p);
@@ -109,6 +111,28 @@ function Changes({ d }: { d: Record<string, any> }) {
   );
 }
 
+type Learned = { memory_id: string; text: string; state: "saved" | "held" | "known" | "replaced" | "undone" };
+const LEARNED_STATE: Record<Learned["state"], string> = { saved: "saved", held: "waiting for you", known: "already known", replaced: "replaced an older one", undone: "undone" };
+/** What this run remembered; read per card from the turn, so an undo shows after a reload too. */
+function LearnedCard({ d }: { d: Record<string, any> }) {
+  const f = useFetch(() => api.get<{ items: Learned[] }>(`/api/turns/${d.turnId}/learned`, { quiet: true }), [d.turnId]);
+  const [items, setItems] = useState<Learned[] | null>(null);
+  const list = items ?? f.data?.items ?? null;
+  if (!list?.length) return null;
+  const undo = async (m: Learned) => setItems((await api.post<{ items: Learned[] }>(`/api/turns/${d.turnId}/learned/${encodeURIComponent(m.memory_id)}/undo`)).items);
+  return (
+    <div className="changes learned">
+      <b className="small">{`Learned this run · ${list.length}`}</b>
+      {list.map((m) => (
+        <div key={m.memory_id} className="cf">
+          <span className={`pc-chip ${m.state === "saved" ? "ok" : m.state === "held" ? "blue" : ""}`}>{LEARNED_STATE[m.state]}</span>
+          <span className={`small${m.state === "undone" ? " faint" : ""}`} style={m.state === "undone" ? { textDecoration: "line-through" } : undefined}>{m.text}</span>
+          {m.state === "saved" && <BusyButton className="small faint" busyLabel="Undoing…" onClick={() => undo(m)}>Undo</BusyButton>}
+        </div>))}
+    </div>
+  );
+}
+
 export interface EventCtx { cont?: boolean; b: Bot; fromName: string; pits: Record<string, PitStop>; latest: Map<string, Record<string, any>>; surface: (id: string) => ReactNode }
 
 /** The element for one event, or null when it draws nothing (an unknown pit stop or surface). */
@@ -123,6 +147,7 @@ export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
     case "system": return <p className={`sys ${d.tone === "bad" ? "bad" : ""}`}>{d.text}</p>;
     case "error": return <p className="err">{d.text}</p>;
     case "changes": return <Changes d={d} />;
+    case "learned": return <LearnedCard d={d} />;
     case "delegation": return <DelegationCard d={(c.latest.get(d.id) || d) as Deleg} />;
     case "plan": return <PlanCard P={(c.latest.get(d.id) || d) as PlanSnapshot} />;
     case "pitstop": { const p = c.pits[d.id]; return p ? <div style={{ marginLeft: 40, maxWidth: 760 }}><PitCard p={p} /></div> : null; }
