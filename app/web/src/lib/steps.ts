@@ -1,7 +1,7 @@
 // A tool step's title (notify.ts toolTitle) as an icon, a plain label and the detail. Parsed from the title, so old
 // threads read the same: "engram.google__gmail_search query=x" → mail · "Search mail" · "x".
 export type StepIcon = "mail" | "calendar" | "drive" | "engram" | "ledger" | "web" | "browser" | "terminal" | "file" | "tool"
-  | "search" | "read" | "add" | "edit" | "remove" | "send";
+  | "search" | "read" | "add" | "edit" | "remove" | "send" | "code";
 export interface StepView { icon: StepIcon; label: string; detail: string }
 
 const GOOGLE: Record<string, [StepIcon, string]> = {
@@ -29,6 +29,7 @@ const tidyArgs = (s: string) => s.replace(/^(query|text|id|q)=/, "").trim();
 /** connLabel: the connection's real name when Pitcrew stamped one on the event (from Engram's sync); else the id, in words. */
 export function stepView(title: string, connLabel?: string | null): StepView {
   const t = title.trim();
+  if (t === "Ran a script") return { icon: "code", label: "Ran a script", detail: "" };
   if (t.startsWith("$ ")) return { icon: "terminal", label: "Run", detail: t.slice(2) };
   if (t.startsWith("Edited ")) return { icon: "file", label: "Edit", detail: t.slice(7) };
   if (t.startsWith("Searched ")) return { icon: "web", label: "Search the web", detail: t.slice(9) };
