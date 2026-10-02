@@ -7,6 +7,9 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 button:disabled{opacity:.45;cursor:default}
 input,textarea,select{font:inherit;color:var(--ink);background:var(--surface-2);border:1px solid var(--line-2);border-radius:10px;padding:9px 12px;width:100%;outline:none}
 input:focus,textarea:focus,select:focus{border-color:var(--ink-3)}
+/* Our own chevron: the native arrow ignores padding, so it sat closer to the edge than the text. Inset 12px like the text. */
+select{appearance:none;-webkit-appearance:none;padding-right:34px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%23a9a9b4' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;background-size:12px 12px}
+[data-theme="light"] select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%234a4a55' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")}
 textarea{resize:vertical;min-height:44px}
 input[type=checkbox],input[type=radio]{width:auto;accent-color:var(--ink)}
 input[type=range]{padding:0;border:0;background:none;accent-color:var(--ink)}
