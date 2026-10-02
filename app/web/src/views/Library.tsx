@@ -1,5 +1,5 @@
 // Kept surfaces and the files on each member's computer.
-import type { KeptSurface, LibraryBot } from "../../../shared/types";
+import type { KeptSurface, LibraryBot, PublishedArtifact } from "../../../shared/types";
 import { Surface } from "../components/Surface";
 import { api, fileUrl } from "../lib/api";
 import { kb, when } from "../lib/format";
@@ -9,8 +9,10 @@ import { useFetch } from "../lib/useFetch";
 
 export function Library() {
   const { data, error, reload } = useFetch(async () => {
-    const [files, surfaces] = await Promise.all([api.get<LibraryBot[]>("/api/library"), api.get<KeptSurface[]>("/api/surfaces")]);
-    return { files, surfaces };
+    // Engram being down must not hide the crew's own files, so its list fails on its own.
+    const [files, surfaces, published] = await Promise.all([api.get<LibraryBot[]>("/api/library"), api.get<KeptSurface[]>("/api/surfaces"),
+      api.get<PublishedArtifact[]>("/api/engram/artifacts", { quiet: true }).catch((e: Error) => e)]);
+    return { files, surfaces, published };
   }, []);
   useLiveReload((e) => e.type === "turn", reload, 2000);
   if (error && !data) return <div className="page"><p className="badc">{error}</p></div>;
@@ -18,6 +20,21 @@ export function Library() {
   return (
     <div className="page">
       <h1 className="pc-h2">Library</h1>
+      {data.published instanceof Error ? <p className="small badc">{`Published files: ${data.published.message}`}</p>
+        : data.published.length > 0 && <>
+        <p className="pc-lab">Published</p>
+        <div className="pc-card tight"><table className="tbl"><tbody>{data.published.map((a) => (
+          <tr key={a.id}>
+            <td><div className="row">{a.hue && a.shape && <pc-bot key={`${a.hue}.${a.shape}`} size="xs" hue={a.hue} shape={a.shape} />}
+              <a href={a.url} target="_blank" rel="noreferrer"><b>{a.title}</b></a></div>
+              <span className="small faint">{`${a.bot_name} · ${a.kind}${a.version > 1 ? ` · v${a.version}` : ""}${a.size ? ` · ${kb(a.size)}` : ""}`}</span></td>
+            <td className="small">{a.public_url ? <a href={a.public_url} target="_blank" rel="noreferrer">Public link</a>
+              : a.share_pending ? <a className="faint" href="#/pitstops">Public link waits for you</a> : <span className="faint">Private</span>}</td>
+            <td className="num small faint">{when(a.updated_at)}</td>
+            <td className="num">{a.thread_id && <a className="small" href={`#/t/${a.thread_id}`}>Thread</a>}</td>
+          </tr>))}
+        </tbody></table></div>
+      </>}
       {data.surfaces.length > 0 && <>
         <p className="pc-lab">Kept surfaces</p>
         <div className="col">{data.surfaces.map((s) => (

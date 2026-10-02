@@ -21,6 +21,7 @@ export const engramRoutes = new Hono<Env>()
     const b = getBot(c.req.param("id")); if (!b) throw httpErr(404, "No such crew member");
     await E.linkMember(b); return c.json(E.status());
   })
+  .get("/api/engram/artifacts", signedIn, async (c) => c.json(await E.listArtifacts()))
   .get("/api/engram/connections", signedIn, async (c) => c.json({ connections: await E.listConnections() }))
   .post("/api/engram/migrate", signedIn, (c) => c.json(E.startMigration()))
   .get("/api/engram/digest", signedIn, async (c) => { const d = await E.digest(); return c.json({ url: engramUrl(), at: d?.at ?? null, digest: d?.digest ?? null }); })

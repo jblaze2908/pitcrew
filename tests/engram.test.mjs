@@ -12,7 +12,7 @@ Object.assign(process.env, { PITCREW_ROOT: root, PITCREW_DATA: `${root}/data`, P
 
 // ---------- the stub ----------
 const LINK = "link-token-0123456789abcdef";
-const E = { proposals: [], skills: [], calls: [], revoked: new Set(), decisions: [], answers: {}, members: [], memImports: [], artImports: [], n: 0,
+const E = { proposals: [], skills: [], calls: [], revoked: new Set(), decisions: [], answers: {}, artifacts: [], members: [], memImports: [], artImports: [], n: 0,
   mems: {}, remembered: [], forgot: [], episodes: [], published: [], hold: false, connections: [{ id: "google", name: "Google", status: "ok", detail: "Fine", read: 6, write: 4 }],
   digest: { week: "2026-W40", from: "2026-09-28", to: "2026-10-04", built_at: Date.now(), waiting: { open: 3, held: 1 },
     runningOut: [{ date: "2026-10-20", text: "Passport renewal window", area: "home" }], changed: [{ text: "Rent went up", detail: "", tone: "bad" }],
@@ -32,6 +32,7 @@ const srv = createServer(async (req, res) => {
   if (req.method === "GET" && url.pathname === "/link/inbox") return send(200, { proposals: E.proposals, at: Date.now() });
   if (req.method === "POST" && decided) { E.decisions.push({ id: decided[1], ...body }); E.proposals = E.proposals.filter((p) => p.id !== decided[1]); return send(200, E.answers[decided[1]] ?? { ok: true }); }
   if (req.method === "GET" && url.pathname === "/link/digest") return send(200, E.digest);
+  if (req.method === "GET" && url.pathname === "/link/artifacts") return send(200, { artifacts: E.artifacts });
   if (req.method === "POST" && url.pathname === "/link/members") {
     if (E.revoked.has(body.pitcrew_id)) return send(409, { error: "This member was revoked" });
     E.members.push(body); E.n++;
@@ -373,6 +374,18 @@ test("approving a public link keeps the link on the pit stop and tells the membe
   await G.mirrorInbox();
   const m = await req("POST", "/api/pitstops/eg_p_m/decide", { decision: "approve" });
   assert.deepEqual([m.body.note, m.body.detail.public_url], ["Accepted", undefined], "only a share answer carries a link");
+});
+
+test("the Library lists what the crew published, from Engram, with each member's face and thread", async () => {
+  run("INSERT OR IGNORE INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_lib','bills','Goa',?,?)", now(), now());
+  const art = (id, extra = {}) => ({ id, title: `File ${id}`, kind: "page", pitcrew_id: "bills", version: 2, mime: "text/markdown", size: 120,
+    url: `https://artifacts.example/a/${id}`, public_url: null, share_pending: true, ref: "pitcrew:thread:th_lib", created_at: 1, updated_at: 2, ...extra });
+  E.artifacts = [art("art_a"), art("art_b", { pitcrew_id: "gone-member", ref: "pitcrew:thread:th_missing", share_pending: false }), { id: "../x", url: "javascript:alert(1)" }];
+  const r = await req("GET", "/api/engram/artifacts");
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.map((a) => [a.id, a.bot_name, a.thread_id, a.share_pending, a.version]), [["art_a", "Bills", "th_lib", true, 2], ["art_b", "gone-member", null, false, 2]]);
+  assert.ok(r.body[0].hue && r.body[0].shape, "a known member brings its face");
+  assert.equal("ref" in r.body[0] || "pitcrew_id" in r.body[0], false);
 });
 
 test("hiring: the connections picked go once with the first link, read-only, and the scope comes from the form", async () => {

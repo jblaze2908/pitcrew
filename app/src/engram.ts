@@ -15,7 +15,7 @@ import { bus } from "./runtime/bus.js";
 import { addEvent } from "./runtime/threads.js";
 import { active } from "./runtime/state.js";
 import { tainted } from "./runtime/taint.js";
-import type { Bot, EngramDecision, EngramDigest, EngramMigration, EngramProposal, EngramScope, EngramStatus, PitStop } from "../shared/types.js";
+import type { Bot, PublishedArtifact, EngramDecision, EngramDigest, EngramMigration, EngramProposal, EngramScope, EngramStatus, PitStop } from "../shared/types.js";
 import type { PitstopRow, MemoryRow } from "./models.js";
 
 const MAX_BYTES = 2 << 20, FILE_MAX = 10 << 20, PROFILE_MAX = 6000, SKILLS_INDEX_MAX = 2000;
@@ -85,10 +85,14 @@ const RememberZ = z.object({ status: z.enum(["accepted", "open", "held"]), id: I
 const MemListZ = z.object({ memories: list(MemZ.extend({ scope: cut(20).catch(""), area: cut(60).catch(""), created_at: z.number().catch(0), source: cut(200).catch("") }), 200) });
 const ConnListZ = z.object({ connections: list(z.object({ id: ConnZ.shape.id, name: cut(60), status: z.enum(["ok", "warn", "signal"]).catch("warn"), detail: cut(200).catch(""),
   read: z.number().int().nonnegative().catch(0), write: z.number().int().nonnegative().catch(0) }), 50) });
-// What /link/artifacts answers: the artifact, its version, the private link and the public one once shared.
 const Url = z.string().max(400).regex(/^https:\/\/[^\s"<>]+$/);
+// GET /link/artifacts: one artifact a member published, with its link state.
+const LinkArtifactZ = z.object({ id: Id, title: z.string().max(300), kind: z.string().max(40), pitcrew_id: Id, version: z.number().int().positive(),
+  mime: z.string().max(120).nullable(), size: z.number().nullable(), url: Url, public_url: Url.nullable(), share_pending: z.boolean(),
+  ref: z.string().max(200).nullable(), created_at: z.number(), updated_at: z.number() });
 // What deciding a share answers: Engram's proposal plus the public link it made.
 const DecidedShareZ = z.object({ kind: z.literal("share"), public_url: Url, source: z.object({ ref: z.string().max(200).nullable().optional() }).nullable().optional() });
+// What POST /link/artifacts answers: the artifact, its version, the private link and the public one once shared.
 const PublishZ = z.object({ id: Id, version: z.number().int().positive(), url: Url, public_url: Url.nullable().catch(null), status: z.enum(["published", "share_pending"]) });
 
 // ---------- settings ----------
@@ -268,6 +272,21 @@ export async function decideProposal(id: string, decision: EngramDecision) {
   audit("driver", `engram.${decision}`, { id, title: ps.title });
   emitPit(id);
   return pitView(one<PitstopRow>("SELECT * FROM pitstops WHERE id=?", id)!);
+}
+
+// The Library's Published list: one Engram call per view. Engram is the record, so revoked links and forgotten files
+// drop out here too; a member deleted in Pitcrew keeps its files under its old id.
+export async function listArtifacts(): Promise<PublishedArtifact[]> {
+  if (!linked()) return [];
+  const r = shape(z.object({ artifacts: z.array(z.unknown()).max(500) }), await call("/link/artifacts"), "artifact list");
+  const bots = new Map(listBots().map((b) => [b.id, b]));
+  return r.artifacts.flatMap((x) => {
+    const a = LinkArtifactZ.safeParse(x); if (!a.success) return [];
+    const b = bots.get(a.data.pitcrew_id), th = /^pitcrew:thread:(th_[\w-]{1,40})$/.exec(a.data.ref || "")?.[1];
+    const { pitcrew_id, ref, ...rest } = a.data;
+    return [{ ...rest, title: clean(rest.title, 200), bot_id: pitcrew_id, bot_name: b?.name ?? pitcrew_id, hue: b?.hue ?? null, shape: b?.shape ?? null,
+      thread_id: th && one("SELECT 1 FROM threads WHERE id=?", th) ? th : null }];
+  });
 }
 
 // ---------- digest ----------
