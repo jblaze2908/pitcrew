@@ -133,6 +133,12 @@ tested (`GET /link/inbox`) before it is saved, encrypted like provider keys. Pri
   name the source; propose entities and skills; leave episodes and files to Pitcrew; check before finishing a task.
   Unlinked members keep the plain remember rule, and their `valid_until` goes into the memory's text.
 - Tests: 4 more in `tests/engram.test.mjs`, the taint gate in `tests/sites.test.mjs`.
+- **Artifacts are shareable files** (Engram hosts them, like Claude artifacts). A linked member gets `publish_file`:
+  one file from `/bot/work` (md, html, pdf, image, anything ≤ 10 MB) goes to `POST /link/artifacts` and comes back
+  as a private link only the driver can open; passing its id publishes a new version at the same link; `public: true`
+  asks for a public link, which Engram holds for the driver (a pit stop here). The instructions tell members to
+  publish what the driver will read, keep or share, and leave working files alone. Library files are no longer sent
+  on their own (not by the journal, not by "Move memories"); the journal links what a session published.
 - `brain/` (the Codex harness image) is now `harness/`; image and container stay `pitcrew-brain`, data stays in
   `/srv/pitcrew/brains`.
 

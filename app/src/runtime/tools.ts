@@ -14,7 +14,7 @@ import { askCrew } from "./delegation.js";
 import { planTool } from "./plans.js";
 import { runtimeTool, type ToolCall } from "./browser.js";
 import { IST, say } from "./util.js";
-import { remember, forget } from "../engram.js";
+import { remember, forget, publishFile } from "../engram.js";
 import { memberLinked } from "../engramStore.js";
 
 export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Promise<ToolResult> {
@@ -86,6 +86,16 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
         addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Scheduled “${s.prompt.slice(0, 80)}” ${s.spec} (next ${new Date(s.next_run + IST).toISOString().slice(0, 16).replace("T", " ")} IST)` });
         return say(`Scheduled ${s.id}: ${s.spec}.`);
       } catch (e: any) { return say(e.message, false); }
+    }
+    case "publish_file": {
+      if (!memberLinked(b)) return say("Publishing needs Engram, and this crew member isn't linked to it.", false);
+      try {
+        const r = await publishFile(b, String(a.path || ""), { title: a.title ? String(a.title) : undefined, id: a.id ? String(a.id) : null, public: a.public === true, description: a.description ? String(a.description) : undefined, threadId });
+        const title = String(a.title || String(a.path || "").split("/").pop());
+        addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Published “${title}”${r.version > 1 ? ` (version ${r.version})` : ""}: ${r.url}`, artifact: { id: r.id, title, url: r.url, public_url: r.public_url, version: r.version } });
+        const share = r.status === "share_pending" ? ` A public link waits for ${getSetting("driver_name", "the driver")}'s approval in Pit stops.` : r.public_url ? ` Public link: ${r.public_url}` : "";
+        return say(`Published as ${r.id}, version ${r.version}. Private link (only ${getSetting("driver_name", "the driver")} can open it): ${r.url}${share} To update it, publish again with id ${r.id}.`);
+      } catch (e: any) { return say(`Couldn't publish: ${e.message}`, false); }
     }
     case "find_threads": {
       const found = findThreads(b.id, a.query, { exclude: threadId, limit: Math.min(Number(a.limit) || 8, 20) });

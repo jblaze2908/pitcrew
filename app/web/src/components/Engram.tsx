@@ -54,15 +54,15 @@ export function EngramSettings() {
       </div>}
       {s.linked && <div className="pc-card col" style={{ maxWidth: 640 }}>
         <p className="pc-lab">Move memories to Engram</p>
-        <p className="small muted">Sends each member's memories, with their dates, and its Library files from out/ and downloads/ (up to 6 MB each) to Engram. Private members without Money or Health memories are skipped, and nothing here is deleted. Run it again any time: only what's new is sent.</p>
+        <p className="small muted">Sends each member's memories, with their dates, to Engram. Private members without Money or Health memories are skipped, and nothing here is deleted. Run it again any time: only what's new is sent. Files go to Engram only when a member publishes them.</p>
         <div className="row">
           <BusyButton className="pc-pill s" onClick={async () => { await api.post("/api/engram/migrate"); st.reload(); }}>{running ? "Moving…" : "Move memories to Engram"}</BusyButton>
-          <span className="small faint">{`${plural(s.sent.memories, "memory")} and ${plural(s.sent.files, "file")} sent so far`}</span>
+          <span className="small faint">{`${plural(s.sent.memories, "memory")} sent so far`}</span>
         </div>
         {m.line && <p className="small">{m.line}</p>}
         {!running && m.summary && m.summary.length > 0 && <table className="tbl"><tbody>{m.summary.map((r) => (
-          <tr key={r.name}><td>{r.name}</td><td className="small">{`${plural(r.memories, "memory")}, ${plural(r.files, "file")}`}</td>
-            <td className="small faint">{[r.skipped && `${r.skipped} already there`, r.tooBig && `${r.tooBig} over 6 MB`, r.failed && `${r.failed} failed`].filter(Boolean).join(" · ")}</td></tr>))}
+          <tr key={r.name}><td>{r.name}</td><td className="small">{plural(r.memories, "memory")}</td>
+            <td className="small faint">{[r.skipped && `${r.skipped} already there`, r.failed && `${r.failed} failed`].filter(Boolean).join(" · ")}</td></tr>))}
         </tbody></table>}
       </div>}
     </div>
