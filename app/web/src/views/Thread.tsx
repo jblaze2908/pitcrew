@@ -33,6 +33,7 @@ function layout(events: ThreadEvent[], ctx: EventCtx): Item[] {
   const items: Item[] = [];
   const drawn = new Set<string>();
   let group: { turn: string | null; steps: ThreadEvent[] } | null = null;
+  let lastAgent = false;  // the last drawn item, steps aside, was this member's message
   for (const e of events) {
     if (e.kind === "tool") {
       const last = items[items.length - 1];
@@ -41,14 +42,17 @@ function layout(events: ThreadEvent[], ctx: EventCtx): Item[] {
       continue;
     }
     if ((e.kind === "plan" || e.kind === "delegation") && drawn.has(e.data.id)) continue;
-    const el = renderEvent(e, ctx);
+    const el = renderEvent(e, e.kind === "agent" && lastAgent ? { ...ctx, cont: true } : ctx);
     if (el == null) continue;
+    lastAgent = e.kind === "agent";
     if (e.kind === "plan" || e.kind === "delegation") drawn.add(e.data.id);
     group = null;
     items.push({ key: `e${e.id}`, el });
   }
   return items;
 }
+/** Whether the newest drawn item (steps aside) is the member's own message, so a streaming reply continues it. */
+const endsWithAgent = (events: ThreadEvent[]) => { for (let i = events.length - 1; i >= 0; i--) { const k = events[i].kind; if (k === "tool") continue; return k === "agent"; } return false; };
 
 function LiveThread({ d }: { d: ThreadView }) {
   const { bot } = useStore();
@@ -155,7 +159,7 @@ function LiveThread({ d }: { d: ThreadView }) {
           {items.map((it) => "steps" in it
             ? <Steps key={it.key} events={it.steps} closeSignal={closeSteps} initialOpen={it.key === openOnLoad.current || liveIds.current.has(it.steps[0].id)} />
             : <Fragment key={it.key}>{it.el}</Fragment>)}
-          {streaming && <div className="msg bot"><Face b={b} size="sm" mood="working" /><div className="md">{streaming.text}</div></div>}
+          {streaming && <div className={`msg bot${endsWithAgent(events) ? " cont" : ""}`}>{endsWithAgent(events) ? <span /> : <Face b={b} size="sm" mood="working" />}<div className="md">{streaming.text}</div></div>}
           <div className={`live ${running ? "" : "hidden"}`}><Loader /><span>{activity}</span></div>
         </div>
         <Composer threadId={id} name={b.name} running={running} />
