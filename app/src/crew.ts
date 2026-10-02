@@ -152,7 +152,8 @@ export function engramBlock(driver: string, engram: EngramContext, scope: keyof 
       `- If a fact changed, pass the old memory's id to remember so it is replaced, not duplicated.`,
       `- Not worth saving: what you just read from Engram, guesses or estimates, one-off chatter, and secrets (passwords, OTPs, card numbers, full account numbers).`,
       `- If a fact didn't come from ${driver}, say where it did ("per the October BESCOM bill"). Anything from an email or a web page waits for ${driver}'s review.`,
-      `- engram propose: a person, account or place worth its own record (kind entity), or a how-to you worked out that will come up again (kind skill)${scope === "personal" ? "" : `, with scope ${scope}`}. Don't propose episodes or files: Pitcrew sends your journal and Library files itself.`,
+      `- engram propose: a person, account or place worth its own record (kind entity), or a how-to you worked out that will come up again (kind skill)${scope === "personal" ? "" : `, with scope ${scope}`}. Don't propose episodes: Pitcrew sends your journal itself.`,
+      `- When you make something ${driver} will read, keep or share (a report, comparison, plan, dashboard, letter), write it as one file in /bot/work/out (md, html or pdf) and call publish_file, then give them the link. To change it later, publish again with its id. Working files stay unpublished.`,
       `- Before you finish a task, check whether you learned something durable, and save it then.`,
       scope === "personal" ? "" : `Your memories are filed under ${SCOPE_NAME[scope]}, which other crew members can't read.`].filter(Boolean).join("\n"),
     engram.profile ? `How ${driver} works, from Engram (their profile, compiled for you):\n${engram.profile}` : "",
@@ -214,7 +215,7 @@ function browserTool(x: McpTool) {
 }
 const BROWSER_READ = { type: "function", name: "browser_read", description: "Read the current page's content as compact markdown (headings, text, lists, links with their URLs, form fields, tables), up to 12 KB; the main landmark when the page has one. Pass target (a ref) to read just that part. For reading; use browser_snapshot when you need refs to act on.",
   inputSchema: { type: "object", properties: { target: { type: "string", description: "Ref of the element to read, from the latest snapshot. Omit for the whole page." }, element: { type: "string", description: "What that element is, in words." } } } };
-export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { browser: [], computer: [] }) {
+export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { browser: [], computer: [] }, { engram = false } = {}) {
   const runtime = [
     ...manifest.browser.filter((x) => !NO_PAGE_JS.has(x.name) && !HIDDEN.has(x.name)).map(browserTool),
     ...(manifest.browser.some((x) => x.name === "browser_snapshot") ? [BROWSER_READ] : []),
@@ -234,6 +235,12 @@ export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { br
     { type: "function", name: "schedule_task", description: 'Run a prompt on a schedule in this thread. when: "daily HH:MM", "weekly mon HH:MM", "every N minutes|hours" (min 15 minutes). Times are Asia/Kolkata.',
       inputSchema: { type: "object", properties: { when: { type: "string" }, prompt: { type: "string" } }, required: ["when", "prompt"] } },
   ];
+  // Only for a member linked to Engram, which hosts the published files.
+  if (engram) tools.push({ type: "function", name: "publish_file",
+    description: "Publish one file from /bot/work (md, html, pdf, an image, or any single file) as a page the driver opens at a link. Private to the driver; public only when they ask to share it and approve. Pass id to update one you published (same link, new version).",
+    inputSchema: { type: "object", properties: { path: { type: "string", description: "Under /bot/work, e.g. /bot/work/out/goa-comparison.html" }, title: { type: "string" },
+      id: { type: "string", description: "An artifact you published, to replace it with a new version" }, description: { type: "string" },
+      public: { type: "boolean", description: "Ask the driver for a public link anyone can open. Only when they asked to share it." } }, required: ["path", "title"] } });
   const plans = b.kind === "chief" && plansOn();
   if (plans) tools.push({ type: "function", name: "plan",
     description: "Run work that needs crew members as a living todo list that Pitcrew executes. First call: goal, constraints (the driver's preferences and limits, word for word) and add. Later calls: add, reopen (send an item back with a new task and why), cancel, or finish. Pitcrew starts every item whose `after` items are done, hands it their results, and wakes you after each item ends. You may finish only when every constraint is marked met, unmet or untested.",

@@ -92,7 +92,7 @@ export async function startTurn(threadId: string, text: string, attachments: str
     const common = { model: b.model, modelProvider: b.provider, cwd: "/bot/work", developerInstructions: instructions(b, mems ?? [], egCtx) };
     let refreshed: string | null = null;
     if (!codexId) {
-      const st = await c.request("thread/start", { ...common, sandbox: "danger-full-access", approvalPolicy: "untrusted", environments: ENVS, dynamicTools: dynamicTools(b, await toolManifest()) }, 120000);
+      const st = await c.request("thread/start", { ...common, sandbox: "danger-full-access", approvalPolicy: "untrusted", environments: ENVS, dynamicTools: dynamicTools(b, await toolManifest(), { engram: memberLinked(b) }) }, 120000);
       codexId = st.thread.id as string;
       run("UPDATE threads SET codex_id=? WHERE id=?", codexId, threadId);
       c.loaded.add(codexId);

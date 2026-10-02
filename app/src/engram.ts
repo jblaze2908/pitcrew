@@ -9,7 +9,7 @@ import { z } from "zod";
 import { one, all, run, now, json, audit, getSetting, setSetting } from "./db.js";
 import { getSecret, putSecret, deleteSecret, secretMeta, httpErr, type HttpError } from "./auth.js";
 import { getBot, listBots } from "./crew.js";
-import { botDir, listFiles, allBrains } from "./computer.js";
+import { botDir, allBrains } from "./computer.js";
 import { DEFAULT_URL, LINK_SECRET, memberSecret, engramUrl, linked, normaliseUrl, engramEligible, memberLinked } from "./engramStore.js";
 import { bus } from "./runtime/bus.js";
 import { active } from "./runtime/state.js";
@@ -17,7 +17,7 @@ import { tainted } from "./runtime/taint.js";
 import type { Bot, EngramDecision, EngramDigest, EngramMigration, EngramProposal, EngramScope, EngramStatus, PitStop } from "../shared/types.js";
 import type { PitstopRow, MemoryRow } from "./models.js";
 
-const MAX_BYTES = 2 << 20, FILE_MAX = 6 << 20, PROFILE_MAX = 6000, SKILLS_INDEX_MAX = 2000;
+const MAX_BYTES = 2 << 20, FILE_MAX = 10 << 20, PROFILE_MAX = 6000, SKILLS_INDEX_MAX = 2000;
 const POLL_MS = 60000, DIGEST_MS = 3600000, SYNC_MS = 5 * 60000;
 const GONE = "Decided in Engram";
 const TOKEN = /^[\x21-\x7e]{16,500}$/;
@@ -84,7 +84,9 @@ const RememberZ = z.object({ status: z.enum(["accepted", "open", "held"]), id: I
 const MemListZ = z.object({ memories: list(MemZ.extend({ scope: cut(20).catch(""), area: cut(60).catch(""), created_at: z.number().catch(0), source: cut(200).catch("") }), 200) });
 const ConnListZ = z.object({ connections: list(z.object({ id: ConnZ.shape.id, name: cut(60), status: z.enum(["ok", "warn", "signal"]).catch("warn"), detail: cut(200).catch(""),
   read: z.number().int().nonnegative().catch(0), write: z.number().int().nonnegative().catch(0) }), 50) });
-const ArtifactZ = z.object({ id: Id });
+// What /link/artifacts answers: the artifact, its version, the private link and the public one once shared.
+const Url = z.string().max(400).regex(/^https:\/\/[^\s"<>]+$/);
+const PublishZ = z.object({ id: Id, version: z.number().int().positive(), url: Url, public_url: Url.nullable().catch(null), status: z.enum(["published", "share_pending"]) });
 
 // ---------- settings ----------
 let lastTest: EngramStatus["test"] = null, lastPoll: EngramStatus["poll"] = null;
@@ -345,12 +347,6 @@ let job: EngramMigration = { running: false, line: "", startedAt: null, endedAt:
 const sha = (b: string | Buffer) => createHash("sha256").update(b).digest("hex");
 const wasSent = (botId: string, kind: string, ref: string) => !!one("SELECT 1 FROM engram_sent WHERE bot_id=? AND kind=? AND ref=?", botId, kind, ref);
 const markSent = (botId: string, kind: string, ref: string) => run("INSERT OR IGNORE INTO engram_sent(bot_id,kind,ref,sent_at) VALUES(?,?,?,?)", botId, kind, ref, now());
-const MIME: Record<string, string> = { pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif", txt: "text/plain", md: "text/markdown", csv: "text/csv", html: "text/html", json: "application/json" };
-const mimeOf = (p: string) => MIME[p.split(".").pop()!.toLowerCase()] || "application/octet-stream";
-const kindOf = (p: string, mime: string) => /receipt|invoice|bill|order/i.test(p) ? "receipt" : /statement/i.test(p) ? "statement" : /report/i.test(p) ? "report" : mime.startsWith("image/") ? "screenshot" : "document";
-
-// Library receipts: what the member made for the driver (out/) or downloaded (downloads/).
-const libraryFiles = (botId: string) => listFiles(botId).filter((f) => /^(out|downloads)\//.test(f.path));
 // Read inside the member's workspace only: the path resolves under work/ and the file itself is no link.
 function readWork(botId: string, rel: string) {
   const base = realpathSync(`${botDir(botId)}/work`), full = realpathSync(`${base}/${rel}`);
@@ -359,16 +355,23 @@ function readWork(botId: string, rel: string) {
   try { const st = fstatSync(fd); return st.isFile() && st.size <= FILE_MAX ? readFileSync(fd) : null; } finally { closeSync(fd); }
 }
 
-// One Library file to Engram as an artifact: its id, "sent" when it already went, or null when it can't be read.
-async function sendFile(b: Bot, path: string, mtime: number): Promise<{ id: string | null; sent: boolean } | null> {
-  let buf: Buffer | null = null; try { buf = readWork(b.id, path); } catch {}
-  if (!buf) return null;
-  const r = `${path}#${sha(buf).slice(0, 16)}`;
-  if (wasSent(b.id, "file", r)) return { id: null, sent: true };
-  const mime = mimeOf(path);
-  const res = await call("/link/import/artifacts", { method: "POST", timeoutMs: 60000, body: { pitcrew_id: b.id, title: basename(path), kind: kindOf(path, mime), mime, content_base64: buf.toString("base64"), created_at: Math.round(mtime) } });
-  markSent(b.id, "file", r);
-  return { id: ArtifactZ.safeParse(res).data?.id ?? null, sent: false };
+// ---------- artifacts: one workspace file published to Engram ----------
+// Private to the driver; public only once they approve the share (Engram's inbox, mirrored as a pit stop). Passing the
+// id of an artifact this member published makes a new version at the same link. One POST per publish, ≤ 10 MB.
+export async function publishFile(b: Bot, path: string, o: { title?: string; id?: string | null; public?: boolean; description?: string; threadId?: string | null } = {}) {
+  const rel = path.replace(/^\/bot\/work\//, "").replace(/^\.?\/+/, "");
+  if (!rel || rel.split("/").includes("..")) throw httpErr(400, "Give a file under /bot/work");
+  let buf: Buffer | null = null;
+  try { buf = readWork(b.id, rel); } catch { throw httpErr(404, `No file at /bot/work/${clean(rel, 200)}`); }
+  if (!buf) throw httpErr(400, `Not a file under /bot/work, or over 10 MB: ${clean(rel, 200)}`);
+  const id = o.id && /^[\w-]{1,100}$/.test(o.id) ? o.id : undefined;
+  const res = shape(PublishZ, await call("/link/artifacts", { method: "POST", timeoutMs: 60000, body: {
+    pitcrew_id: b.id, title: clean(o.title || basename(rel), 200), filename: clean(basename(rel), 120), content_base64: buf.toString("base64"),
+    ...(id ? { id } : {}), ...(o.description ? { description: clean(o.description, 2000) } : {}), ...(o.public ? { public: true } : {}),
+    ...(o.threadId ? { ref: `pitcrew:thread:${o.threadId}` } : {}) } }), "publish result");
+  if (res.status === "share_pending") mirrorInbox().catch(() => {});
+  audit(b.id, "engram.published", { botId: b.id, id: res.id, version: res.version, path: rel, share: res.status === "share_pending" });
+  return res;
 }
 
 export const migration = () => job;
@@ -405,23 +408,14 @@ async function migrate() {
         row.memories += batch.length - dup; row.skipped += dup;
       } catch { row.failed += batch.length; }
     }
-    const files = libraryFiles(b.id);
-    for (const [i, f] of files.entries()) {
-      job.line = `${b.name}: files ${i + 1} of ${files.length}`;
-      if (f.size > FILE_MAX) { row.tooBig++; continue; }
-      try {
-        const r = await sendFile(b, f.path, f.mtime);
-        if (!r) row.failed++; else if (r.sent) row.skipped++; else row.files++;
-      } catch { row.failed++; }
-    }
   }
-  const t = job.summary!.reduce((a, s) => ({ m: a.m + s.memories, f: a.f + s.files, x: a.x + s.failed }), { m: 0, f: 0, x: 0 });
-  job.line = `Done: ${t.m} memories and ${t.f} files sent${t.x ? `, ${t.x} failed (run it again to retry)` : ""}.`;
+  const t = job.summary!.reduce((a, s) => ({ m: a.m + s.memories, x: a.x + s.failed }), { m: 0, x: 0 });
+  job.line = `Done: ${t.m} memories sent${t.x ? `, ${t.x} failed (run it again to retry)` : ""}.`;
 }
 
 // ---------- journal: one entry per session ----------
 // A session is a thread's turns until it has been idle 15 min. Its entry says what was asked, what ran and how it ended,
-// and links the thread, its plan and the Library files it made (sent as artifacts first). Looks back 24 h at most.
+// and links the thread, its plan and the artifacts it published. Looks back 24 h at most.
 const EPISODE_IDLE = 15 * 60000, EPISODE_LOOKBACK = 24 * 3600000, EPISODES_PER_TICK = 10;
 type TurnRow = { id: string; status: string; cost_usd: number | null; changes: string | null; ended_at: number };
 const STEP: Record<string, string> = { commandExecution: "shell", fileChange: "edits", webSearch: "web search", dynamicToolCall: "tools" };
@@ -459,13 +453,10 @@ async function sendEpisode(b: Bot, threadId: string, turns: TurnRow[], from: num
   const outputs: { kind: string; ref: string; label: string }[] = [{ kind: "thread", ref: `pitcrew:thread:${threadId}`, label: clean(title, 200) }];
   const plan = one<{ id: string; goal: string; status: string; answer: string | null }>("SELECT id, goal, status, answer FROM plans WHERE thread_id=? ORDER BY created_at DESC LIMIT 1", threadId);
   if (plan) outputs.push({ kind: "plan", ref: `pitcrew:plan:${plan.id}`, label: clean(plan.goal, 200) });
-  // Library files this session made or downloaded, as artifacts the entry links to. Unchanged ones were already sent.
-  for (const f of [...new Map(files.filter((c) => /^(out|downloads)\//.test(c.path)).map((c) => [c.path, c])).values()].slice(0, 15)) {
-    const lib = listFiles(b.id).find((x) => x.path === f.path);
-    if (!lib || lib.size > FILE_MAX) continue;
-    const r = await sendFile(b, f.path, lib.mtime).catch(() => null);
-    if (r?.id && outputs.length < 20) outputs.push({ kind: "artifact", ref: r.id, label: clean(basename(f.path), 200) });
-  }
+  // What publish_file put out in this session (its thread events), one link per artifact.
+  const published = all<{ id: string; title: string }>(`SELECT DISTINCT json_extract(data,'$.artifact.id') id, json_extract(data,'$.artifact.title') title FROM events
+    WHERE thread_id=? AND kind='system' AND turn_id IN (${qs}) AND json_extract(data,'$.artifact.id') IS NOT NULL`, threadId, ...ids);
+  for (const a of published.slice(0, 18)) outputs.push({ kind: "artifact", ref: a.id, label: clean(a.title || a.id, 200) });
   const asked = ev("user", "ASC"), reply = ev("agent", "DESC").text || "";
   const text = [`${b.name} · ${title}`,
     asked.display || asked.text ? `Asked: ${clean(asked.display || asked.text || "", 300)}` : "",

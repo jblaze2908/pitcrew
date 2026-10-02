@@ -13,7 +13,7 @@ Object.assign(process.env, { PITCREW_ROOT: root, PITCREW_DATA: `${root}/data`, P
 // ---------- the stub ----------
 const LINK = "link-token-0123456789abcdef";
 const E = { proposals: [], skills: [], calls: [], revoked: new Set(), decisions: [], members: [], memImports: [], artImports: [], n: 0,
-  mems: {}, remembered: [], forgot: [], episodes: [], hold: false, connections: [{ id: "google", name: "Google", status: "ok", detail: "Fine", read: 6, write: 4 }],
+  mems: {}, remembered: [], forgot: [], episodes: [], published: [], hold: false, connections: [{ id: "google", name: "Google", status: "ok", detail: "Fine", read: 6, write: 4 }],
   digest: { week: "2026-W40", from: "2026-09-28", to: "2026-10-04", built_at: Date.now(), waiting: { open: 3, held: 1 },
     runningOut: [{ date: "2026-10-20", text: "Passport renewal window", area: "home" }], changed: [{ text: "Rent went up", detail: "", tone: "bad" }],
     openLoops: [{ text: "Car insurance quote", area: "home" }], journal: [{ day: "2026-10-01", lines: ["Paid electricity"] }] } };
@@ -48,6 +48,11 @@ const srv = createServer(async (req, res) => {
   }
   const forgot = /^\/link\/memories\/([\w-]+)\/forget$/.exec(url.pathname);
   if (req.method === "POST" && forgot) { E.forgot.push({ id: forgot[1], ...body }); E.mems[pid] = own().filter((m) => m.id !== forgot[1]); return send(200, { ok: true }); }
+  if (req.method === "POST" && url.pathname === "/link/artifacts") {
+    E.published.push(body);
+    const id = body.id || `art_${E.published.length}`, version = E.published.filter((x) => (x.id || null) === body.id && body.id).length + 1;
+    return send(200, { id, version: body.id ? version : 1, url: `https://artifacts.example/a/${id}`, public_url: null, status: body.public ? "share_pending" : "published" });
+  }
   if (req.method === "POST" && url.pathname === "/link/episodes") { E.episodes.push(body); return send(200, { status: "accepted", id: `j_${E.episodes.length}` }); }
   if (req.method === "POST" && url.pathname === "/link/import/memories") { E.memImports.push(body); return send(200, { accepted: body.items.length }); }
   if (req.method === "POST" && url.pathname === "/link/import/artifacts") { E.artImports.push(body); return send(200, { id: `ar_${E.artImports.length}` }); }
@@ -231,7 +236,7 @@ test("thread start: the Chief gets Engram's profile, every linked member its ski
   assert.equal(await G.threadContext(C.getBot("diary")), null);
 });
 
-test("Move memories to Engram sends each linked member's memories and Library files once, and keeps Pitcrew's", async () => {
+test("Move memories to Engram sends each linked member's memories once, never Library files, and keeps Pitcrew's", async () => {
   const t0 = Date.UTC(2026, 0, 2);
   for (const [id, bot, text, at] of [["me_a", "chief", "Prefers aisle seats", t0], ["me_b", "bills", "Electricity is BESCOM", t0 + 1000], ["me_c", "diary", "Private thought", t0 + 2000]])
     run("INSERT INTO memory(id,bot_id,text,source,created_at,updated_at) VALUES(?,?,?,?,?,?)", id, bot, text, "driver", at, at);
@@ -250,17 +255,14 @@ test("Move memories to Engram sends each linked member's memories and Library fi
   await G.migrationDone();
   const sent = E.memImports.flatMap((m) => m.items.map((i) => ({ pid: m.pitcrew_id, ...i })));
   assert.deepEqual(sent, [{ pid: "chief", text: "Prefers aisle seats", created_at: t0 }, { pid: "bills", text: "Electricity is BESCOM", created_at: t0 + 1000 }]);
-  assert.deepEqual(E.artImports.map((a) => [a.pitcrew_id, a.title, a.kind, a.mime]).sort(), [["bills", "receipt-oct.pdf", "receipt", "application/pdf"], ["bills", "statement.csv", "statement", "text/csv"]]);
-  assert.equal(Buffer.from(E.artImports.find((a) => a.title === "receipt-oct.pdf").content_base64, "base64").toString(), "%PDF-1.4 receipt");
+  assert.equal(E.artImports.length + E.published.length, 0, "files go only when published");
   const status = (await req("GET", "/api/engram")).body;
-  assert.match(status.migration.line, /^Done: 2 memories and 2 files sent\.$/);
-  assert.equal(status.migration.summary.find((s) => s.name === "Bills").tooBig, 1);
+  assert.match(status.migration.line, /^Done: 2 memories sent\.$/);
   assert.ok(!status.migration.summary.some((s) => s.name === "Diary"), "private members are skipped");
-  assert.deepEqual(status.sent, { memories: 2, files: 2 });
+  assert.equal(status.sent.memories, 2);
 
   G.startMigration(); await G.migrationDone();
   assert.equal(E.memImports.length, 2, "nothing sent twice");
-  assert.equal(E.artImports.length, 2);
   assert.equal(all("SELECT 1 FROM memory WHERE forgotten_at IS NULL").length, 3, "Pitcrew's memories stay");
 });
 
@@ -320,7 +322,8 @@ test("linked members are told what to send to Engram; unlinked ones keep the pla
   assert.match(linked, /Pass valid_until \(YYYY-MM-DD\)/);
   assert.match(linked, /pass the old memory's id to remember/);
   assert.match(linked, /secrets \(passwords, OTPs, card numbers, full account numbers\)/);
-  assert.match(linked, /Don't propose episodes or files/);
+  assert.match(linked, /Don't propose episodes/);
+  assert.match(linked, /call publish_file, then give them the link/);
   assert.match(linked, /What you remember \(in Engram\)[^\n]*\n- \[m_1\] Gas is Indane/);
   assert.doesNotMatch(linked, /filed under/, "Personal needs no scope line");
   assert.doesNotMatch(linked, /When .* tells you a durable fact/);
@@ -329,12 +332,31 @@ test("linked members are told what to send to Engram; unlinked ones keep the pla
   const plain = C.instructions(C.getBot("bills"), []);
   assert.match(plain, /tells you a durable fact or preference worth keeping, call remember/);
   assert.doesNotMatch(plain, /Engram/);
-  assert.ok(linked.length - plain.length < 2600, `the Engram rules stay small (${linked.length - plain.length} chars)`);
+  assert.ok(linked.length - plain.length < 3000, `the Engram rules stay small (${linked.length - plain.length} chars)`);
 
   await G.remember(C.getBot("bills"), "Car insurance quote is 14,200", { validUntil: "2026-10-31" });
   assert.equal(E.remembered.at(-1).valid_until, "2026-10-31");
   await G.remember(C.getBot("bills"), "No expiry here");
   assert.equal("valid_until" in E.remembered.at(-1), false);
+});
+
+test("publish_file: a workspace file becomes a private artifact; updates by id; a public link waits for approval", async () => {
+  const work = `${root}/bots/bills/work`;
+  writeFileSync(`${work}/out/goa.html`, "<h1>Goa</h1>");
+  const r = await G.publishFile(C.getBot("bills"), "/bot/work/out/goa.html", { title: "Goa comparison", threadId: "th_p" });
+  assert.deepEqual([r.id, r.version, r.status, r.url], ["art_1", 1, "published", "https://artifacts.example/a/art_1"]);
+  const sent = E.published.at(-1);
+  assert.deepEqual([sent.pitcrew_id, sent.title, sent.filename, sent.ref, sent.public, sent.id], ["bills", "Goa comparison", "goa.html", "pitcrew:thread:th_p", undefined, undefined]);
+  assert.equal(Buffer.from(sent.content_base64, "base64").toString(), "<h1>Goa</h1>");
+  const v2 = await G.publishFile(C.getBot("bills"), "out/goa.html", { id: "art_1", public: true });
+  assert.deepEqual([v2.id, v2.status], ["art_1", "share_pending"]);
+  assert.equal(E.published.at(-1).public, true);
+  await assert.rejects(G.publishFile(C.getBot("bills"), "../../etc/passwd"), /under \/bot\/work/);
+  await assert.rejects(G.publishFile(C.getBot("bills"), "out/missing.pdf"), /No file/);
+  writeFileSync(`${work}/out/big.bin`, Buffer.alloc((10 << 20) + 1));
+  await assert.rejects(G.publishFile(C.getBot("bills"), "out/big.bin"), /over 10 MB/);
+  const names = (o) => C.dynamicTools(C.getBot("bills"), undefined, o).map((t) => t.name);
+  assert.ok(names({ engram: true }).includes("publish_file")); assert.ok(!names({}).includes("publish_file"), "only linked members get it");
 });
 
 test("hiring: the connections picked go once with the first link, read-only, and the scope comes from the form", async () => {
@@ -349,13 +371,14 @@ test("hiring: the connections picked go once with the first link, read-only, and
   assert.equal(E.members.at(-1).connections, undefined, "a rotate never re-sends them");
 });
 
-test("journal: an idle session becomes one entry with its thread and new Library files; never twice", async () => {
+test("journal: an idle session becomes one entry linking its thread and what it published; never twice", async () => {
   const th = "th_ep", t = now() - 20 * 60000;
   run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES(?,?,?,?,?)", th, "bills", "Pay the October bills", t, t);
   run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,provider,model,started_at,ended_at,cost_usd,changes) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
     "tu_ep1", th, "bills", "completed", "driver", "openrouter", "m", t - 60000, t, 0.031, JSON.stringify([{ path: "out/receipt-nov.pdf", status: "added" }, { path: "scratch.txt", status: "modified" }]));
   run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES(?,?,?,?,?)", th, "tu_ep1", "user", JSON.stringify({ text: "Pay electricity" }), t - 60000);
   run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES(?,?,?,?,?)", th, "tu_ep1", "tool", JSON.stringify({ type: "mcpToolCall", server: "browser" }), t - 50000);
+  run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES(?,?,?,?,?)", th, "tu_ep1", "system", JSON.stringify({ text: "Published", artifact: { id: "art_9", title: "October bills", url: "https://artifacts.example/a/art_9" } }), t - 2000);
   run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES(?,?,?,?,?)", th, "tu_ep1", "agent", JSON.stringify({ text: "Paid ₹1,240. Receipt saved." }), t - 1000);
   writeFileSync(`${root}/bots/bills/work/out/receipt-nov.pdf`, "%PDF-1.4 november");
   const fresh = "th_busy";
@@ -372,9 +395,8 @@ test("journal: an idle session becomes one entry with its thread and new Library
   const ep = E.episodes[0];
   assert.equal(ep.pitcrew_id, "bills"); assert.equal(ep.at, t);
   assert.match(ep.text, /^Bills · Pay the October bills\nAsked: Pay electricity\nRan: 1 run · browser 1 · 2 files changed · \$0\.03\nEnded with: Paid ₹1,240\. Receipt saved\.$/);
-  assert.equal(E.artImports.length, arts + 1);
-  assert.equal(E.artImports.at(-1).title, "receipt-nov.pdf");
-  assert.deepEqual(ep.outputs, [{ kind: "thread", ref: `pitcrew:thread:${th}`, label: "Pay the October bills" }, { kind: "artifact", ref: `ar_${E.artImports.length}`, label: "receipt-nov.pdf" }]);
+  assert.equal(E.artImports.length, arts, "Library files aren't sent on their own");
+  assert.deepEqual(ep.outputs, [{ kind: "thread", ref: `pitcrew:thread:${th}`, label: "Pay the October bills" }, { kind: "artifact", ref: "art_9", label: "October bills" }]);
   await G.tick();
   assert.equal(E.episodes.length, 1, "never twice");
 });
