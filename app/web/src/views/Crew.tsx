@@ -32,7 +32,7 @@ export function Crew({ id, tab, rest }: { id: string; tab: string; rest: (string
     case "files": body = <FilesTab b={b} rest={rest} />; break;
     case "computer": body = <ComputerTab b={b} reload={reload} />; break;
     case "profile": body = <ProfileTab key={b.id} b={b} />; break;
-    case "memory": body = <MemoryTab b={b} memory={d.memory} reload={reload} />; break;
+    case "memory": body = <MemoryTab b={b} memory={d.memory} memoryIn={d.memoryIn} error={d.memoryError} reload={reload} />; break;
     case "schedules": body = <SchedulesTab b={b} list={d.schedules} reload={reload} />; break;
     case "sites": body = <SitesEditor scope={b.id} help={`Sites for ${b.name}. These win over the crew-wide list in Settings, except a crew-wide block.`} />; break;
     default: body = <div className="col"><RulesList rules={d.rules} after={reload} /><LearnedList items={d.learned} after={reload} /></div>;

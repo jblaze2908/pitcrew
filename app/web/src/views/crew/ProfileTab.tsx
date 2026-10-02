@@ -1,6 +1,6 @@
 // Who a member is (saved with one button) and what it may do without asking (each toggle saves on its own).
 import { useState } from "react";
-import type { BotCard, Decision } from "../../../../shared/types";
+import type { BotCard, Decision, EngramScope } from "../../../../shared/types";
 import { ModelPicker } from "../../components/ModelPicker";
 import { ConfirmButton, Field } from "../../components/ui";
 import { api } from "../../lib/api";
@@ -9,6 +9,7 @@ import { useStore } from "../../lib/store";
 import { toast } from "../../lib/toast";
 
 export const DIALS = ["warmth", "talk", "humour"] as const;
+export const SCOPE_LABEL: Record<EngramScope, string> = { personal: "Personal", finance: "Money", health: "Health" };
 export const splitQuirks = (s: string) => s.split(";").map((x) => x.trim()).filter(Boolean);
 
 export function ProfileTab({ b }: { b: BotCard }) {
@@ -16,13 +17,13 @@ export function ProfileTab({ b }: { b: BotCard }) {
   const p = b.personality || {};
   const [f, setF] = useState({
     name: b.name, job: b.job, role: p.role || "", quirks: (p.quirks || []).join("; "), signoff: p.signoff || "", callMe: p.callMe || "",
-    cap: String(b.weekly_cap_usd), plain: !!p.plain, priv: !!b.private, provider: b.provider as string, model: b.model,
+    cap: String(b.weekly_cap_usd), plain: !!p.plain, priv: !!b.private, scope: b.engram_scope, provider: b.provider as string, model: b.model,
     warmth: p.warmth || 3, talk: p.talk || 3, humour: p.humour || 3,
   });
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((x) => ({ ...x, [k]: v }));
   const save = async () => {
     await api.patch(`/api/bots/${b.id}`, {
-      name: f.name, job: f.job, weekly_cap_usd: +f.cap, provider: f.provider, model: f.model.trim(), private: f.priv,
+      name: f.name, job: f.job, weekly_cap_usd: +f.cap, provider: f.provider, model: f.model.trim(), private: f.priv, engram_scope: f.scope,
       personality: { role: f.role, quirks: splitQuirks(f.quirks), signoff: f.signoff, callMe: f.callMe, plain: f.plain, warmth: f.warmth, talk: f.talk, humour: f.humour },
     });
     toast("Saved. New threads use it; running computers pick it up at next start.");
@@ -42,6 +43,11 @@ export function ProfileTab({ b }: { b: BotCard }) {
             <input type="checkbox" checked={f.priv} onChange={(e) => set("priv", e.target.checked)} />
             <span className="col" style={{ gap: 2 }}><b className="small">Private</b><span className="small faint">Only you talk to it. The Crew Chief can't ask it anything, so nothing it knows reaches other members.</span></span>
           </label>)}
+        <Field label="Memories in Engram" help={f.priv && f.scope === "personal" ? "A private member stays out of Engram until its memories go under Money or Health, which other members can't read." : "Other members read Personal; Money and Health only with a grant you give in Engram."}>
+          <select value={f.scope} onChange={(e) => set("scope", e.target.value as EngramScope)}>
+            {(Object.keys(SCOPE_LABEL) as EngramScope[]).map((k) => <option key={k} value={k}>{SCOPE_LABEL[k]}</option>)}
+          </select>
+        </Field>
         {!chief && <ConfirmButton className="pc-pill o s" ask="Retire?" onConfirm={async () => { await api.post(`/api/bots/${b.id}/archive`); toast(`${b.name} retired`); await refresh(); go("#/"); }}>Retire crew member</ConfirmButton>}
       </div>
       <div className="pc-card col">

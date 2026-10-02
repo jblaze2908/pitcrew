@@ -11,8 +11,10 @@ import { getThread, addEvent, setThreadStatus, nameThread } from "./threads.js";
 import { brain, computer } from "./machines.js";
 import { weekSpend, logSize, billedUsage } from "./spend.js";
 import { activePlan, planLog, emitPlan, planRow } from "./planStore.js";
-import { ensureMemberToken, threadContext, skillsIndex } from "../engram.js";
+import { ensureMemberToken, threadContext, skillsIndex, engramMemories } from "../engram.js";
+import { memberLinked } from "../engramStore.js";
 import { setRollout } from "./scripts.js";
+import { taint, tainted } from "./taint.js";
 import type { Bot } from "../../shared/types.js";
 
 export const isRunning = (threadId: string) => active.has(threadId);
@@ -77,14 +79,16 @@ export async function startTurn(threadId: string, text: string, attachments: str
     const c = brain(b);
     if (!c.up) await ensureMemberToken(b);
     await c.ensure();
-    const mems = all<{ id: string; text: string }>("SELECT id,text FROM memory WHERE bot_id=? AND forgotten_at IS NULL ORDER BY created_at LIMIT 60", b.id);
     let codexId = t.codex_id;
     const refreshNow = refreshing.delete(threadId) && !!codexId;
     // Engram context only where instructions are sent (start/resume) or on /refresh, so a normal turn makes no Engram
     // call. A new thread or a /refresh always syncs: one GET per thread start, not per turn.
     const eg = !codexId || !c.loaded.has(codexId) || refreshNow ? await threadContext(b, !codexId || refreshNow) : null;
     const egCtx = eg && { profile: eg.profile, skills: skillsIndex(eg.skills) };
-    const common = { model: b.model, modelProvider: b.provider, cwd: "/bot/work", developerInstructions: instructions(b, mems, egCtx) };
+    // A linked member's memories are Engram's (cached from the last sync); null until one succeeds, so nothing is
+    // reported forgotten just because Engram was unreachable.
+    const mems = memberLinked(b) ? engramMemories(b.id) : all<{ id: string; text: string }>("SELECT id,text FROM memory WHERE bot_id=? AND forgotten_at IS NULL ORDER BY created_at LIMIT 60", b.id);
+    const common = { model: b.model, modelProvider: b.provider, cwd: "/bot/work", developerInstructions: instructions(b, mems ?? [], egCtx) };
     let refreshed: string | null = null;
     if (!codexId) {
       const st = await c.request("thread/start", { ...common, sandbox: "danger-full-access", approvalPolicy: "untrusted", environments: ENVS, dynamicTools: dynamicTools(b, await toolManifest()) }, 120000);
@@ -116,8 +120,8 @@ export async function startTurn(threadId: string, text: string, attachments: str
     }
     // Developer instructions reach Codex only at start/resume (which just sent the current list); memories saved since
     // go in as turn context, persisted in the thread's history.
-    if (!c.mems.has(codexId)) c.mems.set(codexId, memMap(mems));
-    const memDelta = memoryDelta(c.mems.get(codexId), mems);
+    if (mems && !c.mems.has(codexId)) c.mems.set(codexId, memMap(mems));
+    const memDelta = mems && memoryDelta(c.mems.get(codexId), mems);
     byCodex.set(codexId, threadId);
     const a0 = active.get(threadId);
     if (a0) try { a0.snap = snapshot(b.id); } catch {}
@@ -127,7 +131,7 @@ export async function startTurn(threadId: string, text: string, attachments: str
     // Every turn names the computer environment, so commands never run in the brain itself.
     const r = await c.request("turn/start", { threadId: codexId, environments: ENVS, input: toInput(b.id, carry ? `${carry}\n\n---\n\n${text}` : text, attachments), responsesapiClientMetadata: { pitcrew_turn: turnId },
       ...(Object.keys(ctx).length ? { additionalContext: ctx } : {}) }, 120000);
-    if (memDelta) c.mems.set(codexId, memMap(mems));
+    if (memDelta && mems) c.mems.set(codexId, memMap(mems));
     const a = active.get(threadId);
     if (a) a.codexTurnId = r.turn.id;
     run("UPDATE turns SET codex_turn_id=?, status='running' WHERE id=?", r.turn.id, turnId);
@@ -185,6 +189,9 @@ export async function finishTurn(threadId: string, status: string, error?: strin
       addEvent(threadId, a.turnId, "changes", { turnId: a.turnId, botId: b.id, count: ch.length, files: ch.slice(0, 12).map((c) => ({ path: c.path, status: c.status, lines: c.lines })) });
     }
   } catch {}
+  // A delegated thread's answer carries what it read, so untrusted content also taints the thread that asked.
+  const from = tainted(threadId) && t.origin ? json<{ fromThread?: string }>(t.origin, {}).fromThread : null;
+  if (from && taint(from)) addEvent(from, null, "system", { text: `${b.name}'s answer came from a thread with untrusted content. For the next 10 minutes, sending, paying, signing in, sharing and deleting ask you first.` });
   setThreadStatus(threadId, "idle");
   bus.emit("turn", { threadId, turnId: a.turnId, status, cost: cost.usd, botId: b.id });
   if (wakeFor.has(threadId)) { const p = activePlan(threadId); if (p) { planLog(p.id, `Looked after ${wakeFor.get(threadId)}: no change`); emitPlan(planRow(p.id)!); } wakeFor.delete(threadId); }

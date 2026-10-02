@@ -19,7 +19,7 @@ import type { ToolManifest, McpTool } from "./crew.js";
 export const ROOT = process.env.PITCREW_ROOT || "/srv/pitcrew";
 export const IMAGE = process.env.PITCREW_COMPUTER_IMAGE || "pitcrew-computer:1";
 const BRAIN = process.env.PITCREW_BRAIN_CONTAINER || "pitcrew-brain";
-const CODEX_BIN = "/opt/pitcrew/brain/codex"; // brain/Dockerfile links it to the native binary
+const CODEX_BIN = "/opt/pitcrew/brain/codex"; // harness/Dockerfile links it to the native binary
 const CREW_UID = 1500;
 const MAX_UP = Number(process.env.PITCREW_MAX_COMPUTERS || 3);
 const IDLE_MS = Number(process.env.PITCREW_IDLE_MS || 10 * 60 * 1000);

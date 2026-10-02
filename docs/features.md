@@ -113,7 +113,7 @@ Tiers:
 | "Learned this run" diff after each run: accept or reject new facts | v1.5 |
 | Household facts (addresses, account last-4s, family) shared with explicit per-member grants | v1.5 |
 | Forget-by-source actually forgets (disconnect Gmail → its facts go) | v1 |
-| brain as the shared memory layer | v2 |
+| Engram as the shared memory layer | built 2026-10-02 (v1-build.md) |
 
 ### 7. Integrations
 

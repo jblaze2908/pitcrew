@@ -47,14 +47,14 @@ export function EngramSettings() {
         {s.members.map((x) => (
           <div key={x.id} className="row">
             <Face b={x} size="xs" /><b style={{ flex: 1 }}>{x.name}</b>
-            <span className="small faint">{x.private ? "private: stays out of Engram" : x.linked ? `own token${x.prefix ? ` ${x.prefix}…` : ""} · ${when(x.at)}` : x.revoked ? "revoked in Engram" : "no token yet"}</span>
-            {!x.private && <BusyButton className="pc-pill o s" onClick={async () => after(await api.post<EngramStatus>(`/api/engram/members/${x.id}/rotate`), "New token")}>{x.linked ? "Rotate" : "Link"}</BusyButton>}
+            <span className="small faint">{!x.eligible ? "private: give it Money or Health memories to link it" : x.linked ? `own token${x.prefix ? ` ${x.prefix}…` : ""} · ${when(x.at)}` : x.revoked ? "revoked in Engram" : "no token yet"}</span>
+            {x.eligible && <BusyButton className="pc-pill o s" onClick={async () => after(await api.post<EngramStatus>(`/api/engram/members/${x.id}/rotate`), "New token")}>{x.linked ? "Rotate" : "Link"}</BusyButton>}
           </div>))}
         <p className="small faint">A new token reaches a member when its brain next starts.</p>
       </div>}
       {s.linked && <div className="pc-card col" style={{ maxWidth: 640 }}>
         <p className="pc-lab">Move memories to Engram</p>
-        <p className="small muted">Sends each member's memories, with their dates, and its Library files from out/ and downloads/ (up to 6 MB each) to Engram. Private members are skipped and nothing here is deleted. Run it again any time: only what's new is sent.</p>
+        <p className="small muted">Sends each member's memories, with their dates, and its Library files from out/ and downloads/ (up to 6 MB each) to Engram. Private members without Money or Health memories are skipped, and nothing here is deleted. Run it again any time: only what's new is sent.</p>
         <div className="row">
           <BusyButton className="pc-pill s" onClick={async () => { await api.post("/api/engram/migrate"); st.reload(); }}>{running ? "Moving…" : "Move memories to Engram"}</BusyButton>
           <span className="small faint">{`${plural(s.sent.memories, "memory")} and ${plural(s.sent.files, "file")} sent so far`}</span>

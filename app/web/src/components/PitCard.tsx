@@ -105,6 +105,7 @@ function SiteSummary({ d }: { d: Record<string, any> }) {
 export interface HireSpec {
   name?: string; job?: string; hue?: string; shape?: string; provider?: string; model?: string; weekly_cap_usd?: number; reason?: string;
   personality?: Personality; schedule?: { spec?: string; prompt?: string } | null;
+  engram_scope?: string; engram_connections?: string[];
 }
 export function HireSummary({ s }: { s: HireSpec }) {
   return (
@@ -116,6 +117,7 @@ export function HireSummary({ s }: { s: HireSpec }) {
         {s.reason && <p className="small">Why: {s.reason}</p>}
         <p className="pc-m small faint">{`${s.provider} · ${s.model} · cap ${usd(s.weekly_cap_usd)}/wk${s.schedule?.spec ? ` · ${s.schedule.spec}` : ""}`}</p>
         {s.personality?.role && <p className="small faint">Voice: {s.personality.role}</p>}
+        {(s.engram_scope && s.engram_scope !== "personal" || !!s.engram_connections?.length) && <p className="small faint">{`Engram: ${s.engram_scope === "finance" ? "Money" : s.engram_scope === "health" ? "Health" : "Personal"} memories${s.engram_connections?.length ? ` · reads ${s.engram_connections.join(", ")}` : ""}`}</p>}
       </div>
     </div>
   );

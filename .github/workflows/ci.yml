@@ -29,7 +29,7 @@ jobs:
         run: npm run typecheck && npm run build
         working-directory: app
       - name: Syntax check (plain JS outside the control plane)
-        run: for f in brain/*.mjs computer/*.mjs computer/pointer/*.js deploy/*.mjs; do node --check "$f"; done
+        run: for f in harness/*.mjs computer/*.mjs computer/pointer/*.js deploy/*.mjs; do node --check "$f"; done
       - name: Unit tests
         run: node --test tests/*.test.mjs
       - name: Shell scripts parse

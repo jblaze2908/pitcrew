@@ -1,4 +1,4 @@
-# Read-only code view: px0 (MIT, https://github.com/px0-ai/px0), run per open project by app/src/code.mjs.
+# Read-only code view: px0 (MIT, https://github.com/px0-ai/px0), run per open project by app/src/code.ts.
 # Pinned to a release at least 7 days old (v0.1.9 is the first with -base-path); the checksum is the one published
 # in that release's checksums.txt, so a swapped binary fails the build.
 FROM alpine:3.22

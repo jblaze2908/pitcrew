@@ -107,6 +107,30 @@ tested (`GET /link/inbox`) before it is saved, encrypted like provider keys. Pri
   Pitcrew's own memories stay.
 - Tests: `tests/engram.test.mjs` against a stub link server.
 
+## 2026-10-02 — Engram link v2 (Pitcrew side; Engram 773a61c)
+
+- **Memories live in Engram for a linked member.** `remember`/`forget` go to `POST /link/memories` and
+  `/link/memories/:id/forget`; the member's own memories (≤ 60) come with `/link/sync` at thread start and are cached
+  per member, so a normal turn still makes no Engram call. Accepted directly from a clean turn; held for review (a pit
+  stop) from a thread that read untrusted content. Superseding a memory you added waits for you too (Engram's rule).
+  Pitcrew's own `memory` table is untouched and comes back if Engram is unlinked. The Memory tab reads Engram.
+- **Untrusted content gates outbound actions.** An Engram result marked untrusted (`_meta.engram.untrusted`, the
+  "Untrusted content:" notice, or records from email/web) taints the thread for 10 minutes (`runtime/taint.ts`):
+  send, pay, share, sign-in, delete, install and untrusted exec skip site, jev, standing and learned allows and become
+  a pit stop titled "after untrusted content". A delegated or plan thread's taint passes to the thread that asked.
+  In memory only: a restart clears it (Engram's own 10-minute taint on its write tools still holds).
+- **Journal entries.** A thread idle for 15 min sends one `POST /link/episodes` per session (≤ 10 per poll, 24 h
+  look-back): what was asked, steps by server, files changed, cost, plan and answer, last reply. New Library files from
+  that session go first as artifacts and are linked from the entry. Watermark per thread in `engram_episodes`.
+- **Scopes.** Each member has `engram_scope` (Personal / Money / Health) in its profile and the hire form. A private
+  member joins Engram only under Money or Health, so other members' grants never reach its memories; private +
+  Personal stays out, as before. A scope change re-links (one call at the next brain start).
+- **Hire grants.** With Engram linked, the hire form lists Engram's connections (`/link/connections`); the picked ones
+  go once with the member's first link and Engram grants their read tools only. Writes stay an Engram-side grant.
+- Tests: 4 more in `tests/engram.test.mjs`, the taint gate in `tests/sites.test.mjs`.
+- `brain/` (the Codex harness image) is now `harness/`; image and container stay `pitcrew-brain`, data stays in
+  `/srv/pitcrew/brains`.
+
 ## Status — deployed 2026-10-01
 
 Live at https://pitcrew.example.com (Traefik file-provider router → `172.17.0.1:8330`, Let's Encrypt cert issued on first request). First-run setup (setup token → password) is left for Jai.

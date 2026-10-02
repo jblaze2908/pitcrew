@@ -10,6 +10,7 @@ import { subtract } from "./spend.js";
 import { short, summariseArgs, debugArgs } from "./util.js";
 import { connName } from "../engram.js";
 import { scanScripts } from "./scripts.js";
+import { engramUntrusted, taint } from "./taint.js";
 
 // A Codex thread item (commandExecution, mcpToolCall, fileChange, …) as the app-server sends it.
 type Item = Record<string, any>;
@@ -55,6 +56,8 @@ export function onNotify(c: Brain, method: string, p: Record<string, any>) {
       else if (it.type === "mcpToolCall") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: it.status, output: mcpResultText(it, 8000), error: it.error?.message ? String(it.error.message).slice(0, 4000) : null,
         server: it.server, tool: it.tool, input: debugArgs(it.arguments), durationMs: it.durationMs ?? null,
         ...(it.server === "engram" ? { conn: connName(c.bot.id, String(it.tool)) } : {}), ...via });
+      if (it.type === "mcpToolCall" && it.server === "engram" && engramUntrusted(it.result) && taint(threadId))
+        addEvent(threadId, a?.turnId, "system", { text: "Engram returned untrusted content. For the next 10 minutes, sending, paying, signing in, sharing and deleting ask you first." });
       else if (it.type === "fileChange") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: it.status });
       else if (it.type === "webSearch") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: "completed" });
       else if (it.type === "contextCompaction") addEvent(threadId, a?.turnId, "system", { text: "Thread compacted." });

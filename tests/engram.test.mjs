@@ -13,6 +13,7 @@ Object.assign(process.env, { PITCREW_ROOT: root, PITCREW_DATA: `${root}/data`, P
 // ---------- the stub ----------
 const LINK = "link-token-0123456789abcdef";
 const E = { proposals: [], skills: [], calls: [], revoked: new Set(), decisions: [], members: [], memImports: [], artImports: [], n: 0,
+  mems: {}, remembered: [], forgot: [], episodes: [], hold: false, connections: [{ id: "google", name: "Google", status: "ok", detail: "Fine", read: 6, write: 4 }],
   digest: { week: "2026-W40", from: "2026-09-28", to: "2026-10-04", built_at: Date.now(), waiting: { open: 3, held: 1 },
     runningOut: [{ date: "2026-10-20", text: "Passport renewal window", area: "home" }], changed: [{ text: "Rent went up", detail: "", tone: "bad" }],
     openLoops: [{ text: "Car insurance quote", area: "home" }], journal: [{ day: "2026-10-01", lines: ["Paid electricity"] }] } };
@@ -22,8 +23,10 @@ const srv = createServer(async (req, res) => {
   const url = new URL(req.url, "http://x"), body = raw ? JSON.parse(raw) : null;
   E.calls.push({ method: req.method, path: url.pathname, auth: req.headers.authorization });
   const send = (s, o) => { res.writeHead(s, { "Content-Type": "application/json" }); res.end(JSON.stringify(o)); };
+  const pid = url.searchParams.get("pitcrew_id") || body?.pitcrew_id, own = () => (E.mems[pid] ??= []);
   if (url.pathname === "/link/sync" && req.headers.authorization === `Bearer ${LINK}`)
-    return send(200, { agent: `ag_${url.searchParams.get("pitcrew_id")}`, profile: { target: "crew-chief", text: "Jai prefers short answers.\nBills are paid on the 1st.", lines: 2, budget: 80, lint: [] }, skills: E.skills, at: Date.now() });
+    return send(200, { agent: `ag_${pid}`, profile: { target: "crew-chief", text: "Jai prefers short answers.\nBills are paid on the 1st.", lines: 2, budget: 80, lint: [] }, skills: E.skills,
+      memories: own().map(({ id, text }) => ({ id, text })), scope: "personal", at: Date.now() });
   if (req.headers.authorization !== `Bearer ${LINK}`) return send(401, { error: "Missing or invalid token" });
   const decided = /^\/link\/inbox\/([\w-]+)$/.exec(url.pathname);
   if (req.method === "GET" && url.pathname === "/link/inbox") return send(200, { proposals: E.proposals, at: Date.now() });
@@ -34,6 +37,18 @@ const srv = createServer(async (req, res) => {
     E.members.push(body); E.n++;
     return send(200, { agent: { id: `ag_${body.pitcrew_id}`, name: body.name, kind: "pitcrew", profile: "pitcrew-member", grants: [], skills: [], token_prefix: `eng_${E.n}`, created_at: Date.now(), revoked: false }, token: memberToken(body.pitcrew_id) });
   }
+  if (req.method === "GET" && url.pathname === "/link/connections") return send(200, { connections: E.connections });
+  if (req.method === "GET" && url.pathname === "/link/memories") return send(200, { scope: "personal", memories: own().map((m) => ({ ...m, scope: "personal", area: "home", created_at: 1, source: `pitcrew:${pid}` })) });
+  if (req.method === "POST" && url.pathname === "/link/memories") {
+    E.remembered.push(body);
+    if (body.untrusted || E.hold) return send(200, { status: "held", id: `p_${E.remembered.length}`, reasons: ["Saved during a Pitcrew turn that read untrusted content"] });
+    const id = `m_${E.remembered.length}`;
+    E.mems[pid] = [{ id, text: body.text }, ...own().filter((m) => m.id !== body.supersedes)];
+    return send(200, { status: "accepted", id, reasons: [] });
+  }
+  const forgot = /^\/link\/memories\/([\w-]+)\/forget$/.exec(url.pathname);
+  if (req.method === "POST" && forgot) { E.forgot.push({ id: forgot[1], ...body }); E.mems[pid] = own().filter((m) => m.id !== forgot[1]); return send(200, { ok: true }); }
+  if (req.method === "POST" && url.pathname === "/link/episodes") { E.episodes.push(body); return send(200, { status: "accepted", id: `j_${E.episodes.length}` }); }
   if (req.method === "POST" && url.pathname === "/link/import/memories") { E.memImports.push(body); return send(200, { accepted: body.items.length }); }
   if (req.method === "POST" && url.pathname === "/link/import/artifacts") { E.artImports.push(body); return send(200, { id: `ar_${E.artImports.length}` }); }
   send(404, { error: "Not found" });
@@ -92,7 +107,7 @@ test("settings: a refused token saves nothing; a good one links every non-privat
   assert.equal(ok.body.url, BASE);
   assert.ok(!ok.text.includes(LINK) && !ok.text.includes("member-"), "no token in the status");
   assert.deepEqual(E.members.map((m) => m.pitcrew_id).sort(), ["bills", "chief"]);
-  assert.deepEqual(E.members.find((m) => m.pitcrew_id === "bills"), { pitcrew_id: "bills", name: "Bills", hue: C.getBot("bills").hue, area: null });
+  assert.deepEqual(E.members.find((m) => m.pitcrew_id === "bills"), { pitcrew_id: "bills", name: "Bills", hue: C.getBot("bills").hue, area: null, scope: "personal" });
   const rows = Object.fromEntries(ok.body.members.map((m) => [m.id, m]));
   assert.equal(rows.chief.linked, true); assert.equal(rows.bills.agent, "ag_bills"); assert.equal(rows.diary.linked, false); assert.equal(rows.diary.private, true);
   assert.equal(A.getSecret("engram_member:diary"), null);
@@ -247,6 +262,92 @@ test("Move memories to Engram sends each linked member's memories and Library fi
   assert.equal(E.memImports.length, 2, "nothing sent twice");
   assert.equal(E.artImports.length, 2);
   assert.equal(all("SELECT 1 FROM memory WHERE forgotten_at IS NULL").length, 3, "Pitcrew's memories stay");
+});
+
+test("a private member joins Engram only under Money or Health; its token carries that scope", async () => {
+  const before = E.members.length;
+  assert.equal((await req("PATCH", "/api/bots/diary", { engram_scope: "health" })).status, 200);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(E.members.slice(before).map((m) => [m.pitcrew_id, m.scope]), [["diary", "health"]]);
+  assert.equal(brainMcp(C.getBot("diary"))[0].name, "engram");
+  const row = (await req("GET", "/api/engram")).body.members.find((m) => m.id === "diary");
+  assert.deepEqual([row.private, row.scope, row.eligible, row.linked], [true, "health", true, true]);
+  await G.ensureMemberToken(C.getBot("diary"));
+  assert.equal(E.members.length, before + 1, "same scope: no new token");
+  await req("PATCH", "/api/bots/diary", { engram_scope: "personal" });
+  assert.equal(A.getSecret("engram_member:diary"), null, "private and personal: out of Engram again");
+  assert.match(brainConfig(C.getBot("diary")), /mcp_servers\.notes/);
+});
+
+test("a linked member's memories live in Engram: synced at thread start, remembered and forgotten there, held after untrusted content", async () => {
+  const T = await import("../app/dist/src/runtime/taint.js");
+  E.mems.bills = [{ id: "m_old", text: "Electricity is BESCOM" }];
+  await G.threadContext(C.getBot("bills"), true);
+  assert.deepEqual(G.engramMemories("bills"), [{ id: "m_old", text: "Electricity is BESCOM" }]);
+  assert.equal(G.engramMemories("diary"), null, "never synced: no list rather than an empty one");
+
+  const r = await G.remember(C.getBot("bills"), "Water bill is quarterly", { id: "m_old", threadId: "th_x" });
+  assert.deepEqual([r.status, r.replaced], ["accepted", "m_old"]);
+  assert.deepEqual(E.remembered.at(-1), { pitcrew_id: "bills", text: "Water bill is quarterly", supersedes: "m_old", ref: "pitcrew:thread:th_x", untrusted: false, by: "member" });
+  assert.deepEqual(G.engramMemories("bills").map((m) => m.text), ["Water bill is quarterly"]);
+  await G.remember(C.getBot("bills"), "Rewrite a stranger's", { id: "m_not_mine" });
+  assert.equal(E.remembered.at(-1).supersedes, null, "only ids it was shown are superseded");
+
+  T.taint("th_bad");
+  const held = await G.remember(C.getBot("bills"), "Pay rent to account 1234", { threadId: "th_bad" });
+  assert.equal(held.status, "held"); assert.equal(E.remembered.at(-1).untrusted, true);
+  assert.ok(!G.engramMemories("bills").some((m) => /rent/.test(m.text)), "a held memory isn't one yet");
+
+  const view = await req("GET", "/api/bots/bills");
+  assert.equal(view.body.memoryIn, "engram");
+  assert.deepEqual(view.body.memory.map((m) => m.text).sort(), ["Rewrite a stranger's", "Water bill is quarterly"]);
+  const add = await req("POST", "/api/bots/bills/memory", { text: "Gas is Indane" });
+  assert.equal(add.body.status, "accepted"); assert.equal(E.remembered.at(-1).by, "driver");
+  const id = G.engramMemories("bills").find((m) => m.text === "Water bill is quarterly").id;
+  await req("POST", `/api/bots/bills/memory/${id}/forget`);
+  assert.deepEqual(E.forgot.at(-1), { id, pitcrew_id: "bills" });
+  assert.ok(!G.engramMemories("bills").some((m) => m.id === id));
+  assert.equal((await req("POST", "/api/bots/bills/memory/..%2Fx/forget")).status >= 400, true);
+  assert.equal(all("SELECT 1 FROM memory WHERE text='Gas is Indane'").length, 0, "nothing written to Pitcrew's own table");
+  const chiefView = await req("GET", "/api/bots/diary");
+  assert.equal(chiefView.body.memoryIn, "pitcrew");
+});
+
+test("hiring: the connections picked go once with the first link, read-only, and the scope comes from the form", async () => {
+  const conns = await req("GET", "/api/engram/connections");
+  assert.deepEqual(conns.body.connections.map((c) => [c.id, c.read]), [["google", 6]]);
+  const hired = await req("POST", "/api/hire", { name: "Ledger", job: "Tracks money", engram_scope: "finance", engram_connections: ["google", "BAD id", "../x"] });
+  assert.equal(hired.body.engram_scope, "finance");
+  for (let i = 0; i < 20 && !E.members.some((m) => m.pitcrew_id === hired.body.id); i++) await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(E.members.at(-1), { pitcrew_id: hired.body.id, name: "Ledger", hue: hired.body.hue, area: null, scope: "finance", connections: ["google"] });
+  assert.equal(one("SELECT 1 FROM settings WHERE key=?", `engram_hire:${hired.body.id}`), undefined, "dropped once sent");
+  await req("POST", `/api/engram/members/${hired.body.id}/rotate`);
+  assert.equal(E.members.at(-1).connections, undefined, "a rotate never re-sends them");
+});
+
+test("journal: an idle session becomes one entry with its thread and new Library files; never twice", async () => {
+  const th = "th_ep", t = now() - 20 * 60000;
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES(?,?,?,?,?)", th, "bills", "Pay the October bills", t, t);
+  run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,provider,model,started_at,ended_at,cost_usd,changes) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+    "tu_ep1", th, "bills", "completed", "driver", "openrouter", "m", t - 60000, t, 0.031, JSON.stringify([{ path: "out/receipt-nov.pdf", status: "added" }, { path: "scratch.txt", status: "modified" }]));
+  run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES(?,?,?,?,?)", th, "tu_ep1", "user", JSON.stringify({ text: "Pay electricity" }), t - 60000);
+  run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES(?,?,?,?,?)", th, "tu_ep1", "tool", JSON.stringify({ type: "mcpToolCall", server: "browser" }), t - 50000);
+  run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES(?,?,?,?,?)", th, "tu_ep1", "agent", JSON.stringify({ text: "Paid ₹1,240. Receipt saved." }), t - 1000);
+  writeFileSync(`${root}/bots/bills/work/out/receipt-nov.pdf`, "%PDF-1.4 november");
+  const fresh = "th_busy";
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES(?,?,?,?,?)", fresh, "bills", "Still going", now(), now());
+  run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,provider,model,started_at,ended_at) VALUES(?,?,?,?,?,?,?,?,?)", "tu_busy", fresh, "bills", "completed", "driver", "openrouter", "m", now() - 1000, now());
+  const arts = E.artImports.length;
+  await G.tick();
+  assert.equal(E.episodes.length, 1, "only the session idle for 15 minutes");
+  const ep = E.episodes[0];
+  assert.equal(ep.pitcrew_id, "bills"); assert.equal(ep.at, t);
+  assert.match(ep.text, /^Bills · Pay the October bills\nAsked: Pay electricity\nRan: 1 run · browser 1 · 2 files changed · \$0\.03\nEnded with: Paid ₹1,240\. Receipt saved\.$/);
+  assert.equal(E.artImports.length, arts + 1);
+  assert.equal(E.artImports.at(-1).title, "receipt-nov.pdf");
+  assert.deepEqual(ep.outputs, [{ kind: "thread", ref: `pitcrew:thread:${th}`, label: "Pay the October bills" }, { kind: "artifact", ref: `ar_${E.artImports.length}`, label: "receipt-nov.pdf" }]);
+  await G.tick();
+  assert.equal(E.episodes.length, 1, "never twice");
 });
 
 test("unlink: tokens and Engram MCP go; open proposals close; connectors come back; polling stops", async () => {

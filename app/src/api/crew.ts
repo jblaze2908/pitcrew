@@ -6,7 +6,8 @@ import { httpErr } from "../auth.js";
 import * as R from "../runtime/index.js";
 import { getBot, updateBot, normaliseSpec, createBot } from "../crew.js";
 import { listProjects, openProject } from "../code.js";
-import { memberChanged } from "../engram.js";
+import { memberChanged, listMemories, remember, forget } from "../engram.js";
+import { memberLinked } from "../engramStore.js";
 import { signedIn, type Env } from "../http/guard.js";
 import { readJson, jsonBody, raw, text, trimmed, flag, field } from "../http/body.js";
 import { botCard, LEARNED, liveLearned } from "./views.js";
@@ -23,14 +24,21 @@ const HandBack = z.object({ note: text() });
 const member = (id: string) => { const b = getBot(id); if (!b) throw httpErr(404, "No such crew member"); return b; };
 
 export const crewRoutes = new Hono<Env>()
-  .get("/api/bots/:id", signedIn, (c) => {
+  .get("/api/bots/:id", signedIn, async (c) => {
     const id = c.req.param("id"), b = member(id);
     const pending = all<PitstopRow>("SELECT * FROM pitstops WHERE status='pending'");
-    return c.json({ bot: botCard(b, pending), memory: all("SELECT * FROM memory WHERE bot_id=? AND forgotten_at IS NULL ORDER BY created_at DESC", id),
+    // A linked member's memories are read from Engram (one GET per view); Pitcrew's own stay as they were.
+    let memory: unknown[], memoryIn = "pitcrew", memoryError: string | null = null;
+    if (memberLinked(b)) {
+      memoryIn = "engram";
+      try { memory = (await listMemories(b)).map((m) => ({ id: m.id, bot_id: id, text: m.text, source: m.source, created_at: m.created_at, updated_at: m.created_at })); }
+      catch (e: any) { memory = []; memoryError = e.message; }
+    } else memory = all("SELECT * FROM memory WHERE bot_id=? AND forgotten_at IS NULL ORDER BY created_at DESC", id);
+    return c.json({ bot: botCard(b, pending), memory, memoryIn, memoryError,
       schedules: all("SELECT * FROM schedules WHERE bot_id=? ORDER BY created_at DESC", id), rules: all("SELECT * FROM rules WHERE bot_id=? AND revoked_at IS NULL ORDER BY created_at DESC", id), learned: liveLearned(all<LearnedRow>(`${LEARNED} WHERE l.bot_id=? ORDER BY l.updated_at DESC`, id)) });
   })
   // The patch is normalised by updateBot itself (crew.ts), field by field.
-  .patch("/api/bots/:id", signedIn, async (c) => { const patch = await readJson(c), b = updateBot(c.req.param("id"), patch); if ("private" in patch) memberChanged(b); return c.json(b); })
+  .patch("/api/bots/:id", signedIn, async (c) => { const patch = await readJson(c), b = updateBot(c.req.param("id"), patch); if ("private" in patch || "engram_scope" in patch) memberChanged(b); return c.json(b); })
   .post("/api/bots/:id/archive", signedIn, (c) => {
     const id = c.req.param("id"), b = getBot(id); if (!b || b.kind === "chief") throw httpErr(400, "The Crew Chief can't be retired");
     run("UPDATE bots SET archived=1 WHERE id=?", id); run("UPDATE schedules SET enabled=0 WHERE bot_id=?", id); audit("driver", "crew.retired", { id }); return c.json({ ok: true });
@@ -42,9 +50,17 @@ export const crewRoutes = new Hono<Env>()
   .get("/api/bots/:id/threads", signedIn, (c) => { const id = c.req.param("id"); member(id); return c.json(R.findThreads(id, c.req.query("q") || "", { limit: 30 })); })
 
   // Memory and schedules
-  .post("/api/bots/:id/memory", signedIn, async (c) => { const id = c.req.param("id"), b = await jsonBody(c, Memory); if (!b.text) throw httpErr(400, "Empty"); const mid = uid("me"); run("INSERT INTO memory(id,bot_id,text,source,created_at,updated_at) VALUES(?,?,?,?,?,?)", mid, id, b.text, "driver", now(), now()); return c.json({ id: mid }); })
+  .post("/api/bots/:id/memory", signedIn, async (c) => {
+    const id = c.req.param("id"), b = await jsonBody(c, Memory), bot = member(id); if (!b.text) throw httpErr(400, "Empty");
+    if (memberLinked(bot)) { const r = await remember(bot, b.text, { by: "driver" }); return c.json({ id: r.id, status: r.status }); }
+    const mid = uid("me"); run("INSERT INTO memory(id,bot_id,text,source,created_at,updated_at) VALUES(?,?,?,?,?,?)", mid, id, b.text, "driver", now(), now()); return c.json({ id: mid }); })
   .patch("/api/memory/:id", signedIn, async (c) => { const b = await jsonBody(c, MemoryEdit); run("UPDATE memory SET text=?, updated_at=? WHERE id=?", b.text, now(), c.req.param("id")); return c.json({ ok: true }); })
   .post("/api/memory/:id/forget", signedIn, (c) => { const id = c.req.param("id"); run("UPDATE memory SET forgotten_at=? WHERE id=?", now(), id); audit("driver", "memory.forgotten", { id }); return c.json({ ok: true }); })
+  .post("/api/bots/:id/memory/:mid/forget", signedIn, async (c) => {
+    const id = c.req.param("id"), mid = c.req.param("mid"), b = member(id);
+    if (memberLinked(b)) { await forget(b, mid, "driver"); return c.json({ ok: true }); }
+    run("UPDATE memory SET forgotten_at=? WHERE id=? AND bot_id=?", now(), mid, id); audit("driver", "memory.forgotten", { id: mid }); return c.json({ ok: true });
+  })
   .post("/api/bots/:id/memory/forget-source", signedIn, async (c) => { const id = c.req.param("id"), b = await jsonBody(c, ForgetSource); const r = run("UPDATE memory SET forgotten_at=? WHERE bot_id=? AND source=? AND forgotten_at IS NULL", now(), id, String(b.source)); audit("driver", "memory.forgot_source", { id, source: b.source }); return c.json({ forgotten: Number(r.changes) }); })
   .post("/api/bots/:id/schedules", signedIn, async (c) => { const b = await jsonBody(c, Schedule); try { return c.json(R.addSchedule(c.req.param("id"), b.threadId as string | null, b.spec, b.prompt)); } catch (e: any) { throw httpErr(400, e.message); } })
   .patch("/api/schedules/:id", signedIn, async (c) => { const id = c.req.param("id"), b = await jsonBody(c, Toggle); run("UPDATE schedules SET enabled=? WHERE id=?", b.enabled ? 1 : 0, id); audit("driver", "schedule.toggled", { id, enabled: b.enabled }); return c.json({ ok: true }); })
