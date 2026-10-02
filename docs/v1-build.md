@@ -96,6 +96,8 @@ tested (`GET /link/inbox`) before it is saved, encrypted like provider keys. Pri
   `name — description` line each (2 KB), and is told to load one with the engram `get` tool (`skill:<name>`) when a
   task matches. Nothing is written to disk. The first turn waits (≤ 12 s) for the thread's MCP servers to report
   ready: Codex connects MCP per thread, and a turn sent earlier runs on an older tool list (measured, codex 0.156.1).
+- **Commands:** typing `/` in a thread lists them: `/refresh`, `/compact`, `/fresh` (thread from the last reply),
+  `/stop` (while a run goes). Arrow keys pick, Enter runs, Tab completes, Esc closes.
 - **`/refresh`** (typed in a thread): that thread's next message runs on a `thread/fork` (same history and dynamic
   tools, fresh MCP tools) with Engram's current skills and profile as turn context. Never automatic, since it misses
   the prompt cache for that turn. Other threads keep their tools. Measured: unsubscribe + resume does not reconnect
