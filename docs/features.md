@@ -110,9 +110,9 @@ Tiers:
 | Feature | Tier |
 |---|---|
 | Per-member memory as entries with source, edit, forget | v1 |
-| "Learned this run" diff after each run: accept or reject new facts | v1.5 |
-| Household facts (addresses, account last-4s, family) shared with explicit per-member grants | v1.5 |
-| Forget-by-source actually forgets (disconnect Gmail → its facts go) | v1 |
+| "Learned this run" diff after each run: accept or reject new facts | built 2026-10-03 (card with Undo; held facts are pit stops) |
+| Household facts (addresses, account last-4s, family) shared with explicit per-member grants | built 2026-10-03 (Engram `household` scope) |
+| Forget-by-source actually forgets (disconnect Gmail → its facts go) | built 2026-10-03 (Engram forget by connection) |
 | Engram as the shared memory layer | built 2026-10-02 (v1-build.md) |
 
 ### 7. Integrations
