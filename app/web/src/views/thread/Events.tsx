@@ -52,11 +52,40 @@ function Script({ e, result }: { e: ThreadEvent; result?: Record<string, any> })
   );
 }
 
+// JSON reads better indented; anything else as it came.
+const pretty = (s: unknown) => { const t = String(s ?? ""); try { const j = JSON.parse(t); return typeof j === "object" && j ? JSON.stringify(j, null, 2) : t; } catch { return t; } };
+function Section({ label, text, bad }: { label: string; text: string; bad?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200); }, () => {});
+  return (
+    <div className={`dbg${bad ? " bad" : ""}`}>
+      <div className="dbg-h"><span>{label}</span><button type="button" className="small faint" onClick={copy}>{copied ? "Copied" : "Copy"}</button></div>
+      <pre>{text}</pre>
+    </div>
+  );
+}
+const ms = (d: Record<string, any>) => {
+  const n = typeof d.durationMs === "number" ? d.durationMs : d.timing && typeof d.timing === "object" ? Object.values(d.timing as Record<string, number>).reduce((a, b) => a + (Number(b) || 0), 0) : null;
+  return n == null ? null : n < 1000 ? `${Math.round(n)} ms` : `${(n / 1000).toFixed(1)} s`;
+};
+/** What a step did, for debugging: which tool, how long, how it ended, then its input, output and error. */
+function Debug({ d }: { d: Record<string, any> }) {
+  const meta = [d.server && d.tool ? `${d.server} · ${d.tool}` : d.type, ms(d), d.status, d.exitCode != null ? `exit ${d.exitCode}` : null, d.cwd ? `in ${d.cwd}` : null, d.viaScript ? "from a script" : null].filter(Boolean).join(" · ");
+  return (
+    <div className="tool-debug">
+      <p className="small faint">{meta}</p>
+      {d.input && <Section label="Input" text={pretty(d.input)} />}
+      {d.output && <Section label="Output" text={pretty(d.output)} />}
+      {d.error && <Section label="Error" text={String(d.error)} bad />}
+    </div>
+  );
+}
+
 export function Tool({ e, results }: { e: ThreadEvent; results?: Map<string, Record<string, any>> }) {
   if (e.data.type === "script") return <Script e={e} result={results?.get(e.data.callId)} />;
   const st = stepOk(e) ? "ok" : e.data.status === "inProgress" ? "" : "bad";
   const v = stepView(tidyTitle(e.data.title), e.data.conn);
-  return <details className={`tool${e.data.viaScript ? " nested" : ""}`}><summary><span className={`st ${st}`} /><StepIcon name={v.icon} /><span className="lbl">{v.label}</span>{v.detail && <span className="det">{v.detail}</span>}</summary>{(e.data.output || e.data.error) && <pre>{e.data.error || e.data.output}</pre>}</details>;
+  return <details className={`tool${e.data.viaScript ? " nested" : ""}`}><summary><span className={`st ${st}`} /><StepIcon name={v.icon} /><span className="lbl">{v.label}</span>{v.detail && <span className="det">{v.detail}</span>}</summary><Debug d={e.data} /></details>;
 }
 
 function Changes({ d }: { d: Record<string, any> }) {

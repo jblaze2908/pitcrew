@@ -103,6 +103,10 @@ main{overflow:auto;min-width:0}
 .tool.nested{margin-left:22px}
 .steps-body .tool.nested{margin-left:22px}
 .tool.script pre{max-height:320px;overflow:auto}
+.tool-debug{display:flex;flex-direction:column;gap:8px;margin:8px 0 4px 15px}
+.tool-debug .dbg pre{margin:0;max-height:360px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+.tool-debug .dbg-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font:500 11px/1 var(--font-data);letter-spacing:.03em;color:var(--ink-3);text-transform:uppercase}
+.tool-debug .dbg.bad pre{color:var(--bad)}
 .steps .last{display:inline-flex;align-items:center;gap:6px}
 .msg.bot.cont{margin-top:-6px}
 .tool pre{margin-top:6px}

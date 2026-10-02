@@ -7,7 +7,7 @@ import { active, byCodex, items, usage } from "./state.js";
 import { addEvent } from "./threads.js";
 import { finishTurn } from "./turns.js";
 import { subtract } from "./spend.js";
-import { short, summariseArgs } from "./util.js";
+import { short, summariseArgs, debugArgs } from "./util.js";
 import { connName } from "../engram.js";
 import { scanScripts } from "./scripts.js";
 
@@ -23,9 +23,11 @@ function toolTitle(it: Item) {
     default: return it.type;
   }
 }
-function mcpResultText(it: Item) {
+// Text content, or the structured result when there is no text. Kept up to `max` for the step's Output.
+function mcpResultText(it: Item, max = 1500) {
   const c = it.result?.content || it.result?.contentItems || [];
-  return (Array.isArray(c) ? c : []).filter((x) => x.type === "text").map((x) => x.text).join("\n").slice(0, 1500);
+  const text = (Array.isArray(c) ? c : []).filter((x) => x.type === "text").map((x) => x.text).join("\n");
+  return (text || (it.result?.structuredContent ? JSON.stringify(it.result.structuredContent) : "")).slice(0, max);
 }
 
 export function onNotify(c: Brain, method: string, p: Record<string, any>) {
@@ -48,8 +50,10 @@ export function onNotify(c: Brain, method: string, p: Record<string, any>) {
       const it = p.item; items.delete(it.id);
       const via = typeof it.id === "string" && it.id.startsWith("exec-") ? { viaScript: true } : {};
       if (it.type === "agentMessage" && it.text?.trim()) addEvent(threadId, a?.turnId, "agent", { text: it.text, itemId: it.id });
-      else if (it.type === "commandExecution") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: it.status, exitCode: it.exitCode ?? null, output: String(it.aggregatedOutput || "").slice(-1500), ...via });
-      else if (it.type === "mcpToolCall") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: it.status, output: mcpResultText(it), error: it.error?.message || null,
+      else if (it.type === "commandExecution") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: it.status, exitCode: it.exitCode ?? null, output: String(it.aggregatedOutput || "").slice(-8000),
+        input: String(it.command || "").slice(0, 8000), cwd: it.cwd ?? null, durationMs: it.durationMs ?? null, ...via });
+      else if (it.type === "mcpToolCall") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: it.status, output: mcpResultText(it, 8000), error: it.error?.message ? String(it.error.message).slice(0, 4000) : null,
+        server: it.server, tool: it.tool, input: debugArgs(it.arguments), durationMs: it.durationMs ?? null,
         ...(it.server === "engram" ? { conn: connName(c.bot.id, String(it.tool)) } : {}), ...via });
       else if (it.type === "fileChange") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: it.status });
       else if (it.type === "webSearch") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: "completed" });

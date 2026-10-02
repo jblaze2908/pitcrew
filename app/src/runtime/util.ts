@@ -9,6 +9,23 @@ export function summariseArgs(a: any) {
   const pick = a.element || a.target || a.field || a.purpose || a.url || a.text || a.ref || "";
   return pick ? String(pick) : Object.entries(a).map(([k, v]) => `${k}=${short(v, 40)}`).join(" ");
 }
+// A step's input as the driver sees it when debugging: the arguments as JSON, capped, with secret-looking values
+// replaced, by key (password, token, otp…) or, for a form field, by its label ({name: "Password", value: …}).
+const SECRET = /pass(word|code|phrase)?|secret|token|api[_-]?key|\botp\b|one[- ]time|\bpin\b|cvv|cvc|card[ _-]?(number|no)|credential|cookie|authori[sz]ation/i;
+export function debugArgs(a: unknown, max = 4000): string | null {
+  if (a == null) return null;
+  const walk = (v: any, d: number): any => {
+    if (d > 6) return "…";
+    if (Array.isArray(v)) return v.slice(0, 50).map((x) => walk(x, d + 1));
+    if (v && typeof v === "object") {
+      const named = [v.name, v.label, v.element, v.field, v.purpose].some((x) => typeof x === "string" && SECRET.test(x));
+      return Object.fromEntries(Object.entries(v).slice(0, 80).map(([k, x]) => [k, SECRET.test(k) || (named && /^(value|text|values)$/.test(k)) ? "[redacted]" : walk(x, d + 1)]));
+    }
+    return typeof v === "string" && v.length > 2000 ? `${v.slice(0, 2000)}… (${v.length} chars)` : v;
+  };
+  const s = JSON.stringify(walk(a, 0));
+  return s ? (s.length > max ? `${s.slice(0, max)}…` : s) : null;
+}
 export const hostOf = (url: string | null | undefined) => { try { return url ? new URL(url).hostname : ""; } catch { return ""; } };
 // A dynamic tool's reply to the brain.
 export const say = (text: string, success = true): ToolResult => ({ success, contentItems: [{ type: "inputText", text }] });

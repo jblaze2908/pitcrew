@@ -551,3 +551,14 @@ test("Code Mode scripts are read from the rollout: code once, output by call id,
     assert.equal(seen.length, 2, "paths outside the member's own brain dir are never read");
   } finally { client.destroy(); }
 });
+
+test("a step's recorded input hides secrets by key and by form-field label, and caps long values", async () => {
+  const { debugArgs } = await import("../app/dist/src/runtime/util.js");
+  const j = (a) => JSON.parse(debugArgs(a));
+  assert.deepEqual(j({ query: "from:bescom", api_key: "k-123", nested: { refreshToken: "r", ok: 1 } }), { query: "from:bescom", api_key: "[redacted]", nested: { refreshToken: "[redacted]", ok: 1 } });
+  assert.deepEqual(j({ fields: [{ name: "Email", value: "a@b.c" }, { name: "Password", value: "hunter2" }, { element: "OTP box", text: "123456" }] }),
+    { fields: [{ name: "Email", value: "a@b.c" }, { name: "Password", value: "[redacted]" }, { element: "OTP box", text: "[redacted]" }] });
+  assert.match(j({ content: "x".repeat(5000) }).content, /… \(5000 chars\)$/);
+  assert.ok(!debugArgs({ card_number: "4111111111111111" }).includes("4111"));
+  assert.equal(debugArgs(undefined), null);
+});

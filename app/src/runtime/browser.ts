@@ -13,7 +13,7 @@ import { takeRefusal, afterAction } from "./sitegate.js";
 import { planLive } from "./plans.js";
 import { ground, pixelContext, snapshotOf, noteSnapshot } from "./grounding.js";
 import { SNAP_LINK, SNAP_MODES, shapeSnapshot, verifyLine, snapshotToText, readTabs, pageHead } from "./pageText.js";
-import { short, summariseArgs, hostOf, say } from "./util.js";
+import { short, summariseArgs, hostOf, say, debugArgs } from "./util.js";
 
 // A dynamic tool call from the brain (item/tool/call): p.threadId is Codex's thread id.
 // A call from inside a Code Mode script (Codex gives those ids "exec-…"); the thread draws it under that script.
@@ -35,7 +35,7 @@ export async function runtimeTool(br: Brain, threadId: string, p: ToolCall): Pro
   bus.emit("activity", { threadId, botId: b.id, text: title });
   const ok = await gate(br, threadId, { kind: "mcp", server: kind, tool, arguments: g.grounded, ...(g.effect ? { effect: g.effect } : {}) }, { kind: "mcp", title, detail: { server: kind, tool, args: g.grounded } });
   const timing: Record<string, number> = { gate: Date.now() - t0 }; // includes a lease wait and jev's remote check (p50 336 ms for browser, measured)
-  if (!ok) { addEvent(threadId, turnId, "tool", { type: kind, title, ...viaScript(p), status: "declined", timing }); return say(takeRefusal(threadId) || "Not done: this action was declined at a pit stop. Don't retry it another way; tell the driver what didn't happen.", false); }
+  if (!ok) { addEvent(threadId, turnId, "tool", { type: kind, title, ...viaScript(p), server: kind, tool, input: debugArgs(args), status: "declined", timing }); return say(takeRefusal(threadId) || "Not done: this action was declined at a pit stop. Don't retry it another way; tell the driver what didn't happen.", false); }
   const comp = computer(b);
   try {
     if (!comp.desktopUp) bus.emit("activity", { threadId, botId: b.id, text: comp.up ? "Starting the desktop…" : "Starting the computer…" });
@@ -62,10 +62,10 @@ export async function runtimeTool(br: Brain, threadId: string, p: ToolCall): Pro
       if (post) out = `${post}\n\n${out}`;
       const tb = readTabs(text); if (tb) tabCounts.set(mcp, tb.count);
     }
-    addEvent(threadId, turnId, "tool", { type: kind, title, ...viaScript(p), status: r.isError ? "failed" : "completed", output: text.slice(0, 1500), timing });
+    addEvent(threadId, turnId, "tool", { type: kind, title, ...viaScript(p), server: kind, tool, input: debugArgs(args), status: r.isError ? "failed" : "completed", output: text.slice(0, 8000), timing });
     return { success: !r.isError, contentItems: toContentItems([{ type: "text", text: out }, ...content.filter((x) => x.type !== "text")], { codeMode: String(p.callId || "").startsWith("exec-") }) };
   } catch (e: any) {
-    addEvent(threadId, turnId, "tool", { type: kind, title, ...viaScript(p), status: "failed", error: e.message });
+    addEvent(threadId, turnId, "tool", { type: kind, title, ...viaScript(p), server: kind, tool, input: debugArgs(args), status: "failed", error: e.message });
     return say(`The computer couldn't run ${tool}: ${e.message}`, false);
   }
 }
