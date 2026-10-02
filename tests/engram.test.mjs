@@ -361,9 +361,14 @@ test("journal: an idle session becomes one entry with its thread and new Library
   const fresh = "th_busy";
   run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES(?,?,?,?,?)", fresh, "bills", "Still going", now(), now());
   run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,provider,model,started_at,ended_at) VALUES(?,?,?,?,?,?,?,?,?)", "tu_busy", fresh, "bills", "completed", "driver", "openrouter", "m", now() - 1000, now());
+  // Older idle sessions of a member that isn't linked must not hold the per-tick slots.
+  for (let i = 0; i < 12; i++) {
+    run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES(?,?,?,?,?)", `th_d${i}`, "diary", "Private", t, t);
+    run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,provider,model,started_at,ended_at) VALUES(?,?,?,?,?,?,?,?,?)", `tu_d${i}`, `th_d${i}`, "diary", "completed", "driver", "openrouter", "m", t - 9e5, t - 6e5 + i);
+  }
   const arts = E.artImports.length;
   await G.tick();
-  assert.equal(E.episodes.length, 1, "only the session idle for 15 minutes");
+  assert.equal(E.episodes.length, 1, "only the linked member's session idle for 15 minutes");
   const ep = E.episodes[0];
   assert.equal(ep.pitcrew_id, "bills"); assert.equal(ep.at, t);
   assert.match(ep.text, /^Bills · Pay the October bills\nAsked: Pay electricity\nRan: 1 run · browser 1 · 2 files changed · \$0\.03\nEnded with: Paid ₹1,240\. Receipt saved\.$/);

@@ -427,19 +427,26 @@ type TurnRow = { id: string; status: string; cost_usd: number | null; changes: s
 const STEP: Record<string, string> = { commandExecution: "shell", fileChange: "edits", webSearch: "web search", dynamicToolCall: "tools" };
 async function sendEpisodes() {
   const t = now(), since = t - EPISODE_LOOKBACK;
+  // Only linked members' threads, so skipped ones can't hold the per-tick slots (they did: 4 sent, 42 stuck behind 6).
+  const ids = listBots().filter((b) => memberLinked(b)).map((b) => b.id);
+  if (!ids.length) return;
   // Per tick: one grouped read of the last day's turns (indexed by nothing; a single user's day is small).
   const due = all<{ thread_id: string; bot_id: string; last: number; upto: number | null }>(
     `SELECT tu.thread_id, tu.bot_id, MAX(tu.ended_at) last, ep.upto FROM turns tu LEFT JOIN engram_episodes ep ON ep.thread_id=tu.thread_id
-     WHERE tu.ended_at > ? GROUP BY tu.thread_id HAVING last < ? AND last > COALESCE(ep.upto, 0) ORDER BY last LIMIT ?`, since, t - EPISODE_IDLE, EPISODES_PER_TICK);
+     WHERE tu.ended_at > ? AND tu.bot_id IN (${ids.map(() => "?").join(",")}) GROUP BY tu.thread_id HAVING last < ? AND last > COALESCE(ep.upto, 0) ORDER BY last LIMIT ?`,
+    since, ...ids, t - EPISODE_IDLE, EPISODES_PER_TICK * 3);
+  let sent = 0;
   for (const d of due) {
+    if (sent >= EPISODES_PER_TICK) break;
     const b = getBot(d.bot_id);
-    if (!b || !memberLinked(b) || active.has(d.thread_id)) continue;
+    if (!b || active.has(d.thread_id)) continue;
     const from = Math.max(d.upto ?? 0, since);
     const turns = all<TurnRow>("SELECT id, status, cost_usd, changes, ended_at FROM turns WHERE thread_id=? AND ended_at > ? AND ended_at <= ? ORDER BY started_at", d.thread_id, from, d.last);
     if (!turns.length) continue;
     try { await sendEpisode(b, d.thread_id, turns, from); }
     catch (e: any) { if (e.upstream === 404) return; continue; } // an Engram without /link/episodes: try again next tick
     run("INSERT INTO engram_episodes(thread_id,upto) VALUES(?,?) ON CONFLICT(thread_id) DO UPDATE SET upto=excluded.upto", d.thread_id, d.last);
+    sent++;
   }
 }
 async function sendEpisode(b: Bot, threadId: string, turns: TurnRow[], from: number) {
