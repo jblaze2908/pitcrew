@@ -8,6 +8,7 @@ import { addEvent } from "./threads.js";
 import { finishTurn } from "./turns.js";
 import { subtract } from "./spend.js";
 import { short, summariseArgs } from "./util.js";
+import { connName } from "../engram.js";
 
 // A Codex thread item (commandExecution, mcpToolCall, fileChange, …) as the app-server sends it.
 type Item = Record<string, any>;
@@ -44,7 +45,8 @@ export function onNotify(c: Brain, method: string, p: Record<string, any>) {
       const it = p.item; items.delete(it.id);
       if (it.type === "agentMessage" && it.text?.trim()) addEvent(threadId, a?.turnId, "agent", { text: it.text, itemId: it.id });
       else if (it.type === "commandExecution") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: it.status, exitCode: it.exitCode ?? null, output: String(it.aggregatedOutput || "").slice(-1500) });
-      else if (it.type === "mcpToolCall") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: it.status, output: mcpResultText(it), error: it.error?.message || null });
+      else if (it.type === "mcpToolCall") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: it.status, output: mcpResultText(it), error: it.error?.message || null,
+        ...(it.server === "engram" ? { conn: connName(c.bot.id, String(it.tool)) } : {}) });
       else if (it.type === "fileChange") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: it.status });
       else if (it.type === "webSearch") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: "completed" });
       else if (it.type === "contextCompaction") addEvent(threadId, a?.turnId, "system", { text: "Thread compacted." });
