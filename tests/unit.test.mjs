@@ -505,3 +505,21 @@ test("front door finds members named in the sentence as whole words", async () =
   assert.deepEqual(namedMembers("Travel finds days, then @tickets checks and Finance confirms", crew).map((b) => b.id), ["t", "k", "f"]);
   assert.deepEqual(namedMembers("I'm travelling soon; ask the crew chief", crew), []);
 });
+
+test("mcpReady waits until every MCP server of that thread has left starting, one thread at a time", async () => {
+  const { Brain } = await import("../app/dist/src/computer.js");
+  const br = new Brain({ id: "mcp-ready" }, { onRequest() {}, onNotify() {} });
+  br.rpc = { closed: false }; br.servers = ["engram"];
+  const settled = (p, ms = 30) => Promise.race([p.then(() => true), new Promise((r) => setTimeout(() => r(false), ms))]);
+  const a = br.mcpReady("t1", 5000);
+  br.noteMcp({ threadId: "t1", name: "engram", status: "starting" });
+  br.noteMcp({ threadId: "t2", name: "engram", status: "ready" });
+  assert.equal(await settled(a), false, "another thread's ready doesn't count");
+  br.noteMcp({ threadId: "t1", name: "engram", status: "failed" });
+  assert.equal(await settled(a), true, "failed counts as done: the turn runs without that server");
+  assert.equal(await settled(br.mcpReady("t2")), true);
+  const t0 = Date.now(); await br.mcpReady("t3", 40);
+  assert.ok(Date.now() - t0 >= 35, "gives up after its timeout");
+  br.rpc = null;
+  assert.equal(await settled(br.mcpReady("t4", 5000)), true, "a stopped brain doesn't wait");
+});

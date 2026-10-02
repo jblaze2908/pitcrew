@@ -124,12 +124,19 @@ export function instructions(b: Pick<Bot, "name" | "personality"> & Partial<Bot>
     `To show the driver what's on screen (a result, a confirmation, a page that looks wrong), call share_screenshot; your own screenshots stay private.`,
     `When ${driver} tells you a durable fact or preference worth keeping, call remember. Recurring work can be put on a schedule with schedule_task.`,
     memories.length ? `What you remember (edit with remember/forget):\n${memories.map((m) => `- [${m.id}] ${m.text}`).join("\n")}` : "",
-    engram ? `Engram is ${driver}'s context engine; its tools are on your engram MCP server. Search it before asking ${driver} something they may already have told another agent. What you propose to it, ${driver} reviews.` : "",
-    engram?.profile ? `How ${driver} works, from Engram (their profile, compiled for you):\n${engram.profile}` : "",
-    engram?.skills ? `Skills in Engram. When a task matches one, load it with the engram get tool (id "skill:<name>") and follow it:\n${engram.skills}` : "",
+    engram ? engramBlock(driver, engram) : "",
     b.kind === "chief" ? `You are the Crew Chief, the only built-in crew member. When you notice recurring work that deserves its own crew member (the same kind of task 3+ times), call propose_crew_member. ${driver} always reviews and approves a hire; you can't create one yourself.` : "",
     b.kind === "chief" ? crewRoster(b as Bot, driver) : `The Crew Chief may ask you something on ${driver}'s behalf. Answer it fully in one reply; that reply goes back to the Chief.`,
     b.kind === "chief" && plansOn() ? planRules(driver) : "",
+  ].filter(Boolean).join("\n\n");
+}
+
+// Also a /refresh turn's context (turns.ts), so a forked thread hears the same words its instructions use.
+export function engramBlock(driver: string, engram: EngramContext) {
+  return [
+    `Engram is ${driver}'s context engine; its tools are on your engram MCP server. Search it before asking ${driver} something they may already have told another agent. What you propose to it, ${driver} reviews.`,
+    engram.profile ? `How ${driver} works, from Engram (their profile, compiled for you):\n${engram.profile}` : "",
+    engram.skills ? `Skills in Engram. When a task matches one, load it with the engram get tool (id "skill:<name>") and follow it:\n${engram.skills}` : "",
   ].filter(Boolean).join("\n\n");
 }
 

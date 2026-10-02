@@ -261,13 +261,13 @@ export async function digest(): Promise<Cached | null> {
 // ---------- profile and skills at thread start ----------
 interface Ctx { profile: string | null; skills: { name: string; description: string }[] }
 const synced = new Map<string, { tried: number; good: Ctx | null }>();
-// Per thread start or resume (never per turn): at most one GET /link/sync per member per 5 minutes, 4 s timeout;
-// a failure keeps the last good bundle. Skills are names only (bodies load via get("skill:<name>"); nothing on disk);
-// the Chief also gets the profile, cut on a line to PROFILE_MAX.
-export async function threadContext(b: Bot): Promise<Ctx | null> {
+// Per thread start or resume (never per turn), 4 s timeout: a new thread or a /refresh (fresh) always asks; a resume
+// at most once per member per 5 minutes. A failure keeps the last good bundle. Skills are names only (bodies load via
+// get("skill:<name>"); nothing on disk); the Chief also gets the profile, cut on a line to PROFILE_MAX.
+export async function threadContext(b: Bot, fresh = false): Promise<Ctx | null> {
   if (!linked() || b.private || !secretMeta(memberSecret(b.id))) return null;
   let s = synced.get(b.id);
-  if (!s || now() - s.tried > SYNC_MS) {
+  if (fresh || !s || now() - s.tried > SYNC_MS) {
     const tried = now();
     try {
       const bundle = shape(SyncZ, await call(`/link/sync?pitcrew_id=${encodeURIComponent(b.id)}`, { timeoutMs: 4000 }), "sync bundle");
