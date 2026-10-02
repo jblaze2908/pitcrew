@@ -53,7 +53,14 @@ function Script({ e, result }: { e: ThreadEvent; result?: Record<string, any> })
 }
 
 // JSON reads better indented; anything else as it came.
-const pretty = (s: unknown) => { const t = String(s ?? ""); try { const j = JSON.parse(t); return typeof j === "object" && j ? JSON.stringify(j, null, 2) : t; } catch { return t; } };
+const asJson = (t: string) => { try { const j = JSON.parse(t); return typeof j === "object" && j ? JSON.stringify(j, null, 2) : null; } catch { return null; } };
+// Engram puts a one-line untrusted notice before the JSON; keep the line, indent the rest.
+const pretty = (s: unknown) => {
+  const t = String(s ?? ""), whole = asJson(t);
+  if (whole) return whole;
+  const nl = t.indexOf("\n"), rest = nl > 0 ? asJson(t.slice(nl + 1)) : null;
+  return rest ? `${t.slice(0, nl)}\n\n${rest}` : t;
+};
 function Section({ label, text, bad }: { label: string; text: string; bad?: boolean }) {
   const [copied, setCopied] = useState(false);
   const copy = () => navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200); }, () => {});
