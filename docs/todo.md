@@ -17,4 +17,8 @@ Small things to pick up later. Bigger work lives in `features.md`; what shipped 
       `waiting-until` timers and per-plan private consent aren't built. See Obsidian "Research - orchestration".
 - [x] MCP connectors move to the Engram gateway (see Obsidian "Engram - Spec" §13) instead of per-member tokens: built
       (v1-build.md, 2026-10-02). Live: Engram's trace shows Finance Strategist 52 ok / 11 error and Crew Chief 15 ok
-      upstream tool calls by 2026-10-02 08:33 UTC; the 11 errors aren't diagnosed yet.
+      upstream tool calls by 2026-10-02 08:33 UTC. The 11 errors were Tijori refusing arguments the model guessed
+      (5× `get_reports` without `month`, 3× category names instead of ids, `query`/`limit` that don't exist); each was
+      retried with fixed arguments seconds later. Engram's trace now keeps the upstream error text (engram fec449e).
+- [ ] Tijori bills reconcile: a weekly Finance Strategist schedule (Gmail bills ↔ Tijori payments, read only). The prompt
+      is drafted; add it in the member's Schedules tab (`weekly sun 10:00`).
