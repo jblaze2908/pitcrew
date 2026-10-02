@@ -50,7 +50,8 @@ export const systemRoutes = new Hono<Env>()
   .get("/api/models", signedIn, async (c) => {
     const q = (c.req.query("q") || "").toLowerCase();
     const list = await P.models(c.req.query("provider") || "openrouter");
-    return c.json(list.filter((m) => !q || m.id.toLowerCase().includes(q) || String(m.name).toLowerCase().includes(q)).slice(0, 60));
+    // No q: the whole catalogue (the model picker filters it client-side); with q, the best 60.
+    return c.json(q ? list.filter((m) => m.id.toLowerCase().includes(q) || String(m.name).toLowerCase().includes(q)).slice(0, 60) : list);
   })
 
   // Kill switch
