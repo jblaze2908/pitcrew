@@ -25,7 +25,7 @@ function View({ route }: { route: Route }) {
     case "t": return <Thread key={a} id={a} />;
     case "pitstops": return <PitStops />;
     case "telemetry": return <Telemetry />;
-    case "library": return <Library />;
+    case "library": return <Library key={a} arg={a || ""} />;
     case "settings": return <Settings tab={a || "general"} />;
     case "hire": return <Hire key={a || "new"} psId={a} />;
     case "live": return <Live key={a} id={a} />;

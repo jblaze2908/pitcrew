@@ -15,7 +15,7 @@ import { bus } from "./runtime/bus.js";
 import { addEvent } from "./runtime/threads.js";
 import { active } from "./runtime/state.js";
 import { tainted } from "./runtime/taint.js";
-import type { Bot, PublishedArtifact, EngramDecision, EngramDigest, EngramMigration, EngramProposal, EngramScope, EngramStatus, PitStop } from "../shared/types.js";
+import type { Bot, ArtifactFilter, PublishedPage, EngramDecision, EngramDigest, EngramMigration, EngramProposal, EngramScope, EngramStatus, PitStop } from "../shared/types.js";
 import type { PitstopRow, MemoryRow } from "./models.js";
 
 const MAX_BYTES = 2 << 20, FILE_MAX = 10 << 20, PROFILE_MAX = 6000, SKILLS_INDEX_MAX = 2000;
@@ -274,19 +274,24 @@ export async function decideProposal(id: string, decision: EngramDecision) {
   return pitView(one<PitstopRow>("SELECT * FROM pitstops WHERE id=?", id)!);
 }
 
-// The Library's Published list: one Engram call per view. Engram is the record, so revoked links and forgotten files
-// drop out here too; a member deleted in Pitcrew keeps its files under its old id.
-export async function listArtifacts(): Promise<PublishedArtifact[]> {
-  if (!linked()) return [];
-  const r = shape(z.object({ artifacts: z.array(z.unknown()).max(500) }), await call("/link/artifacts"), "artifact list");
+// The Library's Published tab: one Engram call per view or filter change, ≤ 100 rows a page; Engram filters and pages.
+// Engram is the record, so revoked links and forgotten files drop out; a member deleted here keeps its files under its id.
+export async function listArtifacts(f: ArtifactFilter = {}): Promise<PublishedPage> {
+  const empty: PublishedPage = { items: [], next: null, counts: { total: 0, waiting: 0, imported: 0 } };
+  if (!linked()) return empty;
+  const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v !== undefined && v !== "").map(([k, v]) => [k, String(v)]));
+  const r = shape(z.object({ artifacts: z.array(z.unknown()).max(100), next: z.string().max(120).nullable(),
+    counts: z.object({ total: z.number().int(), waiting: z.number().int(), imported: z.number().int() }) }),
+    await call(`/link/artifacts${qs.size ? `?${qs}` : ""}`), "artifact list");
   const bots = new Map(listBots().map((b) => [b.id, b]));
-  return r.artifacts.flatMap((x) => {
+  const items = r.artifacts.flatMap((x) => {
     const a = LinkArtifactZ.safeParse(x); if (!a.success) return [];
     const b = bots.get(a.data.pitcrew_id), th = /^pitcrew:thread:(th_[\w-]{1,40})$/.exec(a.data.ref || "")?.[1];
     const { pitcrew_id, ref, ...rest } = a.data;
-    return [{ ...rest, title: clean(rest.title, 200), bot_id: pitcrew_id, bot_name: b?.name ?? pitcrew_id, hue: b?.hue ?? null, shape: b?.shape ?? null,
+    return [{ ...rest, title: clean(rest.title, 200), imported: !ref, bot_id: pitcrew_id, bot_name: b?.name ?? pitcrew_id, hue: b?.hue ?? null, shape: b?.shape ?? null,
       thread_id: th && one("SELECT 1 FROM threads WHERE id=?", th) ? th : null }];
   });
+  return { items, next: r.next, counts: r.counts };
 }
 
 // ---------- digest ----------

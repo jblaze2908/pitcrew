@@ -10,6 +10,11 @@ import { signedIn, type Env } from "../http/guard.js";
 import { jsonBody, raw, pick } from "../http/body.js";
 
 const Link = z.object({ url: raw, token: raw });
+const ArtifactQuery = z.object({
+  q: z.string().max(100).optional(), member: z.string().regex(/^[\w-]{1,100}$/).optional(), status: z.enum(["public", "waiting", "private"]).optional(),
+  kind: z.enum(["page", "pdf", "image", "other"]).optional(), imported: z.literal("1").optional(),
+  cursor: z.string().regex(/^\d{1,15}:[\w-]{1,100}$/).optional(), limit: z.coerce.number().int().min(1).max(100).optional(),
+});
 const Decision = z.object({ decision: pick(["accept", "keep", "reject"] as const, null) });
 
 export const engramRoutes = new Hono<Env>()
@@ -21,7 +26,10 @@ export const engramRoutes = new Hono<Env>()
     const b = getBot(c.req.param("id")); if (!b) throw httpErr(404, "No such crew member");
     await E.linkMember(b); return c.json(E.status());
   })
-  .get("/api/engram/artifacts", signedIn, async (c) => c.json(await E.listArtifacts()))
+  .get("/api/engram/artifacts", signedIn, async (c) => {
+    const f = ArtifactQuery.safeParse(c.req.query()); if (!f.success) throw httpErr(400, "Invalid filter");
+    return c.json(await E.listArtifacts(f.data));
+  })
   .get("/api/engram/connections", signedIn, async (c) => c.json({ connections: await E.listConnections() }))
   .post("/api/engram/migrate", signedIn, (c) => c.json(E.startMigration()))
   .get("/api/engram/digest", signedIn, async (c) => { const d = await E.digest(); return c.json({ url: engramUrl(), at: d?.at ?? null, digest: d?.digest ?? null }); })

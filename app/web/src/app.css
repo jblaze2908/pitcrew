@@ -208,6 +208,28 @@ main{overflow:auto;min-width:0}
 .seg a{display:inline-flex;align-items:center;height:26px;padding:0 12px;border-radius:99px;font:500 12px/1 var(--font-body);color:var(--ink-2)}
 .seg a.on{background:var(--btn);color:var(--on-btn)}
 
+/* Library */
+.lib-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.lib-bar input[type=search]{flex:1 1 220px;min-width:0}
+.lib-bar select{flex:0 1 auto;max-width:100%}
+.lib-imp{display:inline-flex;align-items:center;gap:6px}
+.lib-imp input{width:auto}
+.arts{padding:0}
+.art{display:grid;grid-template-columns:minmax(0,1fr) auto auto 56px;gap:4px 16px;align-items:center;padding:10px 16px;border-top:1px solid var(--line)}
+.art:first-child{border-top:0}
+.art-t{min-width:0;grid-column:1}
+.art-t a{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.art-m{grid-column:1;grid-row:2}
+.art-s{grid-column:2;grid-row:1/3;white-space:nowrap}
+.art-th{grid-column:4;grid-row:1/3;text-align:right}
+.lib-fold{width:100%;padding:14px 16px;text-align:left}
+.lib-chev{margin-left:auto}
+@media (max-width:640px){
+  .art{grid-template-columns:minmax(0,1fr) auto}
+  .art-s{grid-column:1;grid-row:3}
+  .art-th{grid-column:2;grid-row:1/4;align-self:start}
+}
+
 /* Files and diffs */
 .files{display:grid;grid-template-columns:300px minmax(0,1fr);gap:16px;align-items:start}
 .run{border-radius:10px}
