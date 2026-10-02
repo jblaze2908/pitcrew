@@ -210,8 +210,8 @@ main{overflow:auto;min-width:0}
 
 /* Library */
 .lib-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.lib-bar input[type=search]{flex:1 1 220px;min-width:0}
-.lib-bar select{flex:0 1 auto;max-width:100%}
+.lib-bar input[type=search]{flex:1 1 220px;width:auto;min-width:0}
+.lib-bar select{flex:0 1 auto;width:auto;max-width:100%}
 .lib-imp{display:inline-flex;align-items:center;gap:6px}
 .lib-imp input{width:auto}
 .arts{padding:0}
