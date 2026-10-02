@@ -16,4 +16,5 @@ Small things to pick up later. Bigger work lives in `features.md`; what shipped 
 - [ ] Plans: walkthroughs 2 (dispute: pit stop, days of waiting, chase) and 3 (private-member consent) not yet tested;
       `waiting-until` timers and per-plan private consent aren't built. See Obsidian "Research - orchestration".
 - [x] MCP connectors move to the Engram gateway (see Obsidian "Engram - Spec" §13) instead of per-member tokens: built
-      (v1-build.md, 2026-10-02); not yet run against the live Engram.
+      (v1-build.md, 2026-10-02). Live: Engram's trace shows Finance Strategist 52 ok / 11 error and Crew Chief 15 ok
+      upstream tool calls by 2026-10-02 08:33 UTC; the 11 errors aren't diagnosed yet.
