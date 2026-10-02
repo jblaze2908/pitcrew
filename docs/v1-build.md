@@ -127,6 +127,11 @@ tested (`GET /link/inbox`) before it is saved, encrypted like provider keys. Pri
   Personal stays out, as before. A scope change re-links (one call at the next brain start).
 - **Hire grants.** With Engram linked, the hire form lists Engram's connections (`/link/connections`); the picked ones
   go once with the member's first link and Engram grants their read tools only. Writes stay an Engram-side grant.
+- **What to send, in the instructions.** A linked member's instructions carry Engram rules (1,420 chars; 1,530 with a
+  Money/Health scope line): remember durable facts unprompted, one self-contained sentence each, with `valid_until` for
+  anything that expires; replace by id instead of duplicating; never secrets, guesses or what it just read from Engram;
+  name the source; propose entities and skills; leave episodes and files to Pitcrew; check before finishing a task.
+  Unlinked members keep the plain remember rule, and their `valid_until` goes into the memory's text.
 - Tests: 4 more in `tests/engram.test.mjs`, the taint gate in `tests/sites.test.mjs`.
 - `brain/` (the Codex harness image) is now `harness/`; image and container stay `pitcrew-brain`, data stays in
   `/srv/pitcrew/brains`.

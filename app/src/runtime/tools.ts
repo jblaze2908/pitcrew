@@ -46,9 +46,11 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
     case "remember": {
       const text = String(a.text || "").trim().slice(0, 500);
       if (!text) return say("Nothing to remember", false);
+      const until = /^\d{4}-\d{2}-\d{2}$/.test(String(a.valid_until || "")) ? String(a.valid_until) : null;
+      if (a.valid_until && !until) return say("valid_until must be a date as YYYY-MM-DD", false);
       if (memberLinked(b)) {
         try {
-          const r = await remember(b, text, { id: a.id ? String(a.id) : null, threadId });
+          const r = await remember(b, text, { id: a.id ? String(a.id) : null, threadId, validUntil: until });
           if (r.status === "accepted") {
             if (r.replaced) c.mems.get(p.threadId)?.delete(r.replaced);
             c.mems.get(p.threadId)?.set(r.id, text);
@@ -59,11 +61,13 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
           return say(`Engram is holding this for ${getSetting("driver_name", "the driver")} to review${r.reasons.length ? ` (${r.reasons.join("; ")})` : ""}. It isn't a memory until they accept it.`);
         } catch (e: any) { return say(`Couldn't save it to Engram: ${e.message}`, false); }
       }
+      // Pitcrew's own table has no expiry column, so the date goes in the text.
+      const local = until ? `${text} (valid until ${until})` : text;
       const id = a.id && one("SELECT 1 FROM memory WHERE id=? AND bot_id=?", a.id, b.id) ? a.id : uid("me");
-      if (id === a.id) run("UPDATE memory SET text=?, updated_at=? WHERE id=?", text, now(), id);
-      else run("INSERT INTO memory(id,bot_id,text,source,created_at,updated_at) VALUES(?,?,?,?,?,?)", id, b.id, text, `thread:${threadId}`, now(), now());
-      c.mems.get(p.threadId)?.set(id, text); // this thread already knows; other threads get it on their next turn
-      addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Remembered: ${text}` });
+      if (id === a.id) run("UPDATE memory SET text=?, updated_at=? WHERE id=?", local, now(), id);
+      else run("INSERT INTO memory(id,bot_id,text,source,created_at,updated_at) VALUES(?,?,?,?,?,?)", id, b.id, local, `thread:${threadId}`, now(), now());
+      c.mems.get(p.threadId)?.set(id, local); // this thread already knows; other threads get it on their next turn
+      addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Remembered: ${local}` });
       return say(`Saved as [${id}].`);
     }
     case "forget": {
