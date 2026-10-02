@@ -141,6 +141,7 @@ tested (`GET /link/inbox`) before it is saved, encrypted like provider keys. Pri
   on their own (not by the journal, not by "Move memories"); the journal links what a session published.
   Live 2026-10-02 at https://artifacts.example.com: a Crew Chief turn wrote a file and published it with
   `public: true` in 16 s; it got a private `/a/<id>` link and the share request showed up as an `engram` pit stop.
+  Approving that pit stop shows the public link on the card and posts it to the member's thread (Engram's decide answer carries `public_url`).
 - `brain/` (the Codex harness image) is now `harness/`; image and container stay `pitcrew-brain`, data stays in
   `/srv/pitcrew/brains`.
 
