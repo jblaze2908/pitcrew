@@ -209,6 +209,14 @@ test("untrusted content from Engram: outbound actions on a fully allowed site as
   assert.equal(await gate(c, "t_taint", share, pit), true, "a fully allowed site sends without asking");
   assert.equal(T.taint("t_taint"), true); assert.equal(T.taint("t_taint"), false, "one notice per window");
   assert.equal(T.tainted("t_taint"), true); assert.equal(T.tainted("t_other"), false);
+  // It lives in SQLite, so a restart (nothing in memory) still sees it, and an expired row is pruned on the next write.
+  assert.ok(one("SELECT 1 FROM thread_taint WHERE thread_id='t_taint'"));
+  run("INSERT INTO thread_taint(thread_id,at) VALUES('t_after_restart',?)", Date.now() - 60000);
+  assert.equal(T.tainted("t_after_restart"), true, "a taint from before a restart still holds");
+  run("INSERT INTO thread_taint(thread_id,at) VALUES('t_stale',?)", Date.now() - 11 * 60000);
+  assert.equal(T.tainted("t_stale"), false, "older than 10 minutes no longer gates");
+  T.taint("t_after_restart");
+  assert.equal(one("SELECT 1 FROM thread_taint WHERE thread_id='t_stale'"), undefined, "expired rows are pruned on write");
   const real = globalThis.fetch;
   globalThis.fetch = async () => ({ ok: true, json: async () => ({ model: "jev-test", answers: { effect: { choice: "send", confidence: 0.99, probabilities: { send: 0.99 } }, outside: { noul: 0.1 } } }) });
   try {

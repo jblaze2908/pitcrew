@@ -1,18 +1,20 @@
 // Untrusted content from Engram (email bodies, web pages, untrusted connections): a thread that received some has its
 // outbound actions ask the driver for 10 minutes, the same window Engram applies to its own write tools (spec §8).
-// In memory only, so a restart clears it; Engram's own server-side taint still holds for its tools.
-import { now } from "../db.js";
+// Kept in SQLite so a restart inside the window doesn't lift it.
+import { now, one, run } from "../db.js";
 
 const TAINT_MS = 10 * 60000;
-const taints = new Map<string, number>();
 // Effects that leave the box or spend authority; everything else keeps its normal gate.
 export const OUTBOUND = new Set(["send", "pay", "share", "signin", "delete", "install", "exec_untrusted"]);
 
-export const tainted = (threadId: string | null | undefined) => !!threadId && (taints.get(threadId) ?? 0) > now() - TAINT_MS;
+// One primary-key read per gated tool call.
+export const tainted = (threadId: string | null | undefined) => !!threadId && !!one("SELECT 1 FROM thread_taint WHERE thread_id=? AND at>?", threadId, now() - TAINT_MS);
 // True when this starts a new window, so the caller says so once instead of on every untrusted result.
+// Expired rows are pruned here, on the rare write, so reads never scan.
 export function taint(threadId: string) {
-  const fresh = !tainted(threadId);
-  taints.set(threadId, now());
+  const fresh = !tainted(threadId), t = now();
+  run("DELETE FROM thread_taint WHERE at<=?", t - TAINT_MS);
+  run("INSERT INTO thread_taint(thread_id,at) VALUES(?,?) ON CONFLICT(thread_id) DO UPDATE SET at=excluded.at", threadId, t);
   return fresh;
 }
 

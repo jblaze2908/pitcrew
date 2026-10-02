@@ -118,7 +118,8 @@ tested (`GET /link/inbox`) before it is saved, encrypted like provider keys. Pri
   "Untrusted content:" notice, or records from email/web) taints the thread for 10 minutes (`runtime/taint.ts`):
   send, pay, share, sign-in, delete, install and untrusted exec skip site, jev, standing and learned allows and become
   a pit stop titled "after untrusted content". A delegated or plan thread's taint passes to the thread that asked.
-  In memory only: a restart clears it (Engram's own 10-minute taint on its write tools still holds).
+  Kept in SQLite (`thread_taint`, one row per thread, expired rows pruned on the next taint), so a restart inside
+  the window doesn't lift it (2026-10-03).
 - **Journal entries.** A thread idle for 15 min sends one `POST /link/episodes` per session (≤ 10 per poll, 24 h
   look-back): what was asked, steps by server, files changed, cost, plan and answer, last reply. New Library files from
   that session go first as artifacts and are linked from the entry. Watermark per thread in `engram_episodes`.
