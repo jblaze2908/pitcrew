@@ -97,6 +97,11 @@ main{overflow:auto;min-width:0}
 .tool summary .st{flex:none;width:7px;height:7px;border-radius:2px;background:var(--ink-3)}
 .tool summary .st.ok{background:var(--in)}
 .tool summary .st.bad{background:var(--bad)}
+.tool summary .ic,.steps .last .ic{flex:none;color:var(--ink-3)}
+.tool summary .lbl{color:var(--ink-2)}
+.tool summary .det{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.steps .last{display:inline-flex;align-items:center;gap:6px}
+.msg.bot.cont{margin-top:-6px}
 .tool pre{margin-top:6px}
 .sys{align-self:center;font:500 11px/1.4 var(--font-data);letter-spacing:.03em;color:var(--ink-3);text-align:center;max-width:680px}
 .sys.bad,.err{color:var(--bad)}

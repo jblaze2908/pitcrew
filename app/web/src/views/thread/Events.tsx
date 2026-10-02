@@ -6,6 +6,8 @@ import { PitCard } from "../../components/PitCard";
 import { PlanCard } from "../../components/PlanCard";
 import { Face, Md } from "../../components/ui";
 import { tidyTitle } from "../../lib/format";
+import { stepView } from "../../lib/steps";
+import { StepIcon } from "../../components/StepIcon";
 
 export const stepOk = (e: ThreadEvent) => e.data.status === "completed" && (e.data.exitCode == null || e.data.exitCode === 0);
 const isImg = (p: string) => /\.(png|jpe?g|webp|gif)$/i.test(p);
@@ -41,7 +43,8 @@ function Shot({ e, b }: { e: ThreadEvent; b: Bot }) {
 
 export function Tool({ e }: { e: ThreadEvent }) {
   const st = stepOk(e) ? "ok" : e.data.status === "inProgress" ? "" : "bad";
-  return <details className="tool"><summary><span className={`st ${st}`} />{tidyTitle(e.data.title)}</summary>{(e.data.output || e.data.error) && <pre>{e.data.error || e.data.output}</pre>}</details>;
+  const v = stepView(tidyTitle(e.data.title));
+  return <details className="tool"><summary><span className={`st ${st}`} /><StepIcon name={v.icon} /><span className="lbl">{v.label}</span>{v.detail && <span className="det">{v.detail}</span>}</summary>{(e.data.output || e.data.error) && <pre>{e.data.error || e.data.output}</pre>}</details>;
 }
 
 function Changes({ d }: { d: Record<string, any> }) {
@@ -58,14 +61,15 @@ function Changes({ d }: { d: Record<string, any> }) {
   );
 }
 
-export interface EventCtx { b: Bot; fromName: string; pits: Record<string, PitStop>; latest: Map<string, Record<string, any>>; surface: (id: string) => ReactNode }
+export interface EventCtx { cont?: boolean; b: Bot; fromName: string; pits: Record<string, PitStop>; latest: Map<string, Record<string, any>>; surface: (id: string) => ReactNode }
 
 /** The element for one event, or null when it draws nothing (an unknown pit stop or surface). */
 export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
   const d = e.data;
   switch (e.kind) {
     case "user": return <UserMsg e={e} botId={c.b.id} fromName={c.fromName} />;
-    case "agent": return <div className="msg bot"><Face b={c.b} size="sm" mood="idle" /><Md text={d.text} /></div>;
+    // A follow-on message from the same member (only steps between) drops the face; the column stays for alignment.
+    case "agent": return <div className={`msg bot${c.cont ? " cont" : ""}`}>{c.cont ? <span /> : <Face b={c.b} size="sm" mood="idle" />}<Md text={d.text} /></div>;
     case "shot": return <Shot e={e} b={c.b} />;
     case "tool": return <Tool e={e} />;
     case "system": return <p className={`sys ${d.tone === "bad" ? "bad" : ""}`}>{d.text}</p>;
@@ -79,6 +83,11 @@ export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
   return null;
 }
 
+function Last({ e }: { e: ThreadEvent }) {
+  const v = stepView(tidyTitle(e.data.title));
+  return <span className="last"><StepIcon name={v.icon} />{v.detail ? `${v.label} · ${v.detail}` : v.label}</span>;
+}
+
 /** A run's tool calls fold into one "N steps" row: open while the run goes, folded when it ends (closeSignal bumps). */
 export function Steps({ events, initialOpen, closeSignal }: { events: ThreadEvent[]; initialOpen: boolean; closeSignal: number }) {
   const [open, setOpen] = useState(initialOpen);
@@ -87,7 +96,7 @@ export function Steps({ events, initialOpen, closeSignal }: { events: ThreadEven
   const bad = events.filter((e) => !stepOk(e) && e.data.status !== "inProgress").length;
   return (
     <details className="steps" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary><span>{`${events.length} step${events.length === 1 ? "" : "s"}${bad ? ` · ${bad} failed` : ""}`}</span><span className="last">{tidyTitle(events[events.length - 1].data.title)}</span></summary>
+      <summary><span>{`${events.length} step${events.length === 1 ? "" : "s"}${bad ? ` · ${bad} failed` : ""}`}</span><Last e={events[events.length - 1]} /></summary>
       <div className="steps-body">{events.map((e) => <Tool key={e.id} e={e} />)}</div>
     </details>
   );
