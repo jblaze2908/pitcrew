@@ -92,8 +92,8 @@ tested (`GET /link/inbox`) before it is saved, encrypted like provider keys. Pri
   not retried). With a token, its Codex config has only `[mcp_servers.engram]` (`<url>/mcp`, `MCP_TOKEN_ENGRAM`); no
   upstream connector token reaches the brain. Without one (unlinked, private, revoked) the old connector list is used.
 - **Thread start/resume:** `GET /link/sync` (at most once per member per 5 min): the Chief's instructions get the
-  profile (cut to 6 KB), every linked member a skills index (2 KB), and the skills are written to
-  `<brain home>/.agents/skills/<name>/SKILL.md` with a `.engram-managed` marker; unmarked skills are never touched.
+  profile (cut to 6 KB), every linked member its Engram skills, one `name — description` line each (2 KB), and is told
+  to load one with the engram `get` tool (`skill:<name>`) when a task matches. Nothing is written to disk.
 - **Move memories to Engram** (Settings): memories with their `created_at`, then Library files from `out/` and
   `downloads/` (≤ 6 MB) per member; what was sent is recorded (`engram_sent`), so a rerun sends only what's new.
   Pitcrew's own memories stay.
