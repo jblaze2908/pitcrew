@@ -74,7 +74,8 @@ const DigestZ = z.object({
 });
 const NewTokenZ = z.object({ agent: z.object({ id: Id, token_prefix: z.string().max(40).nullish().catch(null) }), token: z.string().regex(TOKEN) });
 const SkillZ = z.object({ name: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/), description: cut(200).transform((s) => s.replace(/\s+/g, " ").trim()).catch("") });
-const SyncZ = z.object({ profile: z.object({ text: z.string() }).catch({ text: "" }), skills: list(SkillZ, 30) });
+const ConnZ = z.object({ id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,11}$/), name: cut(60) });
+const SyncZ = z.object({ profile: z.object({ text: z.string() }).catch({ text: "" }), skills: list(SkillZ, 30), connections: list(ConnZ, 50) });
 
 // ---------- settings ----------
 let lastTest: EngramStatus["test"] = null, lastPoll: EngramStatus["poll"] = null;
@@ -259,7 +260,7 @@ export async function digest(): Promise<Cached | null> {
 }
 
 // ---------- profile and skills at thread start ----------
-interface Ctx { profile: string | null; skills: { name: string; description: string }[] }
+interface Ctx { profile: string | null; skills: { name: string; description: string }[]; connections?: Record<string, string> }
 const synced = new Map<string, { tried: number; good: Ctx | null }>();
 // Per thread start or resume (never per turn), 4 s timeout: a new thread or a /refresh (fresh) always asks; a resume
 // at most once per member per 5 minutes. A failure keeps the last good bundle. Skills are names only (bodies load via
@@ -271,7 +272,7 @@ export async function threadContext(b: Bot, fresh = false): Promise<Ctx | null> 
     const tried = now();
     try {
       const bundle = shape(SyncZ, await call(`/link/sync?pitcrew_id=${encodeURIComponent(b.id)}`, { timeoutMs: 4000 }), "sync bundle");
-      s = { tried, good: { profile: fitProfile(bundle.profile.text), skills: bundle.skills } };
+      s = { tried, good: { profile: fitProfile(bundle.profile.text), skills: bundle.skills, connections: Object.fromEntries(bundle.connections.map((c) => [c.id, c.name])) } };
     } catch { s = { tried, good: s?.good ?? null }; }
     synced.set(b.id, s);
   }
@@ -282,6 +283,9 @@ function fitProfile(text: string) {
   if (t.length <= PROFILE_MAX) return t || null;
   return `${t.slice(0, t.lastIndexOf("\n", PROFILE_MAX) > 0 ? t.lastIndexOf("\n", PROFILE_MAX) : PROFILE_MAX)}\n(cut to fit)`;
 }
+// A connection's name for an Engram tool step ("google__gmail_search" → "Google (Gmail, Calendar, Drive)"), from the last
+// sync of that member; null before the first one. A map lookup, per tool event.
+export const connName = (botId: string, tool: string) => { const id = /^([a-z0-9-]+)__/.exec(tool)?.[1]; return (id && synced.get(botId)?.good?.connections?.[id]) || null; };
 export const skillsIndex = (skills: Ctx["skills"]) => {
   let out = "";
   for (const s of skills) { const line = `- ${s.name}${s.description ? ` — ${s.description}` : ""}\n`; if (out.length + line.length > SKILLS_INDEX_MAX) break; out += line; }

@@ -43,7 +43,7 @@ function Shot({ e, b }: { e: ThreadEvent; b: Bot }) {
 
 export function Tool({ e }: { e: ThreadEvent }) {
   const st = stepOk(e) ? "ok" : e.data.status === "inProgress" ? "" : "bad";
-  const v = stepView(tidyTitle(e.data.title));
+  const v = stepView(tidyTitle(e.data.title), e.data.conn);
   return <details className="tool"><summary><span className={`st ${st}`} /><StepIcon name={v.icon} /><span className="lbl">{v.label}</span>{v.detail && <span className="det">{v.detail}</span>}</summary>{(e.data.output || e.data.error) && <pre>{e.data.error || e.data.output}</pre>}</details>;
 }
 
@@ -84,7 +84,7 @@ export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
 }
 
 function Last({ e }: { e: ThreadEvent }) {
-  const v = stepView(tidyTitle(e.data.title));
+  const v = stepView(tidyTitle(e.data.title), e.data.conn);
   return <span className="last"><StepIcon name={v.icon} />{v.detail ? `${v.label} · ${v.detail}` : v.label}</span>;
 }
 
