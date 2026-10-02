@@ -89,7 +89,9 @@ CREATE TABLE IF NOT EXISTS plan_items (
 db.exec(`CREATE TABLE IF NOT EXISTS engram_members (bot_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, token_prefix TEXT, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS engram_sent (bot_id TEXT NOT NULL, kind TEXT NOT NULL, ref TEXT NOT NULL, sent_at INTEGER NOT NULL, PRIMARY KEY (bot_id, kind, ref));
 -- Journal entries: per thread, the end time of the last turn already sent to Engram.
-CREATE TABLE IF NOT EXISTS engram_episodes (thread_id TEXT PRIMARY KEY, upto INTEGER NOT NULL)`);
+CREATE TABLE IF NOT EXISTS engram_episodes (thread_id TEXT PRIMARY KEY, upto INTEGER NOT NULL);
+-- Threads that received untrusted Engram content: outbound effects ask until at + 10 min (runtime/taint.ts).
+CREATE TABLE IF NOT EXISTS thread_taint (thread_id TEXT PRIMARY KEY, at INTEGER NOT NULL)`);
 // Columns added after v1 shipped; ALTER fails harmlessly once they exist.
 for (const sql of ["ALTER TABLE turns ADD COLUMN changes TEXT", "ALTER TABLE jev_labels ADD COLUMN shadow TEXT",
   "ALTER TABLE threads ADD COLUMN origin TEXT", "ALTER TABLE bots ADD COLUMN private INTEGER NOT NULL DEFAULT 0",
