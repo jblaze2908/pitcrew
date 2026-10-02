@@ -1,14 +1,14 @@
 // The Engram link (Engram milestones M3–M5): Engram's inbox mirrored as pit stops, the weekly digest, a token and MCP
 // server per member, profile and skills at thread start, and the one-shot memory move. Off until a link token is saved.
 // Engram's answers are untrusted data: size-capped, zod-shaped, cut to length; tokens never leave the secret store.
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, lstatSync, existsSync, chownSync, realpathSync, openSync, fstatSync, closeSync, constants, type Stats } from "node:fs";
+import { readFileSync, realpathSync, openSync, fstatSync, closeSync, constants } from "node:fs";
 import { createHash } from "node:crypto";
 import { basename } from "node:path";
 import { z } from "zod";
 import { one, all, run, now, json, audit, getSetting, setSetting } from "./db.js";
 import { getSecret, putSecret, deleteSecret, secretMeta, httpErr, type HttpError } from "./auth.js";
 import { listBots } from "./crew.js";
-import { botDir, brainDir, brainUid, listFiles, allBrains } from "./computer.js";
+import { botDir, listFiles, allBrains } from "./computer.js";
 import { DEFAULT_URL, LINK_SECRET, memberSecret, engramUrl, linked, normaliseUrl } from "./engramStore.js";
 import { bus } from "./runtime/bus.js";
 import { active } from "./runtime/state.js";
@@ -17,7 +17,7 @@ import type { PitstopRow, MemoryRow } from "./models.js";
 
 const MAX_BYTES = 2 << 20, FILE_MAX = 6 << 20, PROFILE_MAX = 6000, SKILLS_INDEX_MAX = 2000;
 const POLL_MS = 60000, DIGEST_MS = 3600000, SYNC_MS = 5 * 60000;
-const GONE = "Decided in Engram", MARKER = ".engram-managed";
+const GONE = "Decided in Engram";
 const TOKEN = /^[\x21-\x7e]{16,500}$/;
 
 // ---------- HTTP ----------
@@ -73,7 +73,7 @@ const DigestZ = z.object({
   journal: list(z.object({ day: cut(20), lines: list(cut(300), 20) }), 7),
 });
 const NewTokenZ = z.object({ agent: z.object({ id: Id, token_prefix: z.string().max(40).nullish().catch(null) }), token: z.string().regex(TOKEN) });
-const SkillZ = z.object({ name: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/), version: z.number().catch(1), body: z.string().max(64 << 10) });
+const SkillZ = z.object({ name: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/), description: cut(200).transform((s) => s.replace(/\s+/g, " ").trim()).catch("") });
 const SyncZ = z.object({ profile: z.object({ text: z.string() }).catch({ text: "" }), skills: list(SkillZ, 30) });
 
 // ---------- settings ----------
@@ -110,7 +110,6 @@ export function unlink() {
   deleteSecret(LINK_SECRET);
   run("DELETE FROM settings WHERE key='engram_digest'");
   for (const p of all<{ id: string }>("SELECT id FROM pitstops WHERE kind='engram' AND status='pending'")) closePit(p.id, "Engram unlinked");
-  for (const id of ids) try { writeSkills(id, []); } catch {}
   lastTest = lastPoll = null;
   audit("driver", "engram.unlinked");
   return status();
@@ -163,11 +162,11 @@ export async function ensureMemberToken(b: Bot) {
   await linkMember(b, "system").catch(() => {});
 }
 const revoked = (botId: string) => getSetting(`engram_revoked:${botId}`) === "1";
-// A member turned private leaves Engram: its token, its Engram skills and its Engram MCP server go at the next brain start.
+// A member turned private leaves Engram: its token and its Engram MCP server go at the next brain start.
 export function unlinkMember(botId: string) {
   if (!secretMeta(memberSecret(botId))) return;
   deleteSecret(memberSecret(botId)); run("DELETE FROM engram_members WHERE bot_id=?", botId);
-  synced.delete(botId); try { writeSkills(botId, []); } catch {}
+  synced.delete(botId);
   audit("driver", "engram.member.unlinked", { botId }); restartIdle(botId);
 }
 // After a HIRE pit stop is approved: links whoever has no token yet (one POST per new member).
@@ -263,7 +262,8 @@ export async function digest(): Promise<Cached | null> {
 interface Ctx { profile: string | null; skills: { name: string; description: string }[] }
 const synced = new Map<string, { tried: number; good: Ctx | null }>();
 // Per thread start or resume (never per turn): at most one GET /link/sync per member per 5 minutes, 4 s timeout;
-// a failure keeps the last good bundle. The Chief also gets the profile, cut on a line to PROFILE_MAX.
+// a failure keeps the last good bundle. Skills are names only (bodies load via get("skill:<name>"); nothing on disk);
+// the Chief also gets the profile, cut on a line to PROFILE_MAX.
 export async function threadContext(b: Bot): Promise<Ctx | null> {
   if (!linked() || b.private || !secretMeta(memberSecret(b.id))) return null;
   let s = synced.get(b.id);
@@ -271,7 +271,7 @@ export async function threadContext(b: Bot): Promise<Ctx | null> {
     const tried = now();
     try {
       const bundle = shape(SyncZ, await call(`/link/sync?pitcrew_id=${encodeURIComponent(b.id)}`, { timeoutMs: 4000 }), "sync bundle");
-      s = { tried, good: { profile: fitProfile(bundle.profile.text), skills: writeSkills(b.id, bundle.skills) } };
+      s = { tried, good: { profile: fitProfile(bundle.profile.text), skills: bundle.skills } };
     } catch { s = { tried, good: s?.good ?? null }; }
     synced.set(b.id, s);
   }
@@ -284,49 +284,9 @@ function fitProfile(text: string) {
 }
 export const skillsIndex = (skills: Ctx["skills"]) => {
   let out = "";
-  for (const s of skills) { const line = `- $${s.name}: ${s.description}\n`; if (out.length + line.length > SKILLS_INDEX_MAX) break; out += line; }
+  for (const s of skills) { const line = `- ${s.name}${s.description ? ` — ${s.description}` : ""}\n`; if (out.length + line.length > SKILLS_INDEX_MAX) break; out += line; }
   return out.trimEnd();
 };
-
-// Codex reads user skills from $HOME/.agents/skills; HOME is the member's brain home (computer.ts).
-export const skillsDir = (botId: string) => `${brainDir(botId)}/home/.agents/skills`;
-// The brain's uid can write its own home, so every path component is checked for symlinks before root writes through it.
-function realDir(p: string) {
-  try { if (lstatSync(p).isSymbolicLink()) return false; } catch { mkdirSync(p); }
-  return lstatSync(p).isDirectory();
-}
-function skillFile(s: z.output<typeof SkillZ>) {
-  const fm = /^---\n([\s\S]*?)\n---\n/.exec(s.body);
-  const desc = fm && /^description:\s*(.+)$/m.exec(fm[1])?.[1];
-  if (fm && /^name:/m.test(fm[1]) && desc) return { text: s.body, description: clean(desc.replace(/^["']|["']$/g, ""), 200) };
-  const first = s.body.split("\n").map((l) => l.replace(/^#+\s*/, "").trim()).find(Boolean) || s.name, description = clean(first, 200);
-  return { text: `---\nname: ${s.name}\ndescription: ${JSON.stringify(description)}\n---\n\n${s.body}`, description };
-}
-// Writes each granted skill with a marker; removes marked skills no longer granted; never touches a skill without the marker.
-export function writeSkills(botId: string, skills: z.output<typeof SkillZ>[]) {
-  const home = `${brainDir(botId)}/home`, root = skillsDir(botId), uid = brainUid(botId);
-  const own = (p: string) => { try { chownSync(p, uid, 1500); } catch {} };
-  mkdirSync(home, { recursive: true });
-  if (!realDir(home) || !realDir(`${home}/.agents`) || !realDir(root)) return [];
-  own(`${home}/.agents`); own(root);
-  const keep = new Set<string>(), index: Ctx["skills"] = [];
-  for (const s of skills) {
-    const dir = `${root}/${s.name}`;
-    let st: Stats | null = null; try { st = lstatSync(dir); } catch {}
-    if (st && (!st.isDirectory() || !existsSync(`${dir}/${MARKER}`))) continue;
-    if (!st) mkdirSync(dir);
-    own(dir);
-    const f = skillFile(s);
-    for (const [name, text] of [["SKILL.md", f.text], [MARKER, `engram skill v${s.version}\n`]]) {
-      rmSync(`${dir}/${name}`, { force: true }); // a link planted here is removed, never written through
-      writeFileSync(`${dir}/${name}`, text, { flag: "wx" }); own(`${dir}/${name}`);
-    }
-    keep.add(s.name); index.push({ name: s.name, description: f.description });
-  }
-  for (const e of readdirSync(root, { withFileTypes: true }))
-    if (e.isDirectory() && !keep.has(e.name) && existsSync(`${root}/${e.name}/${MARKER}`)) rmSync(`${root}/${e.name}`, { recursive: true, force: true });
-  return index;
-}
 
 // ---------- Move memories to Engram ----------
 let job: EngramMigration = { running: false, line: "", startedAt: null, endedAt: null, summary: null };

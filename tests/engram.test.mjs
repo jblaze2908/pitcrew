@@ -3,7 +3,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 const root = mkdtempSync(`${tmpdir()}/pitcrew-engram-`);
@@ -47,7 +47,7 @@ const calls = (path) => E.calls.filter((c) => c.path === path).length;
 const A = await import("../app/dist/src/auth.js");
 const { run, one, all, now } = await import("../app/dist/src/db.js");
 const C = await import("../app/dist/src/crew.js");
-const { brainConfig } = await import("../app/dist/src/computer.js");
+const { brainConfig, brainDir } = await import("../app/dist/src/computer.js");
 const { brainMcp } = await import("../app/dist/src/engramStore.js");
 const G = await import("../app/dist/src/engram.js");
 const { state } = await import("../app/dist/src/api/views.js");
@@ -197,26 +197,17 @@ test("linked members run Engram as their only MCP server, with their own token; 
   assert.equal((await req("POST", "/api/engram/members/diary/rotate")).status, 400);
 });
 
-test("thread start: the Chief gets Engram's profile, every linked member its skills; only marked skills are replaced", async () => {
-  const dir = G.skillsDir("chief");
-  mkdirSync(`${dir}/mine`, { recursive: true }); writeFileSync(`${dir}/mine/SKILL.md`, "---\nname: mine\ndescription: by hand\n---\nmine");
-  mkdirSync(`${dir}/old`, { recursive: true }); writeFileSync(`${dir}/old/SKILL.md`, "old"); writeFileSync(`${dir}/old/.engram-managed`, "engram skill v1\n");
-  mkdirSync(`${dir}/clash`, { recursive: true }); writeFileSync(`${dir}/clash/SKILL.md`, "hand-written");
-  E.skills = [{ name: "pay-bills", version: 2, body: "---\nname: pay-bills\ndescription: Pay the monthly bills\n---\nSteps." },
-    { name: "tidy", version: 1, body: "# Tidy the downloads\nMove old files." }, { name: "clash", version: 1, body: "from engram" }, { name: "../up", version: 1, body: "x" }];
+test("thread start: the Chief gets Engram's profile, every linked member its skills as names; nothing is written to disk", async () => {
+  E.skills = [{ name: "pay-bills", description: "Pay the monthly bills", version: 2 },
+    { name: "tidy", description: "Tidy the\ndownloads", version: 1 }, { name: "bare", version: 1 }, { name: "../up", description: "x", version: 1 }];
   const before = calls("/link/sync");
   const ctx = await G.threadContext(C.getBot("chief"));
   assert.match(ctx.profile, /Jai prefers short answers/);
-  assert.deepEqual(ctx.skills.map((s) => s.name), ["pay-bills", "tidy"]);
-  assert.equal(readFileSync(`${dir}/pay-bills/SKILL.md`, "utf8"), E.skills[0].body);
-  assert.match(readFileSync(`${dir}/tidy/SKILL.md`, "utf8"), /^---\nname: tidy\ndescription: "Tidy the downloads"\n---\n/);
-  assert.ok(existsSync(`${dir}/tidy/.engram-managed`));
-  assert.equal(readFileSync(`${dir}/mine/SKILL.md`, "utf8").endsWith("mine"), true);
-  assert.equal(readFileSync(`${dir}/clash/SKILL.md`, "utf8"), "hand-written", "an unmarked skill is never overwritten");
-  assert.equal(existsSync(`${dir}/old`), false, "a marked skill Engram no longer grants is removed");
+  assert.deepEqual(ctx.skills, [{ name: "pay-bills", description: "Pay the monthly bills" }, { name: "tidy", description: "Tidy the downloads" }, { name: "bare", description: "" }]);
+  assert.equal(existsSync(`${brainDir("chief")}/home/.agents`), false, "no skill files");
   const ins = C.instructions(C.getBot("chief"), [], { profile: ctx.profile, skills: G.skillsIndex(ctx.skills) });
   assert.match(ins, /How .* works, from Engram[^\n]*\nJai prefers short answers\./);
-  assert.match(ins, /- \$pay-bills: Pay the monthly bills\n- \$tidy: Tidy the downloads/);
+  assert.match(ins, /load it with the engram get tool \(id "skill:<name>"\)[^\n]*\n- pay-bills — Pay the monthly bills\n- tidy — Tidy the downloads\n- bare\n/);
   assert.equal((await G.threadContext(C.getBot("bills"))).profile, null, "only the Chief gets the profile");
   await G.threadContext(C.getBot("chief"));
   assert.equal(calls("/link/sync") - before, 2, "one sync per member per 5 minutes");
@@ -256,7 +247,7 @@ test("Move memories to Engram sends each linked member's memories and Library fi
   assert.equal(all("SELECT 1 FROM memory WHERE forgotten_at IS NULL").length, 3, "Pitcrew's memories stay");
 });
 
-test("unlink: tokens, Engram MCP and Engram skills go; open proposals close; connectors come back; polling stops", async () => {
+test("unlink: tokens and Engram MCP go; open proposals close; connectors come back; polling stops", async () => {
   E.proposals = [proposal("p9")];
   await G.mirrorInbox();
   const r = await req("DELETE", "/api/engram");
@@ -265,8 +256,6 @@ test("unlink: tokens, Engram MCP and Engram skills go; open proposals close; con
   assert.equal(all("SELECT 1 FROM secrets WHERE name LIKE 'engram_member:%'").length, 0);
   assert.deepEqual({ ...one("SELECT status, note FROM pitstops WHERE id='eg_p9'") }, { status: "expired", note: "Engram unlinked" });
   assert.match(brainConfig(C.getBot("bills")), /mcp_servers\.gh/);
-  const dir = G.skillsDir("chief");
-  assert.equal(existsSync(`${dir}/pay-bills`), false); assert.equal(existsSync(`${dir}/mine/SKILL.md`), true);
   const n = E.calls.length;
   await G.tick();
   assert.equal(E.calls.length, n);
