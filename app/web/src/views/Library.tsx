@@ -35,21 +35,24 @@ function Published({ initial }: { initial: URLSearchParams }) {
   const { S } = useStore();
   const [f, setF] = useState<Filter>(() => Object.fromEntries(KEYS.flatMap((k) => (initial.get(k) ? [[k, initial.get(k)!]] : []))) as Filter);
   const [q, setQ] = useState(f.q || "");
-  const [more, setMore] = useState<{ items: PublishedArtifact[]; next: string | null } | null>(null);
+  const [extra, setMore] = useState<{ key: string; items: PublishedArtifact[]; next: string | null } | null>(null);
   const key = new URLSearchParams(Object.entries(f).filter(([, v]) => v) as [string, string][]).toString();
-  const page = useFetch(() => api.get<PublishedPage>(`/api/engram/artifacts?${key}`, { quiet: true }), [key]);
+  const page = useFetch(async () => ({ key, ...(await api.get<PublishedPage>(`/api/engram/artifacts?${key}`, { quiet: true })) }), [key], { keep: true });
+  const stale = !!page.data && page.data.key !== key;
   const set = (patch: Partial<Filter>) => setF((o) => ({ ...o, ...patch }));
 
   useEffect(() => { const t = setTimeout(() => set({ q: q.trim() || undefined }), 250); return () => clearTimeout(t); }, [q]);
   // replaceState keeps typing out of the history and fires no hashchange, so this view isn't remounted.
-  useEffect(() => { setMore(null); history.replaceState(null, "", `#/library/published${key ? `?${key}` : ""}`); }, [key]);
+  useEffect(() => { history.replaceState(null, "", `#/library/published${key ? `?${key}` : ""}`); }, [key]);
+  // Show-more pages belong to the filter they were loaded under, so they drop out when the new first page arrives.
+  const more = extra && extra.key === page.data?.key ? extra : null;
   const paged = useRef(false); paged.current = !!more;
   useLiveReload((e) => e.type === "turn" && !paged.current, page.reload, 2000);
 
   const loadMore = async () => {
     const next = more?.next ?? page.data?.next; if (!next) return;
     const r = await api.get<PublishedPage>(`/api/engram/artifacts?${key}${key ? "&" : ""}cursor=${encodeURIComponent(next)}`);
-    setMore((m) => ({ items: [...(m?.items || []), ...r.items], next: r.next }));
+    setMore({ key, items: [...(more?.items || []), ...r.items], next: r.next });
   };
   const c = page.data?.counts, items = [...(page.data?.items || []), ...(more?.items || [])], next = more ? more.next : page.data?.next;
   const filtered = KEYS.some((k) => f[k]);
@@ -70,14 +73,17 @@ function Published({ initial }: { initial: URLSearchParams }) {
         {(c?.imported || f.imported) ? <label className="small faint lib-imp"><input type="checkbox" checked={!!f.imported} onChange={(e) => set({ imported: e.target.checked ? "1" : undefined })} />
           {`Imported · ${c?.imported ?? 0}`}</label> : null}
       </div>
-      {page.error && !page.data ? <p className="small badc">{`Published files: ${page.error}`}</p>
-        : !page.data ? null
-        : items.length === 0 ? <p className="small faint">{filtered ? "Nothing matches." : "Nothing published yet. A crew member publishes a file when it's something to read, keep or share."}</p>
-        : <>
-          <p className="small faint">{filtered ? plural(items.length, "file") + (next ? "+" : "") : `${plural(c?.total ?? items.length, "file")} published`}</p>
-          <div className="pc-card tight arts">{items.map((a) => <Row key={a.id} a={a} />)}</div>
-          {next && <button className="pc-pill" onClick={loadMore}>Show more</button>}
-        </>}
+      {/* min-height: a short result doesn't shrink the page, so the bar stays put while you type. */}
+      <div className="lib-res">
+        {page.error && !page.data ? <p className="small badc">{`Published files: ${page.error}`}</p>
+          : !page.data ? null
+          : items.length === 0 ? <p className="small faint">{filtered ? "Nothing matches." : "Nothing published yet. A crew member publishes a file when it's something to read, keep or share."}</p>
+          : <>
+            <p className="small faint">{filtered ? plural(items.length, "file") + (next ? "+" : "") : `${plural(c?.total ?? items.length, "file")} published`}</p>
+            <div className={`pc-card tight arts${stale ? " stale" : ""}`}>{items.map((a) => <Row key={a.id} a={a} />)}</div>
+            {next && !stale && <button className="pc-pill" onClick={loadMore}>Show more</button>}
+          </>}
+      </div>
     </div>
   );
 }

@@ -34,7 +34,7 @@ input[type=range]{padding:0;border:0;background:none;accent-color:var(--ink)}
 .crewlist .pc-tile small.bad{color:var(--bad)}
 .crewlist .pc-tile.on{box-shadow:inset 0 0 0 1.5px var(--hue)}
 .side .foot{margin-top:auto;display:flex;flex-direction:column;gap:8px}
-main{overflow:auto;min-width:0}
+main{overflow:auto;min-width:0;scrollbar-gutter:stable}
 .page{max-width:1180px;margin:0 auto;padding:28px 32px 64px;display:flex;flex-direction:column;gap:24px}
 .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .spread{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
@@ -214,7 +214,9 @@ main{overflow:auto;min-width:0}
 .lib-bar select{flex:0 1 auto;width:auto;max-width:100%}
 .lib-imp{display:inline-flex;align-items:center;gap:6px}
 .lib-imp input{width:auto}
-.arts{padding:0}
+.arts{padding:0;transition:opacity .15s}
+.arts.stale{opacity:.55}
+.lib-res{display:flex;flex-direction:column;gap:12px;min-height:70vh}
 .art{display:grid;grid-template-columns:minmax(0,1fr) auto auto 56px;gap:4px 16px;align-items:center;padding:10px 16px;border-top:1px solid var(--line)}
 .art:first-child{border-top:0}
 .art-t{min-width:0;grid-column:1}
