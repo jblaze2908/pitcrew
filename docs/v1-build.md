@@ -153,6 +153,12 @@ tested (`GET /link/inbox`) before it is saved, encrypted like provider keys. Pri
   Undo on a plain new save forgets it (Engram's forget for a linked member, Pitcrew's table otherwise). A held one says
   "waiting for you" (its pit stop decides it); a restatement Engram already had, or a replacement, has no Undo, since
   forgetting it would drop a fact the turn didn't add. The card reads `GET /api/turns/:id/learned`, so it survives a reload.
+- **Household facts** (2026-10-03; Engram's `household` scope). A "Household facts" checkbox on the hire form and the
+  member profile, shown when Engram is linked, off by default (`bots.engram_household`). A first link sends
+  `household: true` on `POST /link/members`; after that a change goes to `POST /link/members/:id/household`, which
+  keeps the member's token. Pitcrew records what Engram was last told (`engram_members.household`): a failed toggle is
+  retried at the next brain start, and a change made in Engram itself (seen in `/link/sync`) is adopted here. A Crew
+  Chief hire proposal can't turn it on; only the driver's form can.
 - `brain/` (the Codex harness image) is now `harness/`; image and container stay `pitcrew-brain`, data stays in
   `/srv/pitcrew/brains`.
 

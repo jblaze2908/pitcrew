@@ -9,7 +9,7 @@ import { go } from "../lib/router";
 import { useStore } from "../lib/store";
 import { toast } from "../lib/toast";
 import { useFetch } from "../lib/useFetch";
-import { DIALS, SCOPE_LABEL, splitQuirks } from "./crew/ProfileTab";
+import { DIALS, HouseholdBox, SCOPE_LABEL, splitQuirks } from "./crew/ProfileTab";
 
 const HUES: Hue[] = ["c1", "c2", "c3", "c5", "c6"];
 const SHAPES: Shape[] = ["square", "round", "blob"];
@@ -31,7 +31,7 @@ function HireForm({ ps }: { ps: PitStop | null }) {
     provider: (spec.provider || S.defaultProvider) as string, model: spec.model || "",
     hue: (spec.hue || ["c2", "c3", "c5", "c6"][Math.floor(Math.random() * 4)]) as Hue, shape: (spec.shape || "round") as Shape,
     warmth: p.warmth || 3, talk: p.talk || 3, humour: p.humour || 3,
-    scope: (["personal", "finance", "health"].includes(spec.engram_scope || "") ? spec.engram_scope : "personal") as EngramScope, conns: [] as string[],
+    scope: (["personal", "finance", "health"].includes(spec.engram_scope || "") ? spec.engram_scope : "personal") as EngramScope, conns: [] as string[], household: false,
   }));
   const conns = useFetch(async () => (S.engram.linked ? (await api.get<{ connections: EngramConnection[] }>("/api/engram/connections")).connections : []), [S.engram.linked]);
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((x) => ({ ...x, [k]: v }));
@@ -43,7 +43,7 @@ function HireForm({ ps }: { ps: PitStop | null }) {
       name: f.name, job: f.job, hue: f.hue, shape: f.shape, provider: f.provider, model: f.model.trim(), weekly_cap_usd: +f.cap,
       personality: { role: f.role, warmth: f.warmth, talk: f.talk, humour: f.humour, quirks: splitQuirks(f.quirks), signoff: f.signoff, callMe: f.callMe },
       schedule: f.sSpec.trim() ? { spec: f.sSpec.trim(), prompt: f.sPrompt.trim() } : null, reason: spec.reason || "",
-      engram_scope: f.scope, engram_connections: f.conns,
+      engram_scope: f.scope, engram_connections: f.conns, engram_household: f.household,
     };
   }
   const toReview = () => {
@@ -87,6 +87,7 @@ function HireForm({ ps }: { ps: PitStop | null }) {
                 {(Object.keys(SCOPE_LABEL) as EngramScope[]).map((k) => <option key={k} value={k}>{SCOPE_LABEL[k]}</option>)}
               </select>
             </Field>
+            <HouseholdBox checked={f.household} onChange={(v) => set("household", v)} />
             {!!conns.data?.length && <div className="col" style={{ gap: 6 }}>
               <p className="pc-lab">Reads through Engram</p>
               {conns.data.map((c) => (

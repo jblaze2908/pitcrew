@@ -23,6 +23,8 @@ export interface Bot {
   archived: boolean; private: boolean; created_at: number;
   /** Where its memories live in Engram; a private member needs finance or health so other members can't read them. */
   engram_scope: EngramScope;
+  /** Reads Engram's household facts (addresses, account last-4s, family); off unless you tick it. */
+  engram_household: boolean;
 }
 export type EngramScope = "personal" | "finance" | "health";
 export interface ThreadSummary { id: string; title: string; status: ThreadStatus; created_at: number; updated_at: number; pinned: number }

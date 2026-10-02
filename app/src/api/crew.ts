@@ -39,7 +39,7 @@ export const crewRoutes = new Hono<Env>()
       schedules: all("SELECT * FROM schedules WHERE bot_id=? ORDER BY created_at DESC", id), rules: all("SELECT * FROM rules WHERE bot_id=? AND revoked_at IS NULL ORDER BY created_at DESC", id), learned: liveLearned(all<LearnedRow>(`${LEARNED} WHERE l.bot_id=? ORDER BY l.updated_at DESC`, id)) });
   })
   // The patch is normalised by updateBot itself (crew.ts), field by field.
-  .patch("/api/bots/:id", signedIn, async (c) => { const patch = await readJson(c), b = updateBot(c.req.param("id"), patch); if ("private" in patch || "engram_scope" in patch) memberChanged(b); return c.json(b); })
+  .patch("/api/bots/:id", signedIn, async (c) => { const patch = await readJson(c), b = updateBot(c.req.param("id"), patch); if ("private" in patch || "engram_scope" in patch || "engram_household" in patch) memberChanged(b); return c.json(b); })
   .post("/api/bots/:id/archive", signedIn, (c) => {
     const id = c.req.param("id"), b = getBot(id); if (!b || b.kind === "chief") throw httpErr(400, "The Crew Chief can't be retired");
     run("UPDATE bots SET archived=1 WHERE id=?", id); run("UPDATE schedules SET enabled=0 WHERE bot_id=?", id); audit("driver", "crew.retired", { id }); return c.json({ ok: true });

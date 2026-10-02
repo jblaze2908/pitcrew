@@ -80,7 +80,8 @@ const SkillZ = z.object({ name: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/), 
 const ConnZ = z.object({ id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,11}$/), name: cut(60) });
 const MemZ = z.object({ id: Id, text: cut(2000) });
 const SyncZ = z.object({ profile: z.object({ text: z.string() }).catch({ text: "" }), skills: list(SkillZ, 30), connections: list(ConnZ, 50),
-  memories: list(MemZ, 60).optional() });
+  memories: list(MemZ, 60).optional(), household: z.boolean().optional() });
+const HouseholdZ = z.object({ household: z.boolean() });
 const RememberZ = z.object({ status: z.enum(["accepted", "open", "held"]), id: Id, reasons: list(cut(300), 10) });
 const MemListZ = z.object({ memories: list(MemZ.extend({ scope: cut(20).catch(""), area: cut(60).catch(""), created_at: z.number().catch(0), source: cut(200).catch("") }), 200) });
 const ConnListZ = z.object({ connections: list(z.object({ id: ConnZ.shape.id, name: cut(60), status: z.enum(["ok", "warn", "signal"]).catch("warn"), detail: cut(200).catch(""),
@@ -161,8 +162,10 @@ export function status(): EngramStatus {
 export async function linkMember(b: Bot, by = "driver") {
   if (!engramEligible(b)) throw httpErr(400, `${b.name} is private: give its memories Money or Health in its profile to link it`);
   const hireKey = `engram_hire:${b.id}`, picked = json<unknown>(getSetting(hireKey), null), connections = Array.isArray(picked) ? picked : [];
+  // Engram applies household only when it makes the agent; an existing one is toggled after (setHousehold).
+  const had = one<{ household: number }>("SELECT household FROM engram_members WHERE bot_id=?", b.id);
   let res: unknown;
-  try { res = await call("/link/members", { method: "POST", body: { pitcrew_id: b.id, name: b.name, hue: b.hue, area: null, scope: b.engram_scope, ...(connections.length ? { connections } : {}) } }); }
+  try { res = await call("/link/members", { method: "POST", body: { pitcrew_id: b.id, name: b.name, hue: b.hue, area: null, scope: b.engram_scope, ...(connections.length ? { connections } : {}), ...(!had && b.engram_household ? { household: true } : {}) } }); }
   catch (e: any) {
     // Revoked in Engram: never retried on its own; the driver's Rotate asks again.
     // Its old token is dead too, so the member goes back to its own connectors.
@@ -172,17 +175,28 @@ export async function linkMember(b: Bot, by = "driver") {
   const r = shape(NewTokenZ, res, "member token");
   run("DELETE FROM settings WHERE key=?", `engram_revoked:${b.id}`);
   putSecret(memberSecret(b.id), r.token);
-  run("INSERT INTO engram_members(bot_id,agent_id,token_prefix,created_at,scope) VALUES(?,?,?,?,?) ON CONFLICT(bot_id) DO UPDATE SET agent_id=excluded.agent_id, token_prefix=excluded.token_prefix, created_at=excluded.created_at, scope=excluded.scope",
-    b.id, r.agent.id, r.agent.token_prefix ?? null, now(), b.engram_scope);
+  run("INSERT INTO engram_members(bot_id,agent_id,token_prefix,created_at,scope,household) VALUES(?,?,?,?,?,?) ON CONFLICT(bot_id) DO UPDATE SET agent_id=excluded.agent_id, token_prefix=excluded.token_prefix, created_at=excluded.created_at, scope=excluded.scope",
+    b.id, r.agent.id, r.agent.token_prefix ?? null, now(), b.engram_scope, b.engram_household ? 1 : 0);
   run("DELETE FROM settings WHERE key=?", hireKey);
   audit(by, "engram.member.token", { botId: b.id, agent: r.agent.id, scope: b.engram_scope, connections });
   synced.delete(b.id); memCache.delete(b.id); restartIdle(b.id);
+  if (had && !!had.household !== b.engram_household) await setHousehold(b, by).catch(() => {});
 }
-// Called before a member's brain starts: a network call only when a linked member has no token, or its scope changed.
+// Household facts are a grant on the member's existing Engram agent, so toggling it keeps the token.
+export async function setHousehold(b: Bot, by = "driver") {
+  const r = shape(HouseholdZ, await call(`/link/members/${encodeURIComponent(b.id)}/household`, { method: "POST", body: { household: b.engram_household } }), "household result");
+  run("UPDATE engram_members SET household=? WHERE bot_id=?", r.household ? 1 : 0, b.id);
+  audit(by, "engram.member.household", { botId: b.id, household: r.household });
+}
+// Called before a member's brain starts: a network call only when a linked member has no token, its scope changed, or
+// its household grant differs from what Engram was last told.
 export async function ensureMemberToken(b: Bot) {
   if (!linked() || !engramEligible(b) || revoked(b.id)) return;
-  const sentScope = one<{ scope: string | null }>("SELECT scope FROM engram_members WHERE bot_id=?", b.id)?.scope ?? "personal";
-  if (secretMeta(memberSecret(b.id)) && sentScope === b.engram_scope) return;
+  const m = one<{ scope: string | null; household: number }>("SELECT scope, household FROM engram_members WHERE bot_id=?", b.id);
+  if (secretMeta(memberSecret(b.id)) && (m?.scope ?? "personal") === b.engram_scope) {
+    if (m && !!m.household !== b.engram_household) await setHousehold(b, "system").catch(() => {});
+    return;
+  }
   await linkMember(b, "system").catch(() => {});
 }
 const revoked = (botId: string) => getSetting(`engram_revoked:${botId}`) === "1";
@@ -325,10 +339,19 @@ export async function threadContext(b: Bot, fresh = false): Promise<Ctx | null> 
       const bundle = shape(SyncZ, await call(`/link/sync?pitcrew_id=${encodeURIComponent(b.id)}`, { timeoutMs: 4000 }), "sync bundle");
       s = { tried, good: { profile: fitProfile(bundle.profile.text), skills: bundle.skills, connections: Object.fromEntries(bundle.connections.map((c) => [c.id, c.name])) } };
       if (bundle.memories) memCache.set(b.id, new Map(bundle.memories.map((m) => [m.id, m.text])));
+      if (bundle.household !== undefined) adoptHousehold(b.id, bundle.household);
     } catch { s = { tried, good: s?.good ?? null }; }
     synced.set(b.id, s);
   }
   return s.good && { profile: b.kind === "chief" ? s.good.profile : null, skills: s.good.skills };
+}
+// A household grant changed in Engram itself (not what Pitcrew last sent) becomes the member's setting here too.
+function adoptHousehold(botId: string, h: boolean) {
+  const m = one<{ household: number }>("SELECT household FROM engram_members WHERE bot_id=?", botId);
+  if (!m || !!m.household === h) return;
+  run("UPDATE engram_members SET household=? WHERE bot_id=?", h ? 1 : 0, botId);
+  run("UPDATE bots SET engram_household=? WHERE id=?", h ? 1 : 0, botId);
+  audit("engram", "engram.member.household", { botId, household: h });
 }
 function fitProfile(text: string) {
   const t = clean(text, 1 << 20).trim();

@@ -13,7 +13,7 @@ Object.assign(process.env, { PITCREW_ROOT: root, PITCREW_DATA: `${root}/data`, P
 // ---------- the stub ----------
 const LINK = "link-token-0123456789abcdef";
 const E = { proposals: [], skills: [], calls: [], revoked: new Set(), decisions: [], answers: {}, artifacts: [], artQueries: [], artNext: null, members: [], memImports: [], artImports: [], n: 0,
-  mems: {}, remembered: [], forgot: [], episodes: [], published: [], hold: false, connections: [{ id: "google", name: "Google", status: "ok", detail: "Fine", read: 6, write: 4 }],
+  mems: {}, remembered: [], forgot: [], household: {}, toggles: [], episodes: [], published: [], hold: false, connections: [{ id: "google", name: "Google", status: "ok", detail: "Fine", read: 6, write: 4 }],
   digest: { week: "2026-W40", from: "2026-09-28", to: "2026-10-04", built_at: Date.now(), waiting: { open: 3, held: 1 },
     runningOut: [{ date: "2026-10-20", text: "Passport renewal window", area: "home" }], changed: [{ text: "Rent went up", detail: "", tone: "bad" }],
     openLoops: [{ text: "Car insurance quote", area: "home" }], journal: [{ day: "2026-10-01", lines: ["Paid electricity"] }] } };
@@ -24,9 +24,10 @@ const srv = createServer(async (req, res) => {
   E.calls.push({ method: req.method, path: url.pathname, auth: req.headers.authorization });
   const send = (s, o) => { res.writeHead(s, { "Content-Type": "application/json" }); res.end(JSON.stringify(o)); };
   const pid = url.searchParams.get("pitcrew_id") || body?.pitcrew_id, own = () => (E.mems[pid] ??= []);
+  if (E.down) return send(503, { error: "Engram is down" });
   if (url.pathname === "/link/sync" && req.headers.authorization === `Bearer ${LINK}`)
     return send(200, { agent: `ag_${pid}`, profile: { target: "crew-chief", text: "Jai prefers short answers.\nBills are paid on the 1st.", lines: 2, budget: 80, lint: [] }, skills: E.skills,
-      memories: own().map(({ id, text }) => ({ id, text })), scope: "personal", at: Date.now() });
+      memories: own().map(({ id, text }) => ({ id, text })), scope: "personal", household: !!E.household[pid], at: Date.now() });
   if (req.headers.authorization !== `Bearer ${LINK}`) return send(401, { error: "Missing or invalid token" });
   const decided = /^\/link\/inbox\/([\w-]+)$/.exec(url.pathname);
   if (req.method === "GET" && url.pathname === "/link/inbox") return send(200, { proposals: E.proposals, at: Date.now() });
@@ -36,8 +37,11 @@ const srv = createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/link/members") {
     if (E.revoked.has(body.pitcrew_id)) return send(409, { error: "This member was revoked" });
     E.members.push(body); E.n++;
+    if (!(body.pitcrew_id in E.household)) E.household[body.pitcrew_id] = body.household === true; // creation only, like Engram
     return send(200, { agent: { id: `ag_${body.pitcrew_id}`, name: body.name, kind: "pitcrew", profile: "pitcrew-member", grants: [], skills: [], token_prefix: `eng_${E.n}`, created_at: Date.now(), revoked: false }, token: memberToken(body.pitcrew_id) });
   }
+  const hh = /^\/link\/members\/([\w-]+)\/household$/.exec(url.pathname);
+  if (req.method === "POST" && hh) { if (!(hh[1] in E.household)) return send(404, { error: "No such member" }); E.toggles.push({ id: hh[1], ...body }); E.household[hh[1]] = body.household; return send(200, { household: body.household }); }
   if (req.method === "GET" && url.pathname === "/link/connections") return send(200, { connections: E.connections });
   if (req.method === "GET" && url.pathname === "/link/memories") return send(200, { scope: "personal", memories: own().map((m) => ({ ...m, scope: "personal", area: "home", created_at: 1, source: `pitcrew:${pid}` })) });
   if (req.method === "POST" && url.pathname === "/link/memories") {
@@ -356,6 +360,48 @@ test("learned this run: a turn's memories become one card; a plain new one can b
   assert.equal((await req("POST", `/api/turns/tu_th_learn_local/learned/${local.memory_id}/undo`)).status, 200);
   assert.ok(one("SELECT forgotten_at FROM memory WHERE id=?", local.memory_id).forgotten_at);
   for (const th of ["th_learn", "th_learn_local"]) active.delete(th);
+});
+
+test("household facts: off by default, sent on a member's first link, toggled without a new token, and Engram's own change wins", async () => {
+  assert.equal(C.getBot("bills").engram_household, false);
+  assert.equal(E.household.bills, false, "never asked for at the first link");
+  const tokenBefore = A.getSecret("engram_member:bills"), membersBefore = E.members.length;
+  assert.equal((await req("PATCH", "/api/bots/bills", { engram_household: true })).status, 200);
+  for (let i = 0; i < 20 && !E.toggles.length; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(E.toggles.at(-1), { id: "bills", household: true });
+  assert.equal(E.members.length, membersBefore, "a toggle never rotates the token");
+  assert.equal(A.getSecret("engram_member:bills"), tokenBefore);
+  assert.equal(one("SELECT household FROM engram_members WHERE bot_id='bills'").household, 1);
+  await G.ensureMemberToken(C.getBot("bills"));
+  assert.equal(E.toggles.length, 1, "in step: no call before the next brain start");
+
+  // Switched off in Engram's own UI: the next sync brings it back here instead of Pitcrew turning it on again.
+  E.household.bills = false;
+  await G.threadContext(C.getBot("bills"), true);
+  assert.equal(C.getBot("bills").engram_household, false);
+  await G.ensureMemberToken(C.getBot("bills"));
+  assert.equal(E.toggles.length, 1);
+
+  // Engram down when you toggle: the brain start after retries it.
+  E.down = true;
+  await req("PATCH", "/api/bots/bills", { engram_household: true });
+  await new Promise((r) => setTimeout(r, 30));
+  E.down = false;
+  assert.equal(one("SELECT household FROM engram_members WHERE bot_id='bills'").household, 0);
+  await G.ensureMemberToken(C.getBot("bills"));
+  assert.deepEqual(E.toggles.at(-1), { id: "bills", household: true });
+
+  // A hire that ticks it asks on creation; a Chief's proposal can't.
+  const hired = await req("POST", "/api/hire", { name: "Home", job: "Runs the house", engram_household: true });
+  for (let i = 0; i < 20 && !E.members.some((m) => m.pitcrew_id === hired.body.id); i++) await new Promise((r) => setTimeout(r, 10));
+  assert.equal(E.members.find((m) => m.pitcrew_id === hired.body.id).household, true);
+  const R = await import("../app/dist/src/runtime/index.js");
+  run("INSERT INTO pitstops(id,bot_id,kind,effect,title,detail,created_at,expires_at) VALUES('ps_hh','chief','hire','hire','Hire Nosy',?,?,?)",
+    JSON.stringify({ spec: { name: "Nosy", job: "Looks around", engram_household: true } }), now(), now() + 60000);
+  await R.decide("ps_hh", "approve");
+  assert.equal(C.listBots().find((b) => b.name === "Nosy").engram_household, false, "only the driver's form turns it on");
+  for (const b of C.listBots().filter((x) => ["Home", "Nosy"].includes(x.name))) run("UPDATE bots SET archived=1 WHERE id=?", b.id);
+  await req("PATCH", "/api/bots/bills", { engram_household: false });
 });
 
 test("linked members are told what to send to Engram; unlinked ones keep the plain remember rule", async () => {
