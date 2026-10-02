@@ -86,6 +86,7 @@ export function PitCard({ p: given, onDone }: { p: PitStop; onDone?: (r: PitStop
         : `Approve “${p.learn.label}” ${p.learn.need - p.learn.streak} times in a row and ${who} stops asking.`}</p>}
       {actions}
       {done && p.note && <p className="small faint">{p.note}</p>}
+      {done && typeof d.public_url === "string" && /^https:\/\//.test(d.public_url) && <p className="small"><a href={d.public_url} target="_blank" rel="noreferrer">{d.public_url}</a></p>}
     </div>
   );
 }
