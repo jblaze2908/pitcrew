@@ -110,6 +110,7 @@ export function voiceBlock(b: Pick<Bot, "personality">) {
 
 // What a linked member gets from Engram at thread start (engram.ts threadContext): the Chief's profile, a skills index.
 export interface EngramContext { profile: string | null; skills: string }
+const SCOPE_NAME = { personal: "Personal", finance: "Money (scope finance)", health: "Health (scope health)" } as const;
 export function instructions(b: Pick<Bot, "name" | "personality"> & Partial<Bot>, memories: { id: string; text: string }[], engram: EngramContext | null = null) {
   const driver = getSetting("driver_name", "the driver");
   return [
@@ -131,9 +132,10 @@ export function instructions(b: Pick<Bot, "name" | "personality"> & Partial<Bot>
     `Pit stops: the runtime decides which actions need ${driver}'s approval (sending, paying, signing in, installing, deleting, sharing). You don't ask for approval yourself; just act and the runtime pauses when needed. If an action is declined, do not retry it another way; say what didn't happen.`,
     `When a comparison, table, chart, dashboard or form would help, call render_surface instead of writing a long text table. Forms come back to you as a message with the submitted values.`,
     `To show the driver what's on screen (a result, a confirmation, a page that looks wrong), call share_screenshot; your own screenshots stay private.`,
-    `When ${driver} tells you a durable fact or preference worth keeping, call remember. Recurring work can be put on a schedule with schedule_task.`,
-    memories.length ? `What you remember (edit with remember/forget):\n${memories.map((m) => `- [${m.id}] ${m.text}`).join("\n")}` : "",
-    engram ? engramBlock(driver, engram) : "",
+    engram ? "" : `When ${driver} tells you a durable fact or preference worth keeping, call remember.`,
+    `Recurring work can be put on a schedule with schedule_task.`,
+    memories.length ? `What you remember${engram ? " (in Engram)" : ""} (rewrite one by passing its id to remember; forget removes it):\n${memories.map((m) => `- [${m.id}] ${m.text}`).join("\n")}` : "",
+    engram ? engramBlock(driver, engram, b.engram_scope) : "",
     b.kind === "chief" ? `You are the Crew Chief, the only built-in crew member. When you notice recurring work that deserves its own crew member (the same kind of task 3+ times), call propose_crew_member. ${driver} always reviews and approves a hire; you can't create one yourself.` : "",
     b.kind === "chief" ? crewRoster(b as Bot, driver) : `The Crew Chief may ask you something on ${driver}'s behalf. Answer it fully in one reply; that reply goes back to the Chief.`,
     b.kind === "chief" && plansOn() ? planRules(driver) : "",
@@ -141,9 +143,18 @@ export function instructions(b: Pick<Bot, "name" | "personality"> & Partial<Bot>
 }
 
 // Also a /refresh turn's context (turns.ts), so a forked thread hears the same words its instructions use.
-export function engramBlock(driver: string, engram: EngramContext) {
+export function engramBlock(driver: string, engram: EngramContext, scope: keyof typeof SCOPE_NAME = "personal") {
   return [
-    `Engram is ${driver}'s context engine; its tools are on your engram MCP server. Search it before asking ${driver} something they may already have told another agent. What you propose to it, ${driver} reviews.`,
+    `Engram is ${driver}'s context engine; its tools are on your engram MCP server. Search it before asking ${driver} something they may already have told another agent.`,
+    // What to send, so the next agent doesn't ask again. Kept short: it rides in every thread's instructions.
+    [`Keep Engram current, without being asked: ${driver} should never have to tell another agent the same thing twice.`,
+      `- remember: one durable fact per call, as a sentence another agent understands cold ("Electricity is BESCOM, account ending 4417, due on the 5th"). Save what ${driver} tells you, and what you confirm from their own accounts, bills, bookings and documents: providers, due and renewal dates, plan and policy details, preferences, people and addresses. Pass valid_until (YYYY-MM-DD) for anything that expires: a fare, an offer, a quote, a document.`,
+      `- If a fact changed, pass the old memory's id to remember so it is replaced, not duplicated.`,
+      `- Not worth saving: what you just read from Engram, guesses or estimates, one-off chatter, and secrets (passwords, OTPs, card numbers, full account numbers).`,
+      `- If a fact didn't come from ${driver}, say where it did ("per the October BESCOM bill"). Anything from an email or a web page waits for ${driver}'s review.`,
+      `- engram propose: a person, account or place worth its own record (kind entity), or a how-to you worked out that will come up again (kind skill)${scope === "personal" ? "" : `, with scope ${scope}`}. Don't propose episodes or files: Pitcrew sends your journal and Library files itself.`,
+      `- Before you finish a task, check whether you learned something durable, and save it then.`,
+      scope === "personal" ? "" : `Your memories are filed under ${SCOPE_NAME[scope]}, which other crew members can't read.`].filter(Boolean).join("\n"),
     engram.profile ? `How ${driver} works, from Engram (their profile, compiled for you):\n${engram.profile}` : "",
     engram.skills ? `Skills in Engram. When a task matches one, load it with the engram get tool (id "skill:<name>") and follow it:\n${engram.skills}` : "",
   ].filter(Boolean).join("\n\n");
@@ -214,8 +225,9 @@ export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { br
       inputSchema: { type: "object", properties: { title: { type: "string" }, root: { type: "object" } }, required: ["title", "root"] } },
     { type: "function", name: "share_screenshot", description: "Post a screenshot into this chat for the driver, with a one-line caption. source: browser (the current page, default) or screen (the whole desktop). For one element, pass element and ref from the latest snapshot.",
       inputSchema: { type: "object", properties: { caption: { type: "string" }, source: { type: "string", enum: ["browser", "screen"] }, full_page: { type: "boolean" }, element: { type: "string" }, ref: { type: "string" } }, required: ["caption"] } },
-    { type: "function", name: "remember", description: "Save one durable fact or preference the driver told you (one sentence). Pass id to rewrite an existing memory.",
-      inputSchema: { type: "object", properties: { text: { type: "string" }, id: { type: "string" } }, required: ["text"] } },
+    { type: "function", name: "remember", description: "Save one durable fact or preference (one self-contained sentence). Pass id to replace an existing memory instead of adding a second one.",
+      inputSchema: { type: "object", properties: { text: { type: "string" }, id: { type: "string", description: "The memory it replaces" },
+        valid_until: { type: "string", description: "YYYY-MM-DD, for a fact that expires (a fare, an offer, a quote, a document)" } }, required: ["text"] } },
     { type: "function", name: "forget", description: "Forget a memory by id.", inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
     { type: "function", name: "find_threads", description: "Search your own past threads (titles and transcripts) when the driver asks to find, reopen or resume an earlier conversation. Returns matching threads, best first, with links. Words, names and phrases from that conversation make good queries.",
       inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "integer" } }, required: ["query"] } },

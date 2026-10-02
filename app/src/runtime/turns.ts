@@ -84,7 +84,8 @@ export async function startTurn(threadId: string, text: string, attachments: str
     // Engram context only where instructions are sent (start/resume) or on /refresh, so a normal turn makes no Engram
     // call. A new thread or a /refresh always syncs: one GET per thread start, not per turn.
     const eg = !codexId || !c.loaded.has(codexId) || refreshNow ? await threadContext(b, !codexId || refreshNow) : null;
-    const egCtx = eg && { profile: eg.profile, skills: skillsIndex(eg.skills) };
+    // A linked member whose sync failed still gets the Engram rules (no profile or skills): its remember goes there.
+    const egCtx = eg ? { profile: eg.profile, skills: skillsIndex(eg.skills) } : memberLinked(b) ? { profile: null, skills: "" } : null;
     // A linked member's memories are Engram's (cached from the last sync); null until one succeeds, so nothing is
     // reported forgotten just because Engram was unreachable.
     const mems = memberLinked(b) ? engramMemories(b.id) : all<{ id: string; text: string }>("SELECT id,text FROM memory WHERE bot_id=? AND forgotten_at IS NULL ORDER BY created_at LIMIT 60", b.id);
@@ -110,7 +111,7 @@ export async function startTurn(threadId: string, text: string, attachments: str
       c.loaded.add(codexId);
       c.mems.set(codexId, seen ?? new Map());  // unknown after a brain restart: every memory goes in as context
       await c.mcpReady(codexId);
-      if (egCtx) refreshed = `Refreshed just now; this replaces any earlier Engram profile and skills list.\n\n${engramBlock(getSetting("driver_name", "the driver"), egCtx)}`;
+      if (eg && egCtx) refreshed = `Refreshed just now; this replaces any earlier Engram profile and skills list.\n\n${engramBlock(getSetting("driver_name", "the driver"), egCtx, b.engram_scope)}`;
     } else if (!c.loaded.has(codexId)) {
       c.mcp.delete(codexId);
       const r = await c.request("thread/resume", { threadId: codexId, ...common, sandbox: "danger-full-access", approvalPolicy: "untrusted", excludeTurns: true }, 120000);

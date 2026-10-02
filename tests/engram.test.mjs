@@ -313,6 +313,30 @@ test("a linked member's memories live in Engram: synced at thread start, remembe
   assert.equal(chiefView.body.memoryIn, "pitcrew");
 });
 
+test("linked members are told what to send to Engram; unlinked ones keep the plain remember rule", async () => {
+  const ctx = { profile: null, skills: "" };
+  const linked = C.instructions(C.getBot("bills"), [{ id: "m_1", text: "Gas is Indane" }], ctx);
+  assert.match(linked, /Keep Engram current, without being asked/);
+  assert.match(linked, /Pass valid_until \(YYYY-MM-DD\)/);
+  assert.match(linked, /pass the old memory's id to remember/);
+  assert.match(linked, /secrets \(passwords, OTPs, card numbers, full account numbers\)/);
+  assert.match(linked, /Don't propose episodes or files/);
+  assert.match(linked, /What you remember \(in Engram\)[^\n]*\n- \[m_1\] Gas is Indane/);
+  assert.doesNotMatch(linked, /filed under/, "Personal needs no scope line");
+  assert.doesNotMatch(linked, /When .* tells you a durable fact/);
+  const money = C.instructions({ ...C.getBot("bills"), engram_scope: "finance" }, [], ctx);
+  assert.match(money, /with scope finance\./); assert.match(money, /filed under Money \(scope finance\), which other crew members can't read/);
+  const plain = C.instructions(C.getBot("bills"), []);
+  assert.match(plain, /tells you a durable fact or preference worth keeping, call remember/);
+  assert.doesNotMatch(plain, /Engram/);
+  assert.ok(linked.length - plain.length < 2600, `the Engram rules stay small (${linked.length - plain.length} chars)`);
+
+  await G.remember(C.getBot("bills"), "Car insurance quote is 14,200", { validUntil: "2026-10-31" });
+  assert.equal(E.remembered.at(-1).valid_until, "2026-10-31");
+  await G.remember(C.getBot("bills"), "No expiry here");
+  assert.equal("valid_until" in E.remembered.at(-1), false);
+});
+
 test("hiring: the connections picked go once with the first link, read-only, and the scope comes from the form", async () => {
   const conns = await req("GET", "/api/engram/connections");
   assert.deepEqual(conns.body.connections.map((c) => [c.id, c.read]), [["google", 6]]);

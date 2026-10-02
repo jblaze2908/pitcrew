@@ -315,10 +315,10 @@ const memCache = new Map<string, Map<string, string>>();
 export const engramMemories = (botId: string) => { const m = memCache.get(botId); return m ? [...m].map(([id, text]) => ({ id, text })) : null; };
 
 // One POST per remember. In a thread that read untrusted content Engram holds it for review instead of accepting it.
-export async function remember(b: Bot, text: string, { id = null, threadId = null, by = "member" }: { id?: string | null; threadId?: string | null; by?: "member" | "driver" } = {}) {
+export async function remember(b: Bot, text: string, { id = null, threadId = null, by = "member", validUntil = null }: { id?: string | null; threadId?: string | null; by?: "member" | "driver"; validUntil?: string | null } = {}) {
   const cache = memCache.get(b.id), supersedes = id && cache?.has(id) ? id : null;
   const res = shape(RememberZ, await call("/link/memories", { method: "POST", body: { pitcrew_id: b.id, text, supersedes,
-    ...(threadId ? { ref: `pitcrew:thread:${threadId}` } : {}), untrusted: tainted(threadId), by } }), "memory result");
+    ...(threadId ? { ref: `pitcrew:thread:${threadId}` } : {}), ...(validUntil ? { valid_until: validUntil } : {}), untrusted: tainted(threadId), by } }), "memory result");
   if (res.status === "accepted" && cache) { if (supersedes) cache.delete(supersedes); cache.set(res.id, text); }
   else if (res.status !== "accepted") mirrorInbox().catch(() => {});
   audit(by === "driver" ? "driver" : b.id, `engram.remember.${res.status}`, { botId: b.id, id: res.id, threadId });
