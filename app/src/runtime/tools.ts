@@ -14,6 +14,8 @@ import { askCrew } from "./delegation.js";
 import { planTool } from "./plans.js";
 import { runtimeTool, type ToolCall } from "./browser.js";
 import { IST, say } from "./util.js";
+import { remember, forget } from "../engram.js";
+import { memberLinked } from "../engramStore.js";
 
 export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Promise<ToolResult> {
   const b = getBot(c.bot.id)!, a = p.arguments || {};
@@ -44,6 +46,19 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
     case "remember": {
       const text = String(a.text || "").trim().slice(0, 500);
       if (!text) return say("Nothing to remember", false);
+      if (memberLinked(b)) {
+        try {
+          const r = await remember(b, text, { id: a.id ? String(a.id) : null, threadId });
+          if (r.status === "accepted") {
+            if (r.replaced) c.mems.get(p.threadId)?.delete(r.replaced);
+            c.mems.get(p.threadId)?.set(r.id, text);
+            addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Remembered in Engram: ${text}` });
+            return say(`Saved in Engram as [${r.id}].`);
+          }
+          addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Sent to Engram for review: ${text}` });
+          return say(`Engram is holding this for ${getSetting("driver_name", "the driver")} to review${r.reasons.length ? ` (${r.reasons.join("; ")})` : ""}. It isn't a memory until they accept it.`);
+        } catch (e: any) { return say(`Couldn't save it to Engram: ${e.message}`, false); }
+      }
       const id = a.id && one("SELECT 1 FROM memory WHERE id=? AND bot_id=?", a.id, b.id) ? a.id : uid("me");
       if (id === a.id) run("UPDATE memory SET text=?, updated_at=? WHERE id=?", text, now(), id);
       else run("INSERT INTO memory(id,bot_id,text,source,created_at,updated_at) VALUES(?,?,?,?,?,?)", id, b.id, text, `thread:${threadId}`, now(), now());
@@ -52,6 +67,11 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
       return say(`Saved as [${id}].`);
     }
     case "forget": {
+      if (memberLinked(b)) {
+        try { await forget(b, String(a.id || "")); } catch (e: any) { return say(`Couldn't forget it in Engram: ${e.message}`, false); }
+        c.mems.get(p.threadId)?.delete(String(a.id));
+        return say("Forgotten in Engram.");
+      }
       run("UPDATE memory SET forgotten_at=? WHERE id=? AND bot_id=?", now(), String(a.id), b.id);
       c.mems.get(p.threadId)?.delete(String(a.id));
       return say("Forgotten.");

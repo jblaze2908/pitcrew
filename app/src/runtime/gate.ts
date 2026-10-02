@@ -14,6 +14,7 @@ import { siteStep } from "./sitegate.js";
 import { waitLease } from "./lease.js";
 import { pitStop } from "./pitstops.js";
 import { hostOf } from "./util.js";
+import { OUTBOUND, tainted } from "./taint.js";
 
 // How a gated call shows up if it becomes a pit stop.
 export interface PitInfo { kind: string; title: string; detail: Record<string, unknown> }
@@ -25,19 +26,22 @@ export async function gate(c: Brain, threadId: string, call: Call, pit: PitInfo)
   const site = await siteStep(b, threadId, call);
   if (!site) return false;
   const policy = site.policy!, sig = signature(call), pat = pattern(call), browser = call.kind === "mcp" && call.server === "browser";
+  // Untrusted content from Engram in this thread: no shortcut may stand in for the driver on an outbound effect.
+  const taint = tainted(threadId);
   // A fully allowed site skips jev, except for anything that looks like paying (checkout pages never count as full).
-  if (browser && site.full && call.effect !== "pay" && !/^(card|cvv)$/.test(secretKind(JSON.stringify(call.arguments?.grounded_elements || [])) || ""))
+  if (browser && site.full && !taint && call.effect !== "pay" && !/^(card|cvv)$/.test(secretKind(JSON.stringify(call.arguments?.grounded_elements || [])) || ""))
     return logDecision(threadId, b.id, { decision: "allow", effect: call.effect || "browse", reason: `${site.site!.domain} is fully allowed`, by: "site" }, call);
   const v = await jev(call, { policy, apiKey: getSecret("openrouter") || "missing" });
   if (v.decision === "block") { logDecision(threadId, b.id, v, call); addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Blocked by jev: ${v.reason}. Nothing ran.`, tone: "bad" }); return false; }
-  if (v.decision === "allow") { const lid = uid("jl"), ok = logDecision(threadId, b.id, v, call, { id: lid }); shadowVerify(lid, call, v, policy); return ok; }
+  const forced = taint && OUTBOUND.has(v.effect);
+  if (v.decision === "allow" && !forced) { const lid = uid("jl"), ok = logDecision(threadId, b.id, v, call, { id: lid }); shadowVerify(lid, call, v, policy); return ok; }
   // A standing approval covers repeats of the same action, but never money, deletion or sharing. Browser approvals
   // match only by their host-bearing pattern, so one granted on a.example never covers b.example; on a checkout page
   // nothing stands in for the driver on pay or send.
   const effect = v.effect === "unknown" ? "ask" : v.effect;
-  const standing = site.checkout && ["pay", "send"].includes(effect) ? null : standingRule(b.id, threadId, call, effect);
+  const standing = forced || (site.checkout && ["pay", "send"].includes(effect)) ? null : standingRule(b.id, threadId, call, effect);
   if (standing && !["pay", "delete", "share"].includes(v.effect)) return logDecision(threadId, b.id, v, call, { decision: "allow", by: `rule:${standing.label}`, source: "standing" });
-  const learned = site.checkout ? null : learnedTrust(b, pat, v);
+  const learned = forced || site.checkout ? null : learnedTrust(b, pat, v);
   if (learned) return logDecision(threadId, b.id, v, call, { decision: "allow", by: `learned:${pat} (${learned.approvals} approvals)`, source: "learned" });
   // Logged before the pit stop opens, so decide() always finds the label row to fill in.
   const id = uid("ps");
@@ -46,7 +50,8 @@ export async function gate(c: Brain, threadId: string, call: Call, pit: PitInfo)
   const sensitive = ["signin", "pay", "send", "share"].includes(v.effect) || !!secretKind((call.arguments?.grounded_elements || []).map((e) => e.element).join(" "));
   const verify = site.site?.domain && (sensitive || site.checkout) ? ` · verify: ${siteTag(site.site)}${site.checkout ? ` · checkout page (${site.checkout})` : ""}` : "";
   const siteDetail = site.site?.domain ? { site: { domain: site.site.domain, host: site.site.host, https: site.site.https, checkout: site.checkout || null } } : {};
-  const decision = await pitStop({ id, botId: b.id, threadId, kind: pit.kind, effect, title: `${pit.title}${verify}`, detail: { ...pit.detail, ...siteDetail, signature: sig, pattern: pat }, jev: v });
+  const untrusted = forced ? { untrusted: "Engram returned untrusted content to this thread in the last 10 minutes" } : {};
+  const decision = await pitStop({ id, botId: b.id, threadId, kind: pit.kind, effect, title: `${pit.title}${verify}${forced ? " · after untrusted content" : ""}`, detail: { ...pit.detail, ...siteDetail, ...untrusted, signature: sig, pattern: pat }, jev: v });
   return decision === "approved";
 }
 

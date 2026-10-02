@@ -5,7 +5,7 @@ FROM ${COMPUTER_IMAGE}
 USER root
 RUN mkdir -p /opt/pitcrew/brain /brains /auth /run/pitcrew && chown crew /brains
 COPY llm-proxy.mjs exec-gateway.mjs main.mjs /opt/pitcrew/brain/
-# App-servers run the native Codex binary directly (computer.mjs), with the env npm's node wrapper would have set.
+# App-servers run the native Codex binary directly (app/src/computer.ts), with the env npm's node wrapper would have set.
 RUN chmod -R a+rX /opt/pitcrew/brain \
  && ln -s "$(npm root -g)/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex" /opt/pitcrew/brain/codex \
  && test -x /opt/pitcrew/brain/codex && test "$(npm root -g)" = /usr/local/lib/node_modules

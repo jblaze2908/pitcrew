@@ -63,7 +63,7 @@ fi
 # Build everything before touching the running stack, so a broken build never takes the app down.
 if [[ "$computer_tag" == "$short" ]]; then docker build -q -t "pitcrew-computer:$short" computer >/dev/null || reject "computer image build failed"; fi
 if [[ "$code_tag" == "$short" ]]; then docker build -q -t "pitcrew-px0:$short" px0 >/dev/null || reject "code view image build failed"; fi
-docker build -q --build-arg COMPUTER_IMAGE="pitcrew-computer:$computer_tag" -t "pitcrew-brain:$short" brain >/dev/null || reject "brain image build failed"
+docker build -q --build-arg COMPUTER_IMAGE="pitcrew-computer:$computer_tag" -t "pitcrew-brain:$short" harness >/dev/null || reject "brain image build failed"
 docker build -q --build-arg COMPUTER_IMAGE="pitcrew-computer:$computer_tag" -t "pitcrew-app:$short" app >/dev/null || reject "app image build failed"
 
 # SQLite snapshot before the new code boots (schema changes run at boot and a rollback doesn't undo them).

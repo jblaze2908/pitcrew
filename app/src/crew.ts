@@ -1,20 +1,22 @@
 // Crew members: the Crew Chief is built in; everyone else is hired through a HIRE pit stop.
 // Personality is voice only: it never touches permissions, caps or jev.
-import { one, all, run, now, uid, json, getSetting, audit } from "./db.js";
+import { one, all, run, now, uid, json, getSetting, setSetting, audit } from "./db.js";
 import { DEFAULT_POLICY } from "./jev.js";
 import { DEFAULT_MODEL } from "./providers.js";
 import { catalogueDoc } from "./surfaces.js";
-import type { Bot, Hue, Shape, Personality, ProviderId } from "../shared/types.js";
+import type { Bot, EngramScope, Hue, Shape, Personality, ProviderId } from "../shared/types.js";
 import type { BotRow } from "./models.js";
 
 export const HUES: Hue[] = ["c1", "c2", "c3", "c5", "c6"];
 // The computer's loopback-only, read-only view of /bot/work (computer/files.mjs, started by desktop.sh).
 export const FILES_URL = "http://127.0.0.1:7780/";
 export const SHAPES: Shape[] = ["square", "round", "blob"];
+export const ENGRAM_SCOPES: EngramScope[] = ["personal", "finance", "health"];
+const CONN_ID = /^[a-z0-9][a-z0-9-]{0,11}$/;
 // New crew members start with read/draft allowed; sign-in, pay and send ask first; delete and share always ask.
 export const STARTING_POLICY = { ...DEFAULT_POLICY };
 
-const row = (b: BotRow | undefined): Bot | undefined => b && ({ ...b, personality: json(b.personality, {}), policy: { ...STARTING_POLICY, ...json(b.policy, {}) }, mcp: json(b.mcp, []), archived: !!b.archived, private: !!b.private } as Bot);
+const row = (b: BotRow | undefined): Bot | undefined => b && ({ ...b, personality: json(b.personality, {}), policy: { ...STARTING_POLICY, ...json(b.policy, {}) }, mcp: json(b.mcp, []), archived: !!b.archived, private: !!b.private, engram_scope: ENGRAM_SCOPES.includes(b.engram_scope as EngramScope) ? b.engram_scope : "personal" } as Bot);
 export const getBot = (id: string | null | undefined) => row(one<BotRow>("SELECT * FROM bots WHERE id=?", id));
 export const listBots = () => all<BotRow>("SELECT * FROM bots WHERE archived=0 ORDER BY kind='chief' DESC, created_at").map(row) as Bot[];
 
@@ -37,6 +39,8 @@ export type HireSpec = Record<string, any>;
 export interface Spec {
   name: string; job: string; hue: Hue; shape: Shape; personality: Personality; provider: ProviderId; model: string;
   weekly_cap_usd: number; schedule: { spec: string; prompt: string } | null; reason: string;
+  // Engram: where its memories live, and the connections it may read (granted once, when its Engram agent is made).
+  engram_scope: EngramScope; engram_connections: string[];
 }
 export function normaliseSpec(s: HireSpec = {}): Spec {
   const provider = (["openrouter", "aigateway", "openai"].includes(s.provider) ? s.provider : getSetting("default_provider", "openrouter")) as ProviderId;
@@ -55,6 +59,8 @@ export function normaliseSpec(s: HireSpec = {}): Spec {
     weekly_cap_usd: Math.min(500, Math.max(0, Number.isFinite(+s.weekly_cap_usd) ? +s.weekly_cap_usd : 5)),
     schedule: s.schedule && typeof s.schedule === "object" ? { spec: text(s.schedule.spec, 60), prompt: text(s.schedule.prompt, 1000) } : null,
     reason: text(s.reason, 600),
+    engram_scope: ENGRAM_SCOPES.includes(s.engram_scope) ? s.engram_scope : "personal",
+    engram_connections: (Array.isArray(s.engram_connections) ? s.engram_connections : []).filter((c: unknown) => typeof c === "string" && CONN_ID.test(c)).slice(0, 20),
   };
 }
 
@@ -62,8 +68,10 @@ export function createBot(spec: Spec) {
   const base = spec.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24) || "crew";
   let id = base, i = 2;
   while (one("SELECT 1 FROM bots WHERE id=?", id)) id = `${base}-${i++}`;
-  run(`INSERT INTO bots(id,name,job,kind,hue,shape,personality,provider,model,weekly_cap_usd,policy,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-    id, spec.name, spec.job, "specialist", spec.hue, spec.shape, JSON.stringify(spec.personality), spec.provider, spec.model, spec.weekly_cap_usd, "{}", now());
+  run(`INSERT INTO bots(id,name,job,kind,hue,shape,personality,provider,model,weekly_cap_usd,policy,engram_scope,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    id, spec.name, spec.job, "specialist", spec.hue, spec.shape, JSON.stringify(spec.personality), spec.provider, spec.model, spec.weekly_cap_usd, "{}", spec.engram_scope, now());
+  // Read by the member's first Engram link (engram.ts linkMember), then dropped.
+  if (spec.engram_connections.length) setSetting(`engram_hire:${id}`, JSON.stringify(spec.engram_connections));
   run("INSERT INTO threads(id,bot_id,title,pinned,created_at,updated_at) VALUES(?,?,?,?,?,?)", uid("th"), id, `${spec.name} · pinned`, 1, now(), now());
   audit("driver", "crew.hired", { id, name: spec.name, provider: spec.provider, model: spec.model });
   return getBot(id)!;
@@ -80,6 +88,7 @@ export function updateBot(id: string, patch: HireSpec) {
   run("UPDATE bots SET name=?,job=?,hue=?,shape=?,personality=?,provider=?,model=?,weekly_cap_usd=?,policy=?,mcp=? WHERE id=?",
     b.kind === "chief" ? b.name : n.name, n.job, n.hue, n.shape, JSON.stringify(n.personality), n.provider, n.model, n.weekly_cap_usd, JSON.stringify(policy), JSON.stringify(mcp), id);
   if (patch.private !== undefined && b.kind !== "chief") run("UPDATE bots SET private=? WHERE id=?", patch.private ? 1 : 0, id);
+  if (patch.engram_scope !== undefined) run("UPDATE bots SET engram_scope=? WHERE id=?", n.engram_scope, id);
   audit("driver", "crew.updated", { id, fields: Object.keys(patch) });
   return getBot(id);
 }
@@ -232,7 +241,8 @@ export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { br
       name: { type: "string" }, job: { type: "string" }, reason: { type: "string", description: "Why: the recurring work you noticed" },
       hue: { type: "string", enum: HUES }, shape: { type: "string", enum: SHAPES },
       personality: { type: "object", properties: { role: { type: "string" }, warmth: { type: "integer" }, talk: { type: "integer" }, humour: { type: "integer" }, quirks: { type: "array", items: { type: "string" } }, signoff: { type: "string" } } },
-      weekly_cap_usd: { type: "number" }, schedule: { type: "object", properties: { spec: { type: "string" }, prompt: { type: "string" } } } },
+      weekly_cap_usd: { type: "number" }, schedule: { type: "object", properties: { spec: { type: "string" }, prompt: { type: "string" } } },
+      engram_scope: { type: "string", enum: ENGRAM_SCOPES, description: "Where its memories live in Engram: finance for money work, health for health, else personal" } },
       required: ["name", "job", "reason"] } });
   return tools;
 }

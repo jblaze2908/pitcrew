@@ -21,7 +21,10 @@ export interface Bot {
   provider: ProviderId; model: string; fallback: string; weekly_cap_usd: number;
   policy: Record<string, Decision>; mcp: McpConnector[];
   archived: boolean; private: boolean; created_at: number;
+  /** Where its memories live in Engram; a private member needs finance or health so other members can't read them. */
+  engram_scope: EngramScope;
 }
+export type EngramScope = "personal" | "finance" | "health";
 export interface ThreadSummary { id: string; title: string; status: ThreadStatus; created_at: number; updated_at: number; pinned: number }
 /** A crew member as /api/state shows it: the row plus live view-model fields. */
 export interface BotCard extends Bot {
@@ -111,7 +114,9 @@ export interface Schedule { id: string; bot_id: string; thread_id: string | null
 export interface Rule { id: string; bot_id: string; bot_name?: string; label: string; effect: string; created_at: number }
 export interface Learned { id: number; bot_id: string; bot_name?: string; label: string; effect: string; streak: number; need: number; approvals: number; denials: number }
 /** GET /api/bots/:id */
-export interface BotDetail { bot: BotCard; memory: Memory[]; schedules: Schedule[]; rules: Rule[]; learned: Learned[] }
+export interface BotDetail { bot: BotCard; memory: Memory[]; memoryIn: "pitcrew" | "engram"; memoryError: string | null; schedules: Schedule[]; rules: Rule[]; learned: Learned[] }
+/** A connection a new member could read through Engram (GET /api/engram/connections). */
+export interface EngramConnection { id: string; name: string; status: "ok" | "warn" | "signal"; detail: string; read: number; write: number }
 /** A row of BotCard.threads, or of GET /api/bots/:id/threads?q= (which adds archived and a snippet). */
 export interface ThreadRow { id: string; title: string; status?: ThreadStatus; pinned?: number; archived?: number; snippet?: string; created_at: number; updated_at: number }
 
@@ -184,7 +189,7 @@ export interface EngramStatus {
   linked: boolean; url: string; defaultUrl: string; updatedAt: number | null;
   test: { ok: boolean; detail: string; at: number } | null;
   poll: { ok: boolean; detail: string; at: number } | null;
-  members: { id: string; name: string; hue: Hue; shape: Shape; private: boolean; linked: boolean; revoked: boolean; agent: string | null; prefix: string | null; at: number | null }[];
+  members: { id: string; name: string; hue: Hue; shape: Shape; private: boolean; scope: EngramScope; eligible: boolean; linked: boolean; revoked: boolean; agent: string | null; prefix: string | null; at: number | null }[];
   sent: { memories: number; files: number };
   migration: EngramMigration;
 }
