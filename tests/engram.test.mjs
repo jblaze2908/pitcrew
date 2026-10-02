@@ -12,7 +12,7 @@ Object.assign(process.env, { PITCREW_ROOT: root, PITCREW_DATA: `${root}/data`, P
 
 // ---------- the stub ----------
 const LINK = "link-token-0123456789abcdef";
-const E = { proposals: [], skills: [], calls: [], revoked: new Set(), decisions: [], members: [], memImports: [], artImports: [], n: 0,
+const E = { proposals: [], skills: [], calls: [], revoked: new Set(), decisions: [], answers: {}, members: [], memImports: [], artImports: [], n: 0,
   mems: {}, remembered: [], forgot: [], episodes: [], published: [], hold: false, connections: [{ id: "google", name: "Google", status: "ok", detail: "Fine", read: 6, write: 4 }],
   digest: { week: "2026-W40", from: "2026-09-28", to: "2026-10-04", built_at: Date.now(), waiting: { open: 3, held: 1 },
     runningOut: [{ date: "2026-10-20", text: "Passport renewal window", area: "home" }], changed: [{ text: "Rent went up", detail: "", tone: "bad" }],
@@ -30,7 +30,7 @@ const srv = createServer(async (req, res) => {
   if (req.headers.authorization !== `Bearer ${LINK}`) return send(401, { error: "Missing or invalid token" });
   const decided = /^\/link\/inbox\/([\w-]+)$/.exec(url.pathname);
   if (req.method === "GET" && url.pathname === "/link/inbox") return send(200, { proposals: E.proposals, at: Date.now() });
-  if (req.method === "POST" && decided) { E.decisions.push({ id: decided[1], ...body }); E.proposals = E.proposals.filter((p) => p.id !== decided[1]); return send(200, { ok: true }); }
+  if (req.method === "POST" && decided) { E.decisions.push({ id: decided[1], ...body }); E.proposals = E.proposals.filter((p) => p.id !== decided[1]); return send(200, E.answers[decided[1]] ?? { ok: true }); }
   if (req.method === "GET" && url.pathname === "/link/digest") return send(200, E.digest);
   if (req.method === "POST" && url.pathname === "/link/members") {
     if (E.revoked.has(body.pitcrew_id)) return send(409, { error: "This member was revoked" });
@@ -357,6 +357,22 @@ test("publish_file: a workspace file becomes a private artifact; updates by id; 
   await assert.rejects(G.publishFile(C.getBot("bills"), "out/big.bin"), /over 10 MB/);
   const names = (o) => C.dynamicTools(C.getBot("bills"), undefined, o).map((t) => t.name);
   assert.ok(names({ engram: true }).includes("publish_file")); assert.ok(!names({}).includes("publish_file"), "only linked members get it");
+});
+
+test("approving a public link keeps the link on the pit stop and tells the member's thread", async () => {
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_share','bills','Goa',?,?)", now(), now());
+  const share = proposal("p_sh", { kind: "share", agent: "Bills", title: "Make public: Goa comparison", data: { artifact_id: "art_1" }, source: { kind: "agent", label: "pitcrew:Bills", ref: "pitcrew:thread:th_share" } });
+  E.proposals.push(share);
+  E.answers.p_sh = { ...share, status: "accepted", public_url: "https://artifacts.example/s/abc" };
+  await G.mirrorInbox();
+  const r = await req("POST", "/api/pitstops/eg_p_sh/decide", { decision: "approve" });
+  assert.deepEqual([r.body.status, r.body.note, r.body.detail.public_url], ["approved", "Public link made", "https://artifacts.example/s/abc"]);
+  const ev = all("SELECT data FROM events WHERE thread_id='th_share'").map((e) => JSON.parse(e.data).text);
+  assert.deepEqual(ev, ["Public link for “Goa comparison”: https://artifacts.example/s/abc"]);
+  E.proposals.push(proposal("p_m")); E.answers.p_m = { ok: true, public_url: "https://evil.example/x" };
+  await G.mirrorInbox();
+  const m = await req("POST", "/api/pitstops/eg_p_m/decide", { decision: "approve" });
+  assert.deepEqual([m.body.note, m.body.detail.public_url], ["Accepted", undefined], "only a share answer carries a link");
 });
 
 test("hiring: the connections picked go once with the first link, read-only, and the scope comes from the form", async () => {

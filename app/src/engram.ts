@@ -12,6 +12,7 @@ import { getBot, listBots } from "./crew.js";
 import { botDir, allBrains } from "./computer.js";
 import { DEFAULT_URL, LINK_SECRET, memberSecret, engramUrl, linked, normaliseUrl, engramEligible, memberLinked } from "./engramStore.js";
 import { bus } from "./runtime/bus.js";
+import { addEvent } from "./runtime/threads.js";
 import { active } from "./runtime/state.js";
 import { tainted } from "./runtime/taint.js";
 import type { Bot, EngramDecision, EngramDigest, EngramMigration, EngramProposal, EngramScope, EngramStatus, PitStop } from "../shared/types.js";
@@ -86,6 +87,8 @@ const ConnListZ = z.object({ connections: list(z.object({ id: ConnZ.shape.id, na
   read: z.number().int().nonnegative().catch(0), write: z.number().int().nonnegative().catch(0) }), 50) });
 // What /link/artifacts answers: the artifact, its version, the private link and the public one once shared.
 const Url = z.string().max(400).regex(/^https:\/\/[^\s"<>]+$/);
+// What deciding a share answers: Engram's proposal plus the public link it made.
+const DecidedShareZ = z.object({ kind: z.literal("share"), public_url: Url, source: z.object({ ref: z.string().max(200).nullable().optional() }).nullable().optional() });
 const PublishZ = z.object({ id: Id, version: z.number().int().positive(), url: Url, public_url: Url.nullable().catch(null), status: z.enum(["published", "share_pending"]) });
 
 // ---------- settings ----------
@@ -250,10 +253,18 @@ export async function decideProposal(id: string, decision: EngramDecision) {
   if (!ps) throw httpErr(404, "No such pit stop");
   if (ps.status !== "pending") return pitView(ps);
   const pid = String(json(ps.detail, {}).proposal?.id || "");
-  try { await call(`/link/inbox/${encodeURIComponent(pid)}`, { method: "POST", body: { decision } }); }
+  let res: unknown;
+  try { res = await call(`/link/inbox/${encodeURIComponent(pid)}`, { method: "POST", body: { decision } }); }
   catch (e: any) { if (e.upstream === 404 || e.upstream === 409) { closePit(id, GONE); return pitView(one<PitstopRow>("SELECT * FROM pitstops WHERE id=?", id)!); } throw e; }
-  const note = decision === "accept" ? "Accepted" : decision === "keep" ? "Kept current" : "Rejected";
-  run("UPDATE pitstops SET status=?, scope='once', note=?, decided_at=? WHERE id=? AND status='pending'", decision === "accept" ? "approved" : "denied", note, now(), id);
+  const shared = decision === "accept" ? DecidedShareZ.safeParse(res) : null;
+  const publicUrl = shared?.success ? shared.data.public_url : null;
+  const note = publicUrl ? "Public link made" : decision === "accept" ? "Accepted" : decision === "keep" ? "Kept current" : "Rejected";
+  const detail = publicUrl ? JSON.stringify({ ...json(ps.detail, {}), public_url: publicUrl }) : ps.detail;
+  run("UPDATE pitstops SET status=?, scope='once', note=?, detail=?, decided_at=? WHERE id=? AND status='pending'", decision === "accept" ? "approved" : "denied", note, detail, now(), id);
+  // The member that asked learns the link in its thread, so it can hand it on.
+  const th = shared?.success && /^pitcrew:thread:(th_[\w-]{1,40})$/.exec(shared.data.source?.ref || "")?.[1];
+  if (publicUrl && th && one("SELECT 1 FROM threads WHERE id=?", th))
+    addEvent(th, null, "system", { text: `Public link for “${clean(ps.title.replace(/^Make public: /, ""), 200)}”: ${publicUrl}` });
   audit("driver", `engram.${decision}`, { id, title: ps.title });
   emitPit(id);
   return pitView(one<PitstopRow>("SELECT * FROM pitstops WHERE id=?", id)!);
