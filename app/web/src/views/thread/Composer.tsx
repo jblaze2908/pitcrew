@@ -52,7 +52,7 @@ export function Composer({ threadId, name, running }: { threadId: string; name: 
         <div className="bar">
           <button className="attach" title="Attach files or paste an image" onClick={() => file.current?.click()}>+ Attach</button>
           <input ref={file} type="file" className="hidden" multiple onChange={async (e) => { const input = e.currentTarget; await upload([...(input.files || [])]); input.value = ""; }} />
-          <span className="small faint hint">Enter to send · Shift+Enter for a new line</span>
+          <span className="small faint hint">Enter to send · Shift+Enter for a new line · /refresh reloads tools and skills</span>
           <span style={{ flex: 1 }} />
           {running && <Seg options={[["steer", "Steer now"], ["queue", "Queue after"]] as const} value={mode} onChange={setMode} />}
           {running && <button className="pc-pill o s" onClick={() => api.post(`/api/threads/${threadId}/interrupt`)}>Stop</button>}

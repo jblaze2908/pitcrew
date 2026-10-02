@@ -211,6 +211,8 @@ test("thread start: the Chief gets Engram's profile, every linked member its ski
   assert.equal((await G.threadContext(C.getBot("bills"))).profile, null, "only the Chief gets the profile");
   await G.threadContext(C.getBot("chief"));
   assert.equal(calls("/link/sync") - before, 2, "one sync per member per 5 minutes");
+  await G.threadContext(C.getBot("chief"), true);
+  assert.equal(calls("/link/sync") - before, 3, "a new thread or /refresh always syncs");
   assert.equal(await G.threadContext(C.getBot("diary")), null);
 });
 

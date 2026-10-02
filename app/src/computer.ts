@@ -164,7 +164,30 @@ export class Brain {
   bot: Bot; hooks: BrainHooks; rpc: Rpc | null = null; ready: Promise<Brain> | null = null; loaded = new Set<string>(); lastActive = Date.now();
   // mems: codex thread id → Map(memory id → text) that thread has been told, so a turn can pass only what changed.
   mems = new Map<string, Map<string, string>>();
+  // Codex connects MCP servers per thread, after thread/start or resume returns; a turn sent before they're ready runs on
+  // the tool list from an earlier connection (measured 2026-10-02, codex 0.156.1). mcp: codex thread id → server → status.
+  servers: string[] = []; mcp = new Map<string, Map<string, string>>(); #mcpWaiters = new Set<() => void>();
   constructor(bot: Bot, hooks: BrainHooks) { this.bot = bot; this.hooks = hooks; }
+  // Resolves once every MCP server of the thread has left "starting" (ready or failed), or after ms. Per thread start/resume.
+  mcpReady(codexId: string, ms = 12000) {
+    const done = () => { const s = this.mcp.get(codexId); return !this.up || this.servers.every((n) => s?.has(n) && s.get(n) !== "starting"); };
+    if (done()) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const check = () => { if (done()) finish(); };
+      const finish = () => { clearTimeout(t); this.#mcpWaiters.delete(check); resolve(); };
+      const t = setTimeout(finish, ms); this.#mcpWaiters.add(check);
+    });
+  }
+  noteMcp(p: any) {
+    if (typeof p?.threadId !== "string" || typeof p?.name !== "string") return;
+    (this.mcp.get(p.threadId) || this.mcp.set(p.threadId, new Map()).get(p.threadId)!).set(p.name, String(p.status));
+    for (const w of [...this.#mcpWaiters]) w();
+  }
+  // Drops one thread from this brain so its next resume reconnects its MCP servers; other threads keep theirs.
+  async unload(codexId: string) {
+    if (this.loaded.has(codexId) && this.up) await this.request("thread/unsubscribe", { threadId: codexId });
+    this.loaded.delete(codexId); this.mems.delete(codexId); this.mcp.delete(codexId);
+  }
   get up() { return !!this.rpc && !this.rpc.closed; }
   ensure() {
     this.lastActive = Date.now();
@@ -175,7 +198,7 @@ export class Brain {
   prewarm() { if (!this.ready) this.ensure().catch(() => {}); }
   async #start() {
     const b = this.bot, uid = ensureBrainDir(b), servers = brainMcp(b);
-    ensureDirs(b.id); writeBrainConfig(b, servers); linkChatgpt(b.id);
+    ensureDirs(b.id); writeBrainConfig(b, servers); linkChatgpt(b.id); this.servers = servers.map((m) => m.name);
     const env: Record<string, string | undefined> = { PATH: process.env.PATH }, envArgs = ["-e", `CODEX_HOME=/brains/${b.id}`, "-e", `HOME=/brains/${b.id}/home`];
     const put = (k: string, v: string | null) => { if (v) { env[k] = v; envArgs.push("-e", k); } };
     put("OPENROUTER_API_KEY", getSecret("openrouter")); put("AI_GATEWAY_API_KEY", getSecret("aigateway"));
@@ -186,8 +209,8 @@ export class Brain {
     this.rpc = new Rpc(proc, {
       name: "brain",
       onRequest: (m, p) => { this.lastActive = Date.now(); return this.hooks.onRequest(this, m, p); },
-      onNotify: (m, p) => { this.lastActive = Date.now(); this.hooks.onNotify(this, m, p); },
-      onExit: (code, tail) => { this.rpc = null; this.ready = null; this.loaded.clear(); this.mems.clear(); reclaimChatgpt(b.id); this.hooks.onBrainExit?.(this, code, tail); },
+      onNotify: (m, p) => { this.lastActive = Date.now(); if (m === "mcpServer/startupStatus/updated") this.noteMcp(p); this.hooks.onNotify(this, m, p); },
+      onExit: (code, tail) => { this.rpc = null; this.ready = null; this.loaded.clear(); this.mems.clear(); this.mcp.clear(); for (const w of [...this.#mcpWaiters]) w(); reclaimChatgpt(b.id); this.hooks.onBrainExit?.(this, code, tail); },
     });
     await this.rpc.request("initialize", { clientInfo: { name: "pitcrew", title: "Pitcrew", version: "1.1" }, capabilities: { experimentalApi: true, requestAttestation: false } }, 60000);
     this.rpc.notify("initialized", {});

@@ -1,7 +1,7 @@
 // Turns on a member's brain: sending a message, starting and finishing a run, steering, interrupting, compacting.
 import { readFileSync } from "node:fs";
 import { one, all, run, now, uid, json, getSetting } from "../db.js";
-import { getBot, instructions, dynamicTools } from "../crew.js";
+import { getBot, instructions, dynamicTools, engramBlock } from "../crew.js";
 import { botDir, toolManifest } from "../computer.js";
 import { providerReady, estimateCost } from "../providers.js";
 import { snapshot, changes } from "../snapshot.js";
@@ -22,6 +22,7 @@ export async function sendMessage(threadId: string, { text: given, attachments =
   if (!t) throw Object.assign(new Error("No such thread"), { status: 404 });
   const text = String(given || "").slice(0, 20000);
   if (!text.trim() && !attachments.length) throw Object.assign(new Error("Say something"), { status: 400 });
+  if (trigger === "driver" && text.trim() === "/refresh" && !attachments.length) return refresh(threadId);
   nameThread(t, text, attachments);
   addEvent(threadId, null, "user", { text, attachments, via: trigger, ...(display ? { display } : {}) });
   const a = active.get(threadId);
@@ -77,17 +78,37 @@ export async function startTurn(threadId: string, text: string, attachments: str
     await c.ensure();
     const mems = all<{ id: string; text: string }>("SELECT id,text FROM memory WHERE bot_id=? AND forgotten_at IS NULL ORDER BY created_at LIMIT 60", b.id);
     let codexId = t.codex_id;
-    // Engram context only where instructions are sent (start/resume), so a normal turn makes no Engram call.
-    const eg = !codexId || !c.loaded.has(codexId) ? await threadContext(b) : null;
-    const common = { model: b.model, modelProvider: b.provider, cwd: "/bot/work", developerInstructions: instructions(b, mems, eg && { profile: eg.profile, skills: skillsIndex(eg.skills) }) };
+    const refreshNow = refreshing.delete(threadId) && !!codexId;
+    // Engram context only where instructions are sent (start/resume) or on /refresh, so a normal turn makes no Engram
+    // call. A new thread or a /refresh always syncs: one GET per thread start, not per turn.
+    const eg = !codexId || !c.loaded.has(codexId) || refreshNow ? await threadContext(b, !codexId || refreshNow) : null;
+    const egCtx = eg && { profile: eg.profile, skills: skillsIndex(eg.skills) };
+    const common = { model: b.model, modelProvider: b.provider, cwd: "/bot/work", developerInstructions: instructions(b, mems, egCtx) };
+    let refreshed: string | null = null;
     if (!codexId) {
       const st = await c.request("thread/start", { ...common, sandbox: "danger-full-access", approvalPolicy: "untrusted", environments: ENVS, dynamicTools: dynamicTools(b, await toolManifest()) }, 120000);
       codexId = st.thread.id as string;
       run("UPDATE threads SET codex_id=? WHERE id=?", codexId, threadId);
       c.loaded.add(codexId);
+      await c.mcpReady(codexId);
+    } else if (refreshNow) {
+      // A fork is the only per-thread way to reconnect MCP: unsubscribe + resume reuses the loaded session's tools. It keeps
+      // the history, dynamic tools and the original instructions (new ones are ignored), so Engram's current skills and
+      // profile go in as this turn's context (all measured 2026-10-02, codex 0.156.1). The old thread is never resumed.
+      const old = codexId, seen = c.mems.get(old);
+      const f = await c.request("thread/fork", { threadId: old, model: b.model, modelProvider: b.provider, cwd: "/bot/work", sandbox: "danger-full-access", approvalPolicy: "untrusted", excludeTurns: true }, 120000);
+      codexId = f.thread.id as string;
+      run("UPDATE threads SET codex_id=? WHERE id=?", codexId, threadId);
+      await c.unload(old); byCodex.delete(old);
+      c.loaded.add(codexId);
+      c.mems.set(codexId, seen ?? new Map());  // unknown after a brain restart: every memory goes in as context
+      await c.mcpReady(codexId);
+      if (egCtx) refreshed = `Refreshed just now; this replaces any earlier Engram profile and skills list.\n\n${engramBlock(getSetting("driver_name", "the driver"), egCtx)}`;
     } else if (!c.loaded.has(codexId)) {
+      c.mcp.delete(codexId);
       await c.request("thread/resume", { threadId: codexId, ...common, sandbox: "danger-full-access", approvalPolicy: "untrusted", excludeTurns: true }, 120000);
       c.loaded.add(codexId);
+      await c.mcpReady(codexId);
     }
     // Developer instructions reach Codex only at start/resume (which just sent the current list); memories saved since
     // go in as turn context, persisted in the thread's history.
@@ -98,9 +119,10 @@ export async function startTurn(threadId: string, text: string, attachments: str
     if (a0) try { a0.snap = snapshot(b.id); } catch {}
     const carry = getThread(threadId)!.carry;
     if (carry) run("UPDATE threads SET carry=NULL WHERE id=?", threadId);
+    const ctx = { ...(memDelta ? { pitcrew_memory: { kind: "application", value: memDelta } } : {}), ...(refreshed ? { pitcrew_engram: { kind: "application", value: refreshed } } : {}) };
     // Every turn names the computer environment, so commands never run in the brain itself.
     const r = await c.request("turn/start", { threadId: codexId, environments: ENVS, input: toInput(b.id, carry ? `${carry}\n\n---\n\n${text}` : text, attachments), responsesapiClientMetadata: { pitcrew_turn: turnId },
-      ...(memDelta ? { additionalContext: { pitcrew_memory: { kind: "application", value: memDelta } } } : {}) }, 120000);
+      ...(Object.keys(ctx).length ? { additionalContext: ctx } : {}) }, 120000);
     if (memDelta) c.mems.set(codexId, memMap(mems));
     const a = active.get(threadId);
     if (a) a.codexTurnId = r.turn.id;
@@ -174,6 +196,15 @@ export async function interrupt(threadId: string) {
   if (a.codexTurnId && c.up) await c.request("turn/interrupt", { threadId: t.codex_id, turnId: a.codexTurnId }).catch(() => {});
   else finishTurn(threadId, "interrupted");
   return true;
+}
+// /refresh: the thread's next message runs on a fork with fresh MCP tools and Engram's current skills and profile. Only
+// on request, never automatically: changed tools or context change the prompt prefix, so that turn misses the cache.
+const refreshing = new Set<string>();
+export function refresh(threadId: string) {
+  if (active.has(threadId)) throw Object.assign(new Error("Wait for the run to finish, then /refresh"), { status: 409 });
+  refreshing.add(threadId);
+  addEvent(threadId, null, "system", { text: "Tools and skills reload with your next message." });
+  return { refreshed: true };
 }
 export async function compact(threadId: string) {
   const t = getThread(threadId);
