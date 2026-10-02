@@ -35,6 +35,8 @@ function layout(events: ThreadEvent[], ctx: EventCtx): Item[] {
   let group: { turn: string | null; steps: ThreadEvent[] } | null = null;
   let lastAgent = false;  // the last drawn item, steps aside, was this member's message
   for (const e of events) {
+    // A script's output is drawn inside its script step (Steps results), never as a row of its own.
+    if (e.kind === "tool" && e.data.type === "scriptResult") continue;
     if (e.kind === "tool") {
       const last = items[items.length - 1];
       if (group && last && "steps" in last && last.steps === group.steps && group.turn === e.turn_id) group.steps.push(e);
@@ -142,6 +144,7 @@ function LiveThread({ d }: { d: ThreadView }) {
     for (const e of events) if (e.kind === "plan" || e.kind === "delegation") m.set(e.data.id, e.data);
     return m;
   }, [events]);
+  const scriptResults = useMemo(() => new Map(events.filter((e) => e.kind === "tool" && e.data.type === "scriptResult").map((e) => [e.data.callId as string, e.data])), [events]);
   const evCtx: EventCtx = {
     b, fromName, pits, latest,
     surface: (sid) => { const s = surfaces[sid]; return s ? <ThreadSurface s={s} /> : null; },
@@ -157,7 +160,7 @@ function LiveThread({ d }: { d: ThreadView }) {
         <header><Face b={b} size="sm" /><Title id={id} title={title} onRenamed={setTitle} />{origin ? <OriginChip origin={origin} threadId={id} b={b} /> : <span className="pc-chip">{b.name}</span>}</header>
         <div ref={stream} className="stream">
           {items.map((it) => "steps" in it
-            ? <Steps key={it.key} events={it.steps} closeSignal={closeSteps} initialOpen={it.key === openOnLoad.current || liveIds.current.has(it.steps[0].id)} />
+            ? <Steps key={it.key} events={it.steps} results={scriptResults} closeSignal={closeSteps} initialOpen={it.key === openOnLoad.current || liveIds.current.has(it.steps[0].id)} />
             : <Fragment key={it.key}>{it.el}</Fragment>)}
           {streaming && <div className={`msg bot${endsWithAgent(events) ? " cont" : ""}`}>{endsWithAgent(events) ? <span /> : <Face b={b} size="sm" mood="working" />}<div className="md">{streaming.text}</div></div>}
           <div className={`live ${running ? "" : "hidden"}`}><Loader /><span>{activity}</span></div>

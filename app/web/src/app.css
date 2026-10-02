@@ -100,6 +100,9 @@ main{overflow:auto;min-width:0}
 .tool summary .ic,.steps .last .ic{flex:none;color:var(--ink-3)}
 .tool summary .lbl{color:var(--ink-2)}
 .tool summary .det{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.tool.nested{margin-left:22px}
+.steps-body .tool.nested{margin-left:22px}
+.tool.script pre{max-height:320px;overflow:auto}
 .steps .last{display:inline-flex;align-items:center;gap:6px}
 .msg.bot.cont{margin-top:-6px}
 .tool pre{margin-top:6px}

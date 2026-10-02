@@ -18,6 +18,7 @@ const P: Record<Name, string[]> = {
   edit: ["M4 20h4L19 9l-4-4L4 16z", "M13.5 6.5l4 4"],
   remove: ["M4 7h16", "M9 7V4h6v3", "M6 7l1 13h10l1-13"],
   send: ["M21 3L10 14", "M21 3l-7 18-4-7-7-4z"],
+  code: ["M8 7l-5 5 5 5", "M16 7l5 5-5 5", "M14 4l-4 16"],
 };
 
 export function StepIcon({ name }: { name: Name }) {

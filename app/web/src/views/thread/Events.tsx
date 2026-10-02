@@ -41,10 +41,22 @@ function Shot({ e, b }: { e: ThreadEvent; b: Bot }) {
   );
 }
 
-export function Tool({ e }: { e: ThreadEvent }) {
+/** A Code Mode script: its code, and its output once the turn has it (a scriptResult event, merged in by callId). */
+function Script({ e, result }: { e: ThreadEvent; result?: Record<string, any> }) {
+  const st = !result ? "" : result.status === "completed" ? "ok" : "bad", lines = String(e.data.code || "").split("\n").length;
+  return (
+    <details className="tool script"><summary><span className={`st ${st}`} /><StepIcon name="code" /><span className="lbl">Ran a script</span><span className="det">{`${lines} line${lines === 1 ? "" : "s"}${result ? "" : " · running"}`}</span></summary>
+      <pre>{e.data.code}</pre>
+      {result?.output && <><p className="small faint" style={{ margin: "8px 0 4px" }}>Output</p><pre>{result.output}</pre></>}
+    </details>
+  );
+}
+
+export function Tool({ e, results }: { e: ThreadEvent; results?: Map<string, Record<string, any>> }) {
+  if (e.data.type === "script") return <Script e={e} result={results?.get(e.data.callId)} />;
   const st = stepOk(e) ? "ok" : e.data.status === "inProgress" ? "" : "bad";
   const v = stepView(tidyTitle(e.data.title), e.data.conn);
-  return <details className="tool"><summary><span className={`st ${st}`} /><StepIcon name={v.icon} /><span className="lbl">{v.label}</span>{v.detail && <span className="det">{v.detail}</span>}</summary>{(e.data.output || e.data.error) && <pre>{e.data.error || e.data.output}</pre>}</details>;
+  return <details className={`tool${e.data.viaScript ? " nested" : ""}`}><summary><span className={`st ${st}`} /><StepIcon name={v.icon} /><span className="lbl">{v.label}</span>{v.detail && <span className="det">{v.detail}</span>}</summary>{(e.data.output || e.data.error) && <pre>{e.data.error || e.data.output}</pre>}</details>;
 }
 
 function Changes({ d }: { d: Record<string, any> }) {
@@ -89,7 +101,7 @@ function Last({ e }: { e: ThreadEvent }) {
 }
 
 /** A run's tool calls fold into one "N steps" row: open while the run goes, folded when it ends (closeSignal bumps). */
-export function Steps({ events, initialOpen, closeSignal }: { events: ThreadEvent[]; initialOpen: boolean; closeSignal: number }) {
+export function Steps({ events, initialOpen, closeSignal, results }: { events: ThreadEvent[]; initialOpen: boolean; closeSignal: number; results?: Map<string, Record<string, any>> }) {
   const [open, setOpen] = useState(initialOpen);
   const first = useRef(closeSignal);
   useEffect(() => { if (closeSignal !== first.current) setOpen(false); }, [closeSignal]);
@@ -97,7 +109,7 @@ export function Steps({ events, initialOpen, closeSignal }: { events: ThreadEven
   return (
     <details className="steps" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary><span>{`${events.length} step${events.length === 1 ? "" : "s"}${bad ? ` · ${bad} failed` : ""}`}</span><Last e={events[events.length - 1]} /></summary>
-      <div className="steps-body">{events.map((e) => <Tool key={e.id} e={e} />)}</div>
+      <div className="steps-body">{events.map((e) => <Tool key={e.id} e={e} results={results} />)}</div>
     </details>
   );
 }

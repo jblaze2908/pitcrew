@@ -9,6 +9,7 @@ import { finishTurn } from "./turns.js";
 import { subtract } from "./spend.js";
 import { short, summariseArgs } from "./util.js";
 import { connName } from "../engram.js";
+import { scanScripts } from "./scripts.js";
 
 // A Codex thread item (commandExecution, mcpToolCall, fileChange, …) as the app-server sends it.
 type Item = Record<string, any>;
@@ -36,6 +37,8 @@ export function onNotify(c: Brain, method: string, p: Record<string, any>) {
     case "item/agentMessage/delta": bus.emit("delta", { threadId, itemId: p.itemId, text: p.delta }); break;
     case "item/started": {
       const it = p.item; items.set(it.id, it);
+      // A Code Mode script's nested call: show the script (from the rollout) before its calls.
+      if (typeof it.id === "string" && it.id.startsWith("exec-")) scanScripts(threadId, a?.turnId, c.bot.id, p.threadId);
       // Browser and pixel tools announce themselves from their own handler, with the grounded element.
       if (["commandExecution", "mcpToolCall", "fileChange", "webSearch"].includes(it.type) || (it.type === "dynamicToolCall" && !/^(browser|computer)_/.test(it.tool)))
         bus.emit("activity", { threadId, botId: c.bot.id, text: toolTitle(it) });
@@ -43,10 +46,11 @@ export function onNotify(c: Brain, method: string, p: Record<string, any>) {
     }
     case "item/completed": {
       const it = p.item; items.delete(it.id);
+      const via = typeof it.id === "string" && it.id.startsWith("exec-") ? { viaScript: true } : {};
       if (it.type === "agentMessage" && it.text?.trim()) addEvent(threadId, a?.turnId, "agent", { text: it.text, itemId: it.id });
-      else if (it.type === "commandExecution") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: it.status, exitCode: it.exitCode ?? null, output: String(it.aggregatedOutput || "").slice(-1500) });
+      else if (it.type === "commandExecution") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: it.status, exitCode: it.exitCode ?? null, output: String(it.aggregatedOutput || "").slice(-1500), ...via });
       else if (it.type === "mcpToolCall") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: it.status, output: mcpResultText(it), error: it.error?.message || null,
-        ...(it.server === "engram" ? { conn: connName(c.bot.id, String(it.tool)) } : {}) });
+        ...(it.server === "engram" ? { conn: connName(c.bot.id, String(it.tool)) } : {}), ...via });
       else if (it.type === "fileChange") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: it.status });
       else if (it.type === "webSearch") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: "completed" });
       else if (it.type === "contextCompaction") addEvent(threadId, a?.turnId, "system", { text: "Thread compacted." });
@@ -60,7 +64,7 @@ export function onNotify(c: Brain, method: string, p: Record<string, any>) {
       bus.emit("context", { threadId, tokens: tu.last.inputTokens, window: tu.modelContextWindow });
       break;
     }
-    case "turn/completed": if (a) finishTurn(threadId, p.turn.status, p.turn.status === "failed" ? (p.turn.error?.message || "The run failed") : null); break;
+    case "turn/completed": scanScripts(threadId, a?.turnId, c.bot.id, p.threadId); if (a) finishTurn(threadId, p.turn.status, p.turn.status === "failed" ? (p.turn.error?.message || "The run failed") : null); break;
     case "error": if (!p.willRetry) addEvent(threadId, a?.turnId, "error", { text: short(p.error?.message || "Model error", 500) }); break;
     case "thread/compacted": addEvent(threadId, null, "system", { text: "Thread compacted." }); break;
   }

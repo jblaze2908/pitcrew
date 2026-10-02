@@ -523,3 +523,31 @@ test("mcpReady waits until every MCP server of that thread has left starting, on
   br.rpc = null;
   assert.equal(await settled(br.mcpReady("t4", 5000)), true, "a stopped brain doesn't wait");
 });
+
+test("Code Mode scripts are read from the rollout: code once, output by call id, half lines wait, other dirs ignored", async () => {
+  const { setRollout, scanScripts } = await import("../app/dist/src/runtime/scripts.js");
+  const { bus } = await import("../app/dist/src/runtime/bus.js");
+  const { appendFileSync, mkdirSync, writeFileSync } = await import("node:fs");
+  const dir = `${process.env.PITCREW_ROOT}/brains/scripter/sessions`;
+  mkdirSync(dir, { recursive: true });
+  const file = `${dir}/rollout-x.jsonl`;
+  writeFileSync(file, JSON.stringify({ payload: { type: "custom_tool_call", name: "exec", call_id: "old", input: "earlier" } }) + "\n");
+  const seen = [], client = { writableLength: 0, destroy() {}, on() {}, write(s) { const m = /^event: event\ndata: (.*)\n\n$/s.exec(s); if (m) seen.push(JSON.parse(m[1]).data); } };
+  bus.add(client, "th_x");
+  try {
+    setRollout("scripter", "cx1", "/brains/scripter/sessions/rollout-x.jsonl");
+    const call = JSON.stringify({ payload: { type: "custom_tool_call", name: "exec", call_id: "c1", input: "const r = await tools.mcp__engram__google__gmail_search({});\ntext(r)" } });
+    appendFileSync(file, call + "\n" + call.slice(0, 20));
+    scanScripts("th_x", null, "scripter", "cx1");
+    assert.deepEqual(seen.map((d) => [d.type, d.callId]), [["script", "c1"]], "only scripts written after setRollout; the cut line waits");
+    appendFileSync(file, call.slice(20) + "\n" + JSON.stringify({ payload: { type: "custom_tool_call_output", call_id: "c1", output: [{ type: "input_text", text: "Script completed\nOutput:" }, { type: "input_text", text: "ok" }] } }) + "\n");
+    scanScripts("th_x", null, "scripter", "cx1");
+    assert.deepEqual(seen.map((d) => [d.type, d.callId, d.status]), [["script", "c1", "inProgress"], ["scriptResult", "c1", "completed"]], "the repeated call isn't shown twice");
+    assert.match(seen[0].code, /tools\.mcp__engram__google__gmail_search/);
+    assert.equal(seen[1].output, "Script completed\nOutput:\nok");
+    setRollout("scripter", "cx2", "/brains/other/sessions/rollout-x.jsonl");
+    setRollout("scripter", "cx3", "/etc/passwd");
+    scanScripts("th_x", null, "scripter", "cx2"); scanScripts("th_x", null, "scripter", "cx3");
+    assert.equal(seen.length, 2, "paths outside the member's own brain dir are never read");
+  } finally { client.destroy(); }
+});

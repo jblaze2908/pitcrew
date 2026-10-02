@@ -12,6 +12,7 @@ import { brain, computer } from "./machines.js";
 import { weekSpend, logSize, billedUsage } from "./spend.js";
 import { activePlan, planLog, emitPlan, planRow } from "./planStore.js";
 import { ensureMemberToken, threadContext, skillsIndex } from "../engram.js";
+import { setRollout } from "./scripts.js";
 import type { Bot } from "../../shared/types.js";
 
 export const isRunning = (threadId: string) => active.has(threadId);
@@ -90,6 +91,7 @@ export async function startTurn(threadId: string, text: string, attachments: str
       codexId = st.thread.id as string;
       run("UPDATE threads SET codex_id=? WHERE id=?", codexId, threadId);
       c.loaded.add(codexId);
+      setRollout(b.id, codexId, st.thread.path);
       await c.mcpReady(codexId);
     } else if (refreshNow) {
       // A fork is the only per-thread way to reconnect MCP: unsubscribe + resume reuses the loaded session's tools. It keeps
@@ -98,6 +100,7 @@ export async function startTurn(threadId: string, text: string, attachments: str
       const old = codexId, seen = c.mems.get(old);
       const f = await c.request("thread/fork", { threadId: old, model: b.model, modelProvider: b.provider, cwd: "/bot/work", sandbox: "danger-full-access", approvalPolicy: "untrusted", excludeTurns: true }, 120000);
       codexId = f.thread.id as string;
+      setRollout(b.id, codexId, f.thread.path);
       run("UPDATE threads SET codex_id=? WHERE id=?", codexId, threadId);
       await c.unload(old); byCodex.delete(old);
       c.loaded.add(codexId);
@@ -106,8 +109,9 @@ export async function startTurn(threadId: string, text: string, attachments: str
       if (egCtx) refreshed = `Refreshed just now; this replaces any earlier Engram profile and skills list.\n\n${engramBlock(getSetting("driver_name", "the driver"), egCtx)}`;
     } else if (!c.loaded.has(codexId)) {
       c.mcp.delete(codexId);
-      await c.request("thread/resume", { threadId: codexId, ...common, sandbox: "danger-full-access", approvalPolicy: "untrusted", excludeTurns: true }, 120000);
+      const r = await c.request("thread/resume", { threadId: codexId, ...common, sandbox: "danger-full-access", approvalPolicy: "untrusted", excludeTurns: true }, 120000);
       c.loaded.add(codexId);
+      setRollout(b.id, codexId, r?.thread?.path);
       await c.mcpReady(codexId);
     }
     // Developer instructions reach Codex only at start/resume (which just sent the current list); memories saved since
