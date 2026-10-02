@@ -63,7 +63,7 @@ export function ModelPicker({ provider, model, onProvider, onModel }: { provider
           <button type="button" className="trigger" onClick={() => (open ? setOpen(false) : show())}>
             <span className="col">
               <b>{cur?.name || model || "Pick a model"}</b>
-              {model && <span className="pc-m small faint">{model}</span>}
+              {model && cur?.name !== model && <span className="pc-m small faint">{model}</span>}
             </span>
             <span className="faint">▾</span>
           </button>
@@ -73,7 +73,7 @@ export function ModelPicker({ provider, model, onProvider, onModel }: { provider
               <div className="rows" ref={list}>
                 {rows.map((r, i) => (
                   <button type="button" key={r.custom ? "custom" : r.id} className={`mi${i === at ? " on" : ""}`} onMouseEnter={() => setAt(i)} onMouseDown={(e) => { e.preventDefault(); pick(r.id); }}>
-                    <span className="col"><b>{r.name}</b>{!r.custom && <span className="pc-m small faint">{r.id}</span>}</span>
+                    <span className="col"><b>{r.name}</b>{!r.custom && r.name !== r.id && <span className="pc-m small faint">{r.id}</span>}</span>
                     <span className="small faint">{r.id === model ? "Current" : r.price}</span>
                   </button>))}
                 {models && !rows.length && <p className="small faint" style={{ padding: "8px 10px" }}>No models match.</p>}
