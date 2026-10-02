@@ -355,3 +355,12 @@ svg text{fill:var(--ink-3);font:10px var(--font-data)}
 .tabs a .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--signal);margin-left:6px;vertical-align:2px}
 .tabs{overflow-x:auto;scrollbar-width:none}
 .field>.seg{align-self:flex-start}
+.modelpick{position:relative}
+.modelpick .trigger{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;text-align:left;background:var(--surface-2);border:1px solid var(--line-2);border-radius:10px;padding:7px 12px;min-height:40px}
+.modelpick .trigger:hover,.modelpick .trigger:focus-visible{border-color:var(--ink-3)}
+.modelpick .trigger .col,.modelpick .mi .col{gap:2px;min-width:0}
+.modelpick .trigger b,.modelpick .mi b{font:600 13.5px/1.2 var(--font-body);color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.modelpick .col .pc-m{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.modelpick .menu{position:absolute;left:0;right:0;top:calc(100% + 6px);width:auto;min-width:min(420px,calc(100vw - 32px));max-height:none;overflow:hidden;gap:6px}
+.modelpick .rows{max-height:320px;overflow:auto;display:flex;flex-direction:column;gap:2px}
+.modelpick .mi{grid-template-columns:minmax(0,1fr) auto}
