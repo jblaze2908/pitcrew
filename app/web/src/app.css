@@ -125,6 +125,7 @@ main{overflow:auto;min-width:0}
 .ask .hl mark{color:transparent;border-radius:6px;background:color-mix(in srgb,var(--hue) 22%,transparent);box-shadow:0 0 0 2px color-mix(in srgb,var(--hue) 22%,transparent)}
 .ask .bar{display:flex;align-items:center;gap:10px;min-width:0}
 .ask .bar .pc-lab{min-width:0}
+.ask .bar .hint,.ask .bar .pc-pill{flex:none;white-space:nowrap}
 .ask .extra{display:flex;flex-direction:column;gap:8px}
 .ask .extra:empty{display:none}
 .ask.off .q{flex:1;font-size:16px;color:var(--ink-3)}
