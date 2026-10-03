@@ -17,4 +17,4 @@ export { parseHandoff } from "./planStore.js";
 export { stopPlan } from "./plans.js";
 export { nextRun, addSchedule } from "./schedules.js";
 export { takeControl, handBack, leaseHeld } from "./lease.js";
-export { killSwitch, resumeCrew, bootRuntime, settleCutTurns, resumable } from "./lifecycle.js";
+export { killSwitch, resumeCrew, bootRuntime, settleCutTurns, resumable, resumeCut } from "./lifecycle.js";
