@@ -66,6 +66,28 @@ test("untitled threads are named from their first message", () => {
   assert.equal(R.titleFrom("```\ncode only\n```"), R.UNTITLED);
 });
 
+test("a restart marks cut turns interrupted, says so in the thread, and resumes each once", () => {
+  const t0 = Date.now();
+  run("INSERT INTO bots(id,name,created_at) VALUES('b_cut','Cutter',0)");
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_cut','b_cut','Slides',0,0)");
+  const turn = (id, status, trigger, at) => run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,started_at) VALUES(?,?,?,?,?,?)", id, "th_cut", "b_cut", status, trigger, at);
+  turn("tu_done", "completed", "driver", t0 - 60000);
+  turn("tu_run", "running", "driver", t0 - 30000);
+  turn("tu_start", "starting", "resume", t0 - 10000);
+  const cut = R.settleCutTurns();
+  assert.deepEqual(cut.map((c) => c.id).sort(), ["tu_run", "tu_start"]);
+  for (const id of ["tu_run", "tu_start"]) assert.deepEqual({ ...one("SELECT status,error FROM turns WHERE id=?", id) }, { status: "interrupted", error: "Control plane restarted" });
+  assert.equal(one("SELECT status FROM turns WHERE id='tu_done'").status, "completed");
+  const notes = all("SELECT data FROM events WHERE thread_id='th_cut' AND kind='system'").map((e) => json(e.data, {}).text);
+  assert.equal(notes.filter((x) => /restarted during this run/.test(x)).length, 2);
+  const by = Object.fromEntries(cut.map((c) => [c.id, c]));
+  assert.equal(R.resumable(by.tu_run, t0), true);
+  assert.equal(R.resumable(by.tu_start, t0), false, "a resume is never resumed again");
+  assert.equal(R.resumable({ ...by.tu_run, trigger: "delegation" }, t0), false);
+  assert.equal(R.resumable(by.tu_run, t0 + 3 * 3600_000), false, "stale work isn't replayed");
+  assert.equal(R.resumable({ ...by.tu_run, thread_id: "th_gone" }, t0), false);
+});
+
 test("plain link clicks are navigation; consequential links are not", () => {
   const snap = { url: "https://example.com/", lines: ['- link "Learn more" [ref=e13] [cursor=pointer]:', '- link "Unsubscribe" [ref=e14]', '- button "Next" [ref=e15]'] };
   assert.equal(R.ground(snap, "browser_click", { target: "e13" }).effect, "browse");

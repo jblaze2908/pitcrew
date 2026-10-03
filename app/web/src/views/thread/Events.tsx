@@ -16,7 +16,7 @@ const isImg = (p: string) => /\.(png|jpe?g|webp|gif)$/i.test(p);
 
 export function UserMsg({ e, botId, fromName }: { e: ThreadEvent; botId: string; fromName: string }) {
   const d = e.data;
-  const via = d.via === "schedule" ? "scheduled · " : d.via === "delegation" ? `${fromName} asks · ` : d.via === "plan" ? "Pitcrew · " : null;
+  const via = d.via === "schedule" ? "scheduled · " : d.via === "delegation" ? `${fromName} asks · ` : d.via === "plan" || d.via === "resume" ? "Pitcrew · " : null;
   return (
     <div className="msg me">
       {via && <span className="pc-lab">{via}</span>}

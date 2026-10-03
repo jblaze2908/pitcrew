@@ -4,8 +4,8 @@ import { allComputers, allBrains } from "../computer.js";
 import { startShotSweeper } from "../shots.js";
 import { bus } from "./bus.js";
 import { active } from "./state.js";
-import { getThread, UNTITLED, titleFrom, isSmallTalk } from "./threads.js";
-import { interrupt } from "./turns.js";
+import { getThread, addEvent, UNTITLED, titleFrom, isSmallTalk } from "./threads.js";
+import { interrupt, sendMessage } from "./turns.js";
 import { decide } from "./pitstops.js";
 import { tickSchedules } from "./schedules.js";
 
@@ -25,8 +25,9 @@ export function resumeCrew() { setSetting("paused", "0"); audit("driver", "crew.
 export function bootRuntime() {
   // Pit stops from a previous process can't be answered: their Codex requests died with the computers.
   for (const ps of all<{ id: string }>("SELECT id,thread_id FROM pitstops WHERE status='pending' AND kind NOT IN ('hire','engram')")) run("UPDATE pitstops SET status='expired', note='Control plane restarted', decided_at=? WHERE id=?", now(), ps.id);
-  run("UPDATE turns SET status='failed', error='Control plane restarted', ended_at=? WHERE status IN ('starting','running')", now());
+  const cut = settleCutTurns();
   run("UPDATE threads SET status='idle' WHERE status!='idle'"); // also clears pre-v1.2 'done'/'failed' thread states
+  setTimeout(() => resumeCut(cut), 3000).unref();
   // Name threads left untitled (from before naming existed, or still on small talk) from their first real message.
   for (const t of all<{ id: string }>("SELECT id FROM threads WHERE title=?", UNTITLED)) {
     const first = all<{ data: string }>("SELECT data FROM events WHERE thread_id=? AND kind='user' ORDER BY id LIMIT 20", t.id).map((e) => json(e.data, {})).find((d) => !isSmallTalk(d.text) || d.attachments?.length);
@@ -34,4 +35,28 @@ export function bootRuntime() {
   }
   setInterval(tickSchedules, 30000).unref();
   startShotSweeper();
+}
+
+type Cut = { id: string; thread_id: string; trigger: string; started_at: number };
+/** A turn still starting or running in the store was cut off by this restart: nothing in memory survives one. */
+export function settleCutTurns() {
+  const cut = all<Cut>("SELECT id,thread_id,trigger,started_at FROM turns WHERE status IN ('starting','running')");
+  for (const t of cut) {
+    run("UPDATE turns SET status='interrupted', error='Control plane restarted', ended_at=? WHERE id=?", now(), t.id);
+    addEvent(t.thread_id, t.id, "system", { text: "Pitcrew restarted during this run, so it stopped partway.", tone: "bad" });
+  }
+  return cut;
+}
+
+const RESUME = "Pitcrew restarted in the middle of your last run, so it stopped partway. Check where things stand now (the screen, the page, the files) and carry on with the task from there. Don't redo steps that already finished.";
+const RESUME_WITHIN = 2 * 3600_000;
+// Each cut turn resumes once, on the thread it was on. Not a resume of a resume (a restart loop would replay forever),
+// nor a delegated or plan turn (whoever waited for its answer died with the process), nor work older than 2 h.
+export const resumable = (t: Cut, at = now()) => !["resume", "delegation", "plan"].includes(t.trigger) && at - t.started_at < RESUME_WITHIN && !!getThread(t.thread_id);
+function resumeCut(cut: Cut[]) {
+  for (const t of cut) {
+    if (!resumable(t)) { addEvent(t.thread_id, null, "system", { text: "Say continue to pick it up." }); continue; }
+    sendMessage(t.thread_id, { text: RESUME, trigger: "resume", display: "Pick up where you left off" })
+      .catch((e) => addEvent(t.thread_id, null, "error", { text: e.message }));
+  }
 }
