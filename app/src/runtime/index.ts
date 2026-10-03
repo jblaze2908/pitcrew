@@ -15,6 +15,6 @@ export { toContentItems, frontTab } from "./browser.js";
 export { findMember } from "./delegation.js";
 export { parseHandoff } from "./planStore.js";
 export { stopPlan } from "./plans.js";
-export { nextRun, addSchedule } from "./schedules.js";
+export { nextRun, addSchedule, listSchedules, updateSchedule, deleteSchedule } from "./schedules.js";
 export { takeControl, handBack, leaseHeld } from "./lease.js";
 export { killSwitch, resumeCrew, bootRuntime, settleCutTurns, resumable, resumeCut } from "./lifecycle.js";

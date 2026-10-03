@@ -36,6 +36,30 @@ export function addSchedule(botId: string, threadId: string | null, spec: string
   audit("crew", "schedule.added", { id, botId, spec });
   return one<ScheduleRow>("SELECT * FROM schedules WHERE id=?", id)!;
 }
+export const listSchedules = (botId: string) => all<ScheduleRow>("SELECT * FROM schedules WHERE bot_id=? ORDER BY created_at", botId);
+// botId scopes a lookup to one member's own schedules; null is the driver, who may touch any.
+function own(id: string, botId: string | null) {
+  const s = one<ScheduleRow>("SELECT * FROM schedules WHERE id=?", id);
+  if (!s || (botId && s.bot_id !== botId)) throw new Error(`No schedule ${id}. list_schedules shows yours.`);
+  return s;
+}
+/** Change the time, prompt or paused state. A new time, or resuming, recomputes the next run so a stale one doesn't fire at once. */
+export function updateSchedule(id: string, botId: string | null, ch: { spec?: string; prompt?: string; enabled?: boolean }, who: "crew" | "driver") {
+  const s = own(id, botId);
+  const spec = ch.spec !== undefined ? ch.spec.trim().toLowerCase() : s.spec, prompt = ch.prompt !== undefined ? ch.prompt.trim().slice(0, 2000) : s.prompt;
+  if (!prompt) throw new Error("A schedule needs a prompt");
+  const enabled = ch.enabled ?? !!s.enabled, next = spec !== s.spec || (enabled && !s.enabled) ? nextRun(spec) : s.next_run;
+  run("UPDATE schedules SET spec=?, prompt=?, enabled=?, next_run=? WHERE id=?", spec, prompt, enabled ? 1 : 0, next, id);
+  audit(who, "schedule.updated", { id, botId: s.bot_id, spec, enabled, promptChanged: prompt !== s.prompt });
+  return one<ScheduleRow>("SELECT * FROM schedules WHERE id=?", id)!;
+}
+/** The audit row keeps the spec and prompt, so a deleted schedule can be put back by hand. */
+export function deleteSchedule(id: string, botId: string | null, who: "crew" | "driver") {
+  const s = own(id, botId);
+  run("DELETE FROM schedules WHERE id=?", id);
+  audit(who, "schedule.deleted", { id, botId: s.bot_id, spec: s.spec, prompt: s.prompt });
+  return s;
+}
 let nextPrune = 0;
 export function tickSchedules() {
   // Rides the schedule tick (30 s) but deletes at most hourly; the ts index keeps it a range scan.

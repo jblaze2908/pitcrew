@@ -46,13 +46,32 @@ export function SchedulesTab({ b, list, reload }: { b: BotCard; list: Schedule[]
       </div>
       <div className="pc-card tight">
         {list.length ? (
-          <table className="tbl"><tbody>{list.map((s) => (
-            <tr key={s.id}>
-              <td className="pc-m">{s.spec}</td><td>{s.prompt}</td><td className="small faint">{s.next_run ? `next ${when(s.next_run)}` : ""}</td>
-              <td className="num"><button className="small faint" onClick={async () => { await api.patch(`/api/schedules/${s.id}`, { enabled: !s.enabled }); reload(); }}>{s.enabled ? "Pause" : "Resume"}</button></td>
-            </tr>))}</tbody></table>
+          <table className="tbl"><tbody>{list.map((s) => <ScheduleRow key={s.id} s={s} reload={reload} />)}</tbody></table>
         ) : <p className="empty">No schedules.</p>}
       </div>
     </div>
+  );
+}
+
+function ScheduleRow({ s, reload }: { s: Schedule; reload: () => void }) {
+  const [edit, setEdit] = useState<{ spec: string; prompt: string } | null>(null);
+  const patch = async (b: object) => { await api.patch(`/api/schedules/${s.id}`, b); setEdit(null); reload(); };
+  const remove = async () => { if (!window.confirm(`Delete the schedule “${s.prompt.slice(0, 60)}”?`)) return; await api.del(`/api/schedules/${s.id}`); toast("Schedule deleted"); reload(); };
+  if (edit) return (
+    <tr>
+      <td><input value={edit.spec} onChange={(e) => setEdit({ ...edit, spec: e.target.value })} aria-label="When" /></td>
+      <td colSpan={2}><textarea rows={3} value={edit.prompt} onChange={(e) => setEdit({ ...edit, prompt: e.target.value })} aria-label="What to do" style={{ width: "100%" }} /></td>
+      <td className="num"><div className="row" style={{ justifyContent: "flex-end" }}>
+        <button className="small sig" onClick={() => patch(edit)}>Save</button><button className="small faint" onClick={() => setEdit(null)}>Cancel</button></div></td>
+    </tr>
+  );
+  return (
+    <tr>
+      <td className="pc-m">{s.spec}</td><td>{s.prompt}</td><td className="small faint">{s.enabled ? (s.next_run ? `next ${when(s.next_run)}` : "") : "paused"}</td>
+      <td className="num"><div className="row" style={{ justifyContent: "flex-end" }}>
+        <button className="small faint" onClick={() => setEdit({ spec: s.spec, prompt: s.prompt })}>Edit</button>
+        <button className="small faint" onClick={() => patch({ enabled: !s.enabled })}>{s.enabled ? "Pause" : "Resume"}</button>
+        <button className="small faint" onClick={remove}>Delete</button></div></td>
+    </tr>
   );
 }
