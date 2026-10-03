@@ -18,7 +18,7 @@ const Memory = z.object({ text: trimmed(500) });
 const MemoryEdit = z.object({ text: text(500) });
 const ForgetSource = z.object({ source: raw });
 const Schedule = z.object({ threadId: field((v) => v || null), spec: text(), prompt: text() });
-const Toggle = z.object({ enabled: flag });
+const ScheduleEdit = z.object({ enabled: z.boolean().optional(), spec: z.string().max(100).optional(), prompt: z.string().max(2000).optional() });
 const Project = z.object({ path: text() });
 const HandBack = z.object({ note: text() });
 
@@ -67,7 +67,8 @@ export const crewRoutes = new Hono<Env>()
   .post("/api/turns/:id/learned/:mid/undo", signedIn, async (c) => c.json({ items: await undoLearned(c.req.param("id"), c.req.param("mid")) }))
   .post("/api/bots/:id/memory/forget-source", signedIn, async (c) => { const id = c.req.param("id"), b = await jsonBody(c, ForgetSource); const r = run("UPDATE memory SET forgotten_at=? WHERE bot_id=? AND source=? AND forgotten_at IS NULL", now(), id, String(b.source)); audit("driver", "memory.forgot_source", { id, source: b.source }); return c.json({ forgotten: Number(r.changes) }); })
   .post("/api/bots/:id/schedules", signedIn, async (c) => { const b = await jsonBody(c, Schedule); try { return c.json(R.addSchedule(c.req.param("id"), b.threadId as string | null, b.spec, b.prompt)); } catch (e: any) { throw httpErr(400, e.message); } })
-  .patch("/api/schedules/:id", signedIn, async (c) => { const id = c.req.param("id"), b = await jsonBody(c, Toggle); run("UPDATE schedules SET enabled=? WHERE id=?", b.enabled ? 1 : 0, id); audit("driver", "schedule.toggled", { id, enabled: b.enabled }); return c.json({ ok: true }); })
+  .patch("/api/schedules/:id", signedIn, async (c) => { const b = await jsonBody(c, ScheduleEdit); try { return c.json(R.updateSchedule(c.req.param("id"), null, b, "driver")); } catch (e: any) { throw httpErr(400, e.message); } })
+  .delete("/api/schedules/:id", signedIn, (c) => { try { R.deleteSchedule(c.req.param("id"), null, "driver"); return c.json({ ok: true }); } catch (e: any) { throw httpErr(404, e.message); } })
 
   // Computers. Watching needs the desktop, so "start" from the UI boots both stages.
   .post("/api/bots/:id/computer/start", signedIn, async (c) => { const b = member(c.req.param("id")); await R.computer(b).desktop(); return c.json({ ok: true }); })

@@ -135,7 +135,7 @@ export function instructions(b: Pick<Bot, "name" | "personality"> & Partial<Bot>
     `When a comparison, table, chart, dashboard or form would help, call render_surface instead of writing a long text table. Forms come back to you as a message with the submitted values.`,
     `To show the driver what's on screen (a result, a confirmation, a page that looks wrong), call share_screenshot; your own screenshots stay private.`,
     engram ? "" : `When ${driver} tells you a durable fact or preference worth keeping, call remember.`,
-    `Recurring work can be put on a schedule with schedule_task.`,
+    `Recurring work can be put on a schedule with schedule_task; list_schedules, update_schedule and cancel_schedule manage the ones you have.`,
     memories.length ? `What you remember${engram ? " (in Engram)" : ""} (rewrite one by passing its id to remember; forget removes it):\n${memories.map((m) => `- [${m.id}] ${m.text}`).join("\n")}` : "",
     engram ? engramBlock(driver, engram, b.engram_scope) : "",
     b.kind === "chief" ? `You are the Crew Chief, the only built-in crew member. When you notice recurring work that deserves its own crew member (the same kind of task 3+ times), call propose_crew_member. ${driver} always reviews and approves a hire; you can't create one yourself.` : "",
@@ -234,8 +234,13 @@ export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { br
     { type: "function", name: "forget", description: "Forget a memory by id.", inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
     { type: "function", name: "find_threads", description: "Search your own past threads (titles and transcripts) when the driver asks to find, reopen or resume an earlier conversation. Returns matching threads, best first, with links. Words, names and phrases from that conversation make good queries.",
       inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "integer" } }, required: ["query"] } },
-    { type: "function", name: "schedule_task", description: 'Run a prompt on a schedule in this thread. when: "daily HH:MM", "weekly mon HH:MM", "every N minutes|hours" (min 15 minutes). Times are Asia/Kolkata.',
+    { type: "function", name: "schedule_task", description: 'Run a prompt on a schedule in this thread. when: "daily HH:MM", "weekly mon HH:MM", "every N minutes|hours" (min 15 minutes). Times are Asia/Kolkata. Call list_schedules first: to change or extend an existing schedule, use update_schedule instead of adding a second one.',
       inputSchema: { type: "object", properties: { when: { type: "string" }, prompt: { type: "string" } }, required: ["when", "prompt"] } },
+    { type: "function", name: "list_schedules", description: "Your schedules: id, when, next run (Asia/Kolkata) or paused, and the prompt.", inputSchema: { type: "object", properties: {} } },
+    { type: "function", name: "update_schedule", description: "Change one of your schedules. Pass only what changes: when (same formats as schedule_task), prompt (replaces the whole prompt), paused.",
+      inputSchema: { type: "object", properties: { id: { type: "string" }, when: { type: "string" }, prompt: { type: "string" }, paused: { type: "boolean" } }, required: ["id"] } },
+    { type: "function", name: "cancel_schedule", description: "Delete one of your schedules for good. To stop it for a while, update_schedule with paused: true.",
+      inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
   ];
   // Only for a member linked to Engram, which hosts the published files.
   if (engram) tools.push({ type: "function", name: "publish_file",

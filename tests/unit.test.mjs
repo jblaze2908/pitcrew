@@ -66,6 +66,29 @@ test("untitled threads are named from their first message", () => {
   assert.equal(R.titleFrom("```\ncode only\n```"), R.UNTITLED);
 });
 
+test("a member lists, edits, pauses and cancels only its own schedules", () => {
+  run("INSERT INTO bots(id,name,created_at) VALUES('b_sch','Scheduler',0),('b_sch2','Other',0)");
+  const a = R.addSchedule("b_sch", null, "daily 22:00", "Review spend");
+  const other = R.addSchedule("b_sch2", null, "daily 09:00", "Not yours");
+  assert.deepEqual(R.listSchedules("b_sch").map((s) => s.id), [a.id]);
+  assert.throws(() => R.updateSchedule(other.id, "b_sch", { prompt: "mine now" }, "crew"), /No schedule/);
+  assert.throws(() => R.deleteSchedule(other.id, "b_sch", "crew"), /No schedule/);
+  const u = R.updateSchedule(a.id, "b_sch", { prompt: "Review spend and label today's transactions" }, "crew");
+  assert.equal(u.spec, "daily 22:00");
+  assert.equal(u.next_run, a.next_run, "a prompt change keeps the next run");
+  const t = R.updateSchedule(a.id, "b_sch", { spec: "Daily 21:30" }, "crew");
+  assert.equal(t.spec, "daily 21:30");
+  assert.ok(Math.abs(t.next_run - R.nextRun("daily 21:30")) < 5000, "a new time recomputes the next run");
+  assert.throws(() => R.updateSchedule(a.id, "b_sch", { spec: "every 5 minutes" }, "crew"), /15 minutes/);
+  assert.equal(R.updateSchedule(a.id, "b_sch", { enabled: false }, "crew").enabled, 0);
+  run("UPDATE schedules SET next_run=1 WHERE id=?", a.id);
+  assert.ok(R.updateSchedule(a.id, "b_sch", { enabled: true }, "crew").next_run > Date.now(), "resuming doesn't fire a stale run at once");
+  R.deleteSchedule(a.id, "b_sch", "crew");
+  assert.deepEqual(R.listSchedules("b_sch"), []);
+  assert.equal(R.listSchedules("b_sch2").length, 1);
+  R.deleteSchedule(other.id, null, "driver");
+});
+
 test("a restart marks cut turns interrupted, says so in the thread, and resumes each once", () => {
   const t0 = Date.now();
   run("INSERT INTO bots(id,name,created_at) VALUES('b_cut','Cutter',0)");

@@ -9,7 +9,7 @@ import { active } from "./state.js";
 import { addEvent, findThreads, threadLink } from "./threads.js";
 import { computer } from "./machines.js";
 import { pitStop } from "./pitstops.js";
-import { addSchedule } from "./schedules.js";
+import { addSchedule, listSchedules, updateSchedule, deleteSchedule } from "./schedules.js";
 import { askCrew } from "./delegation.js";
 import { planTool } from "./plans.js";
 import { runtimeTool, type ToolCall } from "./browser.js";
@@ -17,6 +17,8 @@ import { IST, say } from "./util.js";
 import { remember, forget, publishFile } from "../engram.js";
 import { noteLearned } from "./learned.js";
 import { memberLinked } from "../engramStore.js";
+
+const ist = (t: number | null) => (t ? new Date(t + IST).toISOString().slice(0, 16).replace("T", " ") : "—");
 
 export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Promise<ToolResult> {
   const b = getBot(c.bot.id)!, a = p.arguments || {};
@@ -86,8 +88,27 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
     case "schedule_task": {
       try {
         const s = addSchedule(b.id, threadId, String(a.when || ""), String(a.prompt || ""));
-        addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Scheduled “${s.prompt.slice(0, 80)}” ${s.spec} (next ${new Date(s.next_run + IST).toISOString().slice(0, 16).replace("T", " ")} IST)` });
+        addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Scheduled “${s.prompt.slice(0, 80)}” ${s.spec} (next ${ist(s.next_run)} IST)` });
         return say(`Scheduled ${s.id}: ${s.spec}.`);
+      } catch (e: any) { return say(e.message, false); }
+    }
+    case "list_schedules": {
+      const list = listSchedules(b.id);
+      return say(list.length ? list.map((s) => `${s.id} · ${s.spec}${s.enabled ? ` · next ${ist(s.next_run)} IST` : " · paused"}\n  ${s.prompt}`).join("\n") : "No schedules.");
+    }
+    case "update_schedule": {
+      try {
+        const s = updateSchedule(String(a.id || ""), b.id, { ...(a.when != null ? { spec: String(a.when) } : {}), ...(a.prompt != null ? { prompt: String(a.prompt) } : {}),
+          ...(typeof a.paused === "boolean" ? { enabled: !a.paused } : {}) }, "crew");
+        addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Changed schedule “${s.prompt.slice(0, 80)}”: ${s.spec}${s.enabled ? ` (next ${ist(s.next_run)} IST)` : ", paused"}` });
+        return say(`Updated ${s.id}: ${s.spec}${s.enabled ? "" : ", paused"}.`);
+      } catch (e: any) { return say(e.message, false); }
+    }
+    case "cancel_schedule": {
+      try {
+        const s = deleteSchedule(String(a.id || ""), b.id, "crew");
+        addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Cancelled schedule “${s.prompt.slice(0, 80)}” (${s.spec})` });
+        return say(`Cancelled ${s.id}.`);
       } catch (e: any) { return say(e.message, false); }
     }
     case "publish_file": {
