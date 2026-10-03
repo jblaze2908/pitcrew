@@ -96,8 +96,10 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
         const r = await publishFile(b, String(a.path || ""), { title: a.title ? String(a.title) : undefined, id: a.id ? String(a.id) : null, public: a.public === true, description: a.description ? String(a.description) : undefined, threadId });
         const title = String(a.title || String(a.path || "").split("/").pop());
         addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Published “${title}”${r.version > 1 ? ` (version ${r.version})` : ""}: ${r.url}`, artifact: { id: r.id, title, url: r.url, public_url: r.public_url, version: r.version } });
-        const share = r.status === "share_pending" ? ` A public link waits for ${getSetting("driver_name", "the driver")}'s approval in Pit stops.` : r.public_url ? ` Public link: ${r.public_url}` : "";
-        return say(`Published as ${r.id}, version ${r.version}. Private link (only ${getSetting("driver_name", "the driver")} can open it): ${r.url}${share} To update it, publish again with id ${r.id}.`);
+        // One link per artifact (Engram): sharing changes who may open it, never the URL.
+        const driver = getSetting("driver_name", "the driver");
+        const who = r.public_url ? "anyone with the link can open it" : r.status === "share_pending" ? `only ${driver} until they approve sharing it in Pit stops` : `only ${driver} can open it`;
+        return say(`Published as ${r.id}, version ${r.version}. Link (${who}): ${r.url} To update it, publish again with id ${r.id}.`);
       } catch (e: any) { return say(`Couldn't publish: ${e.message}`, false); }
     }
     case "find_threads": {
