@@ -455,9 +455,9 @@ test("approving a public link keeps the link on the pit stop and tells the membe
   E.answers.p_sh = { ...share, status: "accepted", public_url: "https://artifacts.example/s/abc" };
   await G.mirrorInbox();
   const r = await req("POST", "/api/pitstops/eg_p_sh/decide", { decision: "approve" });
-  assert.deepEqual([r.body.status, r.body.note, r.body.detail.public_url], ["approved", "Public link made", "https://artifacts.example/s/abc"]);
+  assert.deepEqual([r.body.status, r.body.note, r.body.detail.public_url], ["approved", "Anyone with the link can open it", "https://artifacts.example/s/abc"]);
   const ev = all("SELECT data FROM events WHERE thread_id='th_share'").map((e) => JSON.parse(e.data).text);
-  assert.deepEqual(ev, ["Public link for “Goa comparison”: https://artifacts.example/s/abc"]);
+  assert.deepEqual(ev, ["Anyone with the link can now open “Goa comparison”: https://artifacts.example/s/abc"]);
   E.proposals.push(proposal("p_m")); E.answers.p_m = { ok: true, public_url: "https://evil.example/x" };
   await G.mirrorInbox();
   const m = await req("POST", "/api/pitstops/eg_p_m/decide", { decision: "approve" });

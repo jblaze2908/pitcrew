@@ -16,7 +16,7 @@ export function noteLearned(turnId: string | null | undefined, threadId: string,
   run("INSERT INTO turn_memories(turn_id,memory_id,thread_id,bot_id,text,state,at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(turn_id,memory_id) DO UPDATE SET text=excluded.text, state=excluded.state",
     turnId, memoryId, threadId, botId, text.slice(0, 500), state, now());
 }
-export const learnedFor = (turnId: string) => all<LearnedItem>("SELECT memory_id, text, state FROM turn_memories WHERE turn_id=? ORDER BY at", turnId);
+export const learnedFor = (turnId: string) => all<LearnedItem>("SELECT memory_id, text, state FROM turn_memories WHERE turn_id=? ORDER BY at, rowid", turnId);
 
 // Called from finishTurn: one card per turn that saved anything.
 export function postLearned(threadId: string, turnId: string, botId: string) {

@@ -91,7 +91,7 @@ const Url = z.string().max(400).regex(/^https:\/\/[^\s"<>]+$/);
 const LinkArtifactZ = z.object({ id: Id, title: z.string().max(300), kind: z.string().max(40), pitcrew_id: Id, version: z.number().int().positive(),
   mime: z.string().max(120).nullable(), size: z.number().nullable(), url: Url, public_url: Url.nullable(), share_pending: z.boolean(),
   ref: z.string().max(200).nullable(), created_at: z.number(), updated_at: z.number() });
-// What deciding a share answers: Engram's proposal plus the public link it made.
+// What deciding a share answers: Engram's proposal plus the artifact's link, now open to anyone.
 const DecidedShareZ = z.object({ kind: z.literal("share"), public_url: Url, source: z.object({ ref: z.string().max(200).nullable().optional() }).nullable().optional() });
 // What POST /link/artifacts answers: the artifact, its version, the private link and the public one once shared.
 const PublishZ = z.object({ id: Id, version: z.number().int().positive(), url: Url, public_url: Url.nullable().catch(null), status: z.enum(["published", "share_pending"]) });
@@ -276,13 +276,13 @@ export async function decideProposal(id: string, decision: EngramDecision) {
   catch (e: any) { if (e.upstream === 404 || e.upstream === 409) { closePit(id, GONE); return pitView(one<PitstopRow>("SELECT * FROM pitstops WHERE id=?", id)!); } throw e; }
   const shared = decision === "accept" ? DecidedShareZ.safeParse(res) : null;
   const publicUrl = shared?.success ? shared.data.public_url : null;
-  const note = publicUrl ? "Public link made" : decision === "accept" ? "Accepted" : decision === "keep" ? "Kept current" : "Rejected";
+  const note = publicUrl ? "Anyone with the link can open it" : decision === "accept" ? "Accepted" : decision === "keep" ? "Kept current" : "Rejected";
   const detail = publicUrl ? JSON.stringify({ ...json(ps.detail, {}), public_url: publicUrl }) : ps.detail;
   run("UPDATE pitstops SET status=?, scope='once', note=?, detail=?, decided_at=? WHERE id=? AND status='pending'", decision === "accept" ? "approved" : "denied", note, detail, now(), id);
   // The member that asked learns the link in its thread, so it can hand it on.
   const th = shared?.success && /^pitcrew:thread:(th_[\w-]{1,40})$/.exec(shared.data.source?.ref || "")?.[1];
   if (publicUrl && th && one("SELECT 1 FROM threads WHERE id=?", th))
-    addEvent(th, null, "system", { text: `Public link for “${clean(ps.title.replace(/^Make public: /, ""), 200)}”: ${publicUrl}` });
+    addEvent(th, null, "system", { text: `Anyone with the link can now open “${clean(ps.title.replace(/^Make public: /, ""), 200)}”: ${publicUrl}` });
   audit("driver", `engram.${decision}`, { id, title: ps.title });
   emitPit(id);
   return pitView(one<PitstopRow>("SELECT * FROM pitstops WHERE id=?", id)!);

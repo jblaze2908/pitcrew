@@ -242,7 +242,7 @@ export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { br
     description: "Publish one file from /bot/work (md, html, pdf, an image, or any single file) as a page the driver opens at a link. Private to the driver; public only when they ask to share it and approve. Pass id to update one you published (same link, new version).",
     inputSchema: { type: "object", properties: { path: { type: "string", description: "Under /bot/work, e.g. /bot/work/out/goa-comparison.html" }, title: { type: "string" },
       id: { type: "string", description: "An artifact you published, to replace it with a new version" }, description: { type: "string" },
-      public: { type: "boolean", description: "Ask the driver for a public link anyone can open. Only when they asked to share it." } }, required: ["path", "title"] } });
+      public: { type: "boolean", description: "Ask the driver to let anyone with the link open it. Only when they asked to share it." } }, required: ["path", "title"] } });
   const plans = b.kind === "chief" && plansOn();
   if (plans) tools.push({ type: "function", name: "plan",
     description: "Run work that needs crew members as a living todo list that Pitcrew executes. First call: goal, constraints (the driver's preferences and limits, word for word) and add. Later calls: add, reopen (send an item back with a new task and why), cancel, or finish. Pitcrew starts every item whose `after` items are done, hands it their results, and wakes you after each item ends. You may finish only when every constraint is marked met, unmet or untested.",

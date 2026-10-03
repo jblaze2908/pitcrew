@@ -95,8 +95,8 @@ function Row({ a }: { a: PublishedArtifact }) {
       <div className="row art-t">{a.hue && a.shape && <pc-bot key={`${a.hue}.${a.shape}`} size="xs" hue={a.hue} shape={a.shape} />}
         <a href={a.url} target="_blank" rel="noreferrer"><b>{a.title}</b></a>{a.imported && <span className="small faint">imported</span>}</div>
       <span className="small faint art-m">{meta}</span>
-      <span className="small art-s">{a.public_url ? <a href={a.public_url} target="_blank" rel="noreferrer">Public link</a>
-        : a.share_pending ? <a href="#/pitstops">Public link waits for you</a> : <span className="faint">Private</span>}</span>
+      <span className="small art-s">{a.public_url ? <a href={a.public_url} target="_blank" rel="noreferrer">Anyone with link</a>
+        : a.share_pending ? <a href="#/pitstops">Sharing waits for you</a> : <span className="faint">Only you</span>}</span>
       <span className="small art-th">{a.thread_id && <a href={`#/t/${a.thread_id}`}>Thread</a>}</span>
     </div>
   );
