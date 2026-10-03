@@ -45,48 +45,56 @@ export function PitCard({ p: given, onDone }: { p: PitStop; onDone?: (r: PitStop
     : p.kind === "site" ? <SiteSummary d={d} />
     : p.kind === "engram" && d.proposal ? <ProposalSummary x={d.proposal} /> : null;
 
+  const outcome = `${p.kind === "engram" && p.note ? p.note : p.status} ${ago(p.decided_at)}`;
+  // Decided: one line that opens to the details, so a thread's history doesn't keep full cards around.
+  if (done) return (
+    <details className="pit done">
+      <summary><Face b={b} size="sm" mood="idle" /><b>{b?.name || p.bot_id}</b><span className="t1">{p.title}</span><span className="pc-m small faint">{outcome}</span></summary>
+      {body}
+      {j.reason && <p className="why">{`jev · ${j.by || ""} · ${j.reason}${j.ms ? ` · ${j.ms} ms` : ""}`}</p>}
+      {p.note && p.kind !== "engram" && <p className="small faint">{p.note}</p>}
+      {typeof d.public_url === "string" && /^https:\/\//.test(d.public_url) && <p className="small"><a href={d.public_url} target="_blank" rel="noreferrer">{d.public_url}</a></p>}
+    </details>
+  );
+
   let actions = null;
-  if (!done) {
-    if (p.kind === "engram") actions = <div className="acts">
-      {d.proposal?.replaces && btn("Keep current", () => engram("keep"))}
-      {btn("Accept", () => engram("accept"), true)}
-      {btn("Reject", () => engram("reject"))}
-      <a className="small faint" href={`${S.engram.url}/#/inbox`} target="_blank" rel="noopener noreferrer" style={{ marginLeft: "auto" }}>Open in Engram</a></div>;
-    else if (p.kind === "hire") actions = <div className="acts"><a className="pc-pill sig s" href={`#/hire/${p.id}`}>Review &amp; hire</a>{btn("Decline", () => decide("deny"))}</div>;
-    else if (p.kind === "lease") actions = <div className="acts">{btn("Hand it back", () => decide("approve", "once"), true)}{btn("Keep control", () => decide("deny"))}<a className="small faint" href={`#/live/${p.bot_id}`} style={{ marginLeft: "auto" }}>Open live view</a></div>;
-    else if (p.kind === "site") actions = <>{noteInput}<div className="acts">
-      {p.thread_id && btn("Allow once (this thread)", () => decide("approve", "thread"))}
-      {btn("Allow site", () => decide("approve", "site"), true)}
-      {btn("Allow site fully", () => decide("approve", "full"))}
-      {btn("Block site", () => decide("deny", "block"))}
-      {openLink("Open thread")}</div></>;
-    else if (p.kind === "plan") actions = <div className="acts">
-      {btn(p.effect === "browse" ? "Allow for this plan" : "Allow", () => decide("approve", "once"), true)}
-      {btn(p.effect === "browse" ? "Use what they know" : "Finish with what it has", () => decide("deny"))}
-      {openLink("Open plan")}</div>;
-    else actions = <>{noteInput}<div className="acts">
-      {btn("Approve once", () => decide("approve", "once"), true)}
-      {p.thread_id && btn("For this thread", () => decide("approve", "thread"))}
-      {!noAlways && btn("Always for this member", () => decide("approve", "always"))}
-      {btn("Deny", () => decide("deny"))}
-      {openLink("Open thread")}</div></>;
-  }
+  if (p.kind === "engram") actions = <div className="acts">
+    {d.proposal?.replaces && btn("Keep current", () => engram("keep"))}
+    {btn("Accept", () => engram("accept"), true)}
+    {btn("Reject", () => engram("reject"))}
+    <a className="small faint" href={`${S.engram.url}/#/inbox`} target="_blank" rel="noopener noreferrer" style={{ marginLeft: "auto" }}>Open in Engram</a></div>;
+  else if (p.kind === "hire") actions = <div className="acts"><a className="pc-pill sig s" href={`#/hire/${p.id}`}>Review &amp; hire</a>{btn("Decline", () => decide("deny"))}</div>;
+  else if (p.kind === "lease") actions = <div className="acts">{btn("Hand it back", () => decide("approve", "once"), true)}{btn("Keep control", () => decide("deny"))}<a className="small faint" href={`#/live/${p.bot_id}`} style={{ marginLeft: "auto" }}>Open live view</a></div>;
+  else if (p.kind === "site") actions = <>{noteInput}<div className="acts">
+    {p.thread_id && btn("Allow once (this thread)", () => decide("approve", "thread"))}
+    {btn("Allow site", () => decide("approve", "site"), true)}
+    {btn("Allow site fully", () => decide("approve", "full"))}
+    {btn("Block site", () => decide("deny", "block"))}
+    {openLink("Open thread")}</div></>;
+  else if (p.kind === "plan") actions = <div className="acts">
+    {btn(p.effect === "browse" ? "Allow for this plan" : "Allow", () => decide("approve", "once"), true)}
+    {btn(p.effect === "browse" ? "Use what they know" : "Finish with what it has", () => decide("deny"))}
+    {openLink("Open plan")}</div>;
+  else actions = <>{noteInput}<div className="acts">
+    {btn("Approve once", () => decide("approve", "once"), true)}
+    {p.thread_id && btn("For this thread", () => decide("approve", "thread"))}
+    {!noAlways && btn("Always for this member", () => decide("approve", "always"))}
+    {btn("Deny", () => decide("deny"))}
+    {openLink("Open thread")}</div></>;
 
   return (
-    <div className={`pit ${done ? "done" : ""}`}>
+    <div className="pit">
       <div className="spread">
-        <div className="row"><Face b={b} size="sm" mood={done ? "idle" : "needs"} /><b>{b?.name || p.bot_id}</b><EffectChip kind={p.effect} /></div>
-        <span className="pc-m small faint">{done ? `${p.kind === "engram" && p.note ? p.note : p.status} ${ago(p.decided_at)}` : p.kind === "engram" ? "from Engram" : `expires ${when(p.expires_at)}`}</span>
+        <div className="row"><Face b={b} size="sm" mood="needs" /><b>{b?.name || p.bot_id}</b><EffectChip kind={p.effect} /></div>
+        <span className="pc-m small faint">{p.kind === "engram" ? "from Engram" : `expires ${when(p.expires_at)}`}</span>
       </div>
       <p className="t">{p.title}</p>
       {body}
       {j.reason && <p className="why">{`jev · ${j.by || ""} · ${j.reason}${j.ms ? ` · ${j.ms} ms` : ""}`}</p>}
-      {!done && p.learn && <p className="small faint">{p.learn.need - p.learn.streak <= 1
+      {p.learn && <p className="small faint">{p.learn.need - p.learn.streak <= 1
         ? `Approve this and ${who} stops asking for “${p.learn.label}”.`
         : `Approve “${p.learn.label}” ${p.learn.need - p.learn.streak} times in a row and ${who} stops asking.`}</p>}
       {actions}
-      {done && p.note && <p className="small faint">{p.note}</p>}
-      {done && typeof d.public_url === "string" && /^https:\/\//.test(d.public_url) && <p className="small"><a href={d.public_url} target="_blank" rel="noreferrer">{d.public_url}</a></p>}
     </div>
   );
 }
