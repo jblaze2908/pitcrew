@@ -22,12 +22,12 @@ export async function killSwitch() {
 }
 export function resumeCrew() { setSetting("paused", "0"); audit("driver", "crew.resumed"); bus.emit("paused", { paused: false }); }
 
+/** Returns the turns this restart cut off; the caller resumes them once reapOrphans has restarted the brains. */
 export function bootRuntime() {
   // Pit stops from a previous process can't be answered: their Codex requests died with the computers.
   for (const ps of all<{ id: string }>("SELECT id,thread_id FROM pitstops WHERE status='pending' AND kind NOT IN ('hire','engram')")) run("UPDATE pitstops SET status='expired', note='Control plane restarted', decided_at=? WHERE id=?", now(), ps.id);
   const cut = settleCutTurns();
   run("UPDATE threads SET status='idle' WHERE status!='idle'"); // also clears pre-v1.2 'done'/'failed' thread states
-  setTimeout(() => resumeCut(cut), 3000).unref();
   // Name threads left untitled (from before naming existed, or still on small talk) from their first real message.
   for (const t of all<{ id: string }>("SELECT id FROM threads WHERE title=?", UNTITLED)) {
     const first = all<{ data: string }>("SELECT data FROM events WHERE thread_id=? AND kind='user' ORDER BY id LIMIT 20", t.id).map((e) => json(e.data, {})).find((d) => !isSmallTalk(d.text) || d.attachments?.length);
@@ -35,6 +35,7 @@ export function bootRuntime() {
   }
   setInterval(tickSchedules, 30000).unref();
   startShotSweeper();
+  return cut;
 }
 
 type Cut = { id: string; thread_id: string; trigger: string; started_at: number };
@@ -53,7 +54,7 @@ const RESUME_WITHIN = 2 * 3600_000;
 // Each cut turn resumes once, on the thread it was on. Not a resume of a resume (a restart loop would replay forever),
 // nor a delegated or plan turn (whoever waited for its answer died with the process), nor work older than 2 h.
 export const resumable = (t: Cut, at = now()) => !["resume", "delegation", "plan"].includes(t.trigger) && at - t.started_at < RESUME_WITHIN && !!getThread(t.thread_id);
-function resumeCut(cut: Cut[]) {
+export function resumeCut(cut: Cut[]) {
   for (const t of cut) {
     if (!resumable(t)) { addEvent(t.thread_id, null, "system", { text: "Say continue to pick it up." }); continue; }
     sendMessage(t.thread_id, { text: RESUME, trigger: "resume", display: "Pick up where you left off" })

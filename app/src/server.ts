@@ -44,8 +44,10 @@ server.on("upgrade", liveView);
 
 ensureChief();
 A.ensureSetupToken();
-R.bootRuntime();
+const cut = R.bootRuntime();
 await reapOrphans();
+// Only now: reapOrphans restarts the brain container, which kills any brain a resume had already started (exit 137).
+R.resumeCut(cut);
 await reapCode();
 startCodeSweeper();
 startEngram();
