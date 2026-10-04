@@ -139,9 +139,12 @@ export interface EventCtx { cont?: boolean; b: Bot; fromName: string; pits: Reco
 export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
   const d = e.data;
   switch (e.kind) {
-    case "user": return <UserMsg e={e} botId={c.b.id} fromName={c.fromName} />;
+    // A scheduled run's prompt is the same every time: one line, not a message bubble.
+    case "user": return d.via === "schedule" ? <p className="sys">{`Scheduled run · ${String(d.text || "").replace(/^\[Scheduled: ([^\]]+)\][\s\S]*/, "$1")}`}</p> : <UserMsg e={e} botId={c.b.id} fromName={c.fromName} />;
     // A follow-on message from the same member (only steps between) drops the face; the column stays for alignment.
-    case "agent": return <div className={`msg bot${c.cont ? " cont" : ""}`}>{c.cont ? <span /> : <Face b={c.b} size="sm" mood="idle" />}<Md text={d.text} /></div>;
+    // A scheduled run with nothing notable (runtime/turns.ts isQuiet): one faint line.
+    case "agent": if (/^\s*QUIET\b/.test(d.text || "")) return <p className="sys faint">{`Nothing new · ${String(d.text).replace(/^\s*QUIET:?\s*/, "")}`}</p>;
+      return <div className={`msg bot${c.cont ? " cont" : ""}`}>{c.cont ? <span /> : <Face b={c.b} size="sm" mood="idle" />}<Md text={d.text} /></div>;
     case "shot": return <Shot e={e} b={c.b} />;
     case "tool": return <Tool e={e} />;
     case "system": return <p className={`sys ${d.tone === "bad" ? "bad" : ""}`}>{d.text}</p>;

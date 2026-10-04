@@ -2,7 +2,8 @@
 import type { Snapshot } from "../snapshot.js";
 
 export type TokenUsage = Record<string, number>; // Codex's inputTokens, cachedInputTokens, outputTokens, …
-export interface ActiveTurn { turnId: string; codexTurnId: string | null; base: TokenUsage | null; total: TokenUsage | null; last: TokenUsage | null; usageFrom: number; snap?: Snapshot }
+// quietFrom: a scheduled run's thread updated_at before it started, put back if the run ends QUIET (nothing notable).
+export interface ActiveTurn { turnId: string; codexTurnId: string | null; base: TokenUsage | null; total: TokenUsage | null; last: TokenUsage | null; usageFrom: number; snap?: Snapshot; quietFrom?: number }
 export interface TurnEnd { turnId: string; status: string; cost: number }
 export interface Lease { since: number; waiters: ((ok: boolean) => void)[]; ask?: Promise<boolean> | null }
 // The browser snapshot the agent last saw: text is the diff base, lines are its ref lines for grounding.

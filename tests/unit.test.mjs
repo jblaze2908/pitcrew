@@ -723,3 +723,20 @@ test("bound dashboards: one read-only SELECT per query, confined to the member's
   const missing = await L.resolveSurface({ id: "sf_2", title: "x", spec: { ...spec, source: "g/none.db" }, bot_id: "b_led" });
   assert.equal(missing.data.asOf, null); assert.equal(missing.spec.root.children[0].type, "Text");
 });
+
+test("a scheduled run that ends QUIET keeps the thread's place; one with news moves it to the top", async () => {
+  const { active } = await import("../app/dist/src/runtime/state.js");
+  const T = await import("../app/dist/src/runtime/turns.js");
+  run("INSERT INTO bots(id,name,provider,created_at) VALUES('b_quiet','Quiet','openai',0)");
+  for (const [th, reply] of [["th_quiet", "QUIET: checked orders since 23:30, none new"], ["th_news", "3 new orders today, ₹1,240. Milk spend is up 40% this week."]]) {
+    run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES(?,?,?,0,1000)", th, "b_quiet", th);
+    const turnId = `tu_${th}`;
+    run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,provider,model,started_at) VALUES(?,?,?,?,?,?,?,?)", turnId, th, "b_quiet", "running", "schedule", "openai", "m", 1);
+    active.set(th, { turnId, codexTurnId: null, base: null, total: null, last: null, usageFrom: 0, quietFrom: 1000 });
+    run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES(?,?,'agent',?,1)", th, turnId, JSON.stringify({ text: reply }));
+    await T.finishTurn(th, "completed");
+  }
+  assert.equal(one("SELECT updated_at u FROM threads WHERE id='th_quiet'").u, 1000);
+  assert.ok(one("SELECT updated_at u FROM threads WHERE id='th_news'").u > 1000);
+  assert.ok(T.isQuiet("QUIET: nothing") && T.isQuiet("  QUIET") && !T.isQuiet("Quietly, 3 orders came in"));
+});
