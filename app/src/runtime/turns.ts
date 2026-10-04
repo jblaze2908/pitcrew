@@ -5,7 +5,7 @@ import { one, all, run, now, uid, json, getSetting } from "../db.js";
 import { getBot, instructions, dynamicTools, engramBlock } from "../crew.js";
 import { botDir, toolManifest } from "../computer.js";
 import { providerReady, estimateCost } from "../providers.js";
-import { snapshot, changes } from "../snapshot.js";
+import { snapshot, changes, scratchNames } from "../snapshot.js";
 import { bus } from "./bus.js";
 import { active, byCodex, turnWaiters, wakeFor, type TurnEnd } from "./state.js";
 import { enqueue, peekQueued, takeQueued, requeue, queuedThreads } from "./queue.js";
@@ -221,7 +221,12 @@ export async function finishTurn(threadId: string, status: string, error?: strin
     const ch = changes(b.id, a.snap, snapshot(b.id));
     if (ch.length) {
       run("UPDATE turns SET changes=? WHERE id=?", JSON.stringify(ch), a.turnId);
-      addEvent(threadId, a.turnId, "changes", { turnId: a.turnId, botId: b.id, count: ch.length, files: ch.slice(0, 12).map((c) => ({ path: c.path, status: c.status, lines: c.lines })) });
+      // Deletions whose file now sits in .scratch were moved there, not lost: the card counts them as tidied, and lists
+      // only what the driver might care about. The full list stays on the turn for Review changes.
+      const scratch = ch.some((c) => c.status === "deleted") ? scratchNames(b.id) : null;
+      const tidied = scratch ? ch.filter((c) => c.status === "deleted" && scratch.has(c.path.split("/").pop()!)) : [];
+      const shown = ch.filter((c) => !tidied.includes(c));
+      addEvent(threadId, a.turnId, "changes", { turnId: a.turnId, botId: b.id, count: shown.length, tidied: tidied.length, files: shown.slice(0, 12).map((c) => ({ path: c.path, status: c.status, lines: c.lines })) });
     }
   } catch {}
   postLearned(threadId, a.turnId, b.id);

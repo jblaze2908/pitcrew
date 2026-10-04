@@ -98,9 +98,12 @@ export function Tool({ e, results }: { e: ThreadEvent; results?: Map<string, Rec
 }
 
 function Changes({ d }: { d: Record<string, any> }) {
+  // Files only moved into .scratch say so in one line; they're working files, not results.
+  const tidied = d.tidied ? `Tidied ${d.tidied} working file${d.tidied === 1 ? "" : "s"} into .scratch` : "";
+  if (!d.count) return tidied ? <p className="sys faint">{tidied}</p> : null;
   return (
     <div className="changes">
-      <div className="spread"><b className="small">{`Changed ${d.count} file${d.count === 1 ? "" : "s"}`}</b><a className="small faint" href={`#/crew/${d.botId}/files/${d.turnId}`}>Review changes</a></div>
+      <div className="spread"><b className="small">{`Changed ${d.count} file${d.count === 1 ? "" : "s"}${tidied ? ` · ${tidied.toLowerCase()}` : ""}`}</b><a className="small faint" href={`#/crew/${d.botId}/files/${d.turnId}`}>Review changes</a></div>
       {(d.files as { path: string; status: string; lines?: number }[]).map((f) => (
         <a key={f.path} className="cf" href={`#/crew/${d.botId}/files/${d.turnId}/${encodeURIComponent(f.path)}`}>
           <span className={`pc-chip ${f.status === "added" ? "ok" : f.status === "deleted" ? "bad" : "blue"}`}>{f.status[0].toUpperCase()}</span>

@@ -10,11 +10,12 @@ import { go } from "../lib/router";
 import { useFetch } from "../lib/useFetch";
 import { ComputerTab } from "./crew/ComputerTab";
 import { FilesTab } from "./crew/FilesTab";
+import { DataTab } from "./crew/DataTab";
 import { MemoryTab, SchedulesTab } from "./crew/Lists";
 import { ProfileTab } from "./crew/ProfileTab";
 import { ThreadsTab } from "./crew/ThreadsTab";
 
-const TABS = ["threads", "files", "computer", "profile", "memory", "schedules", "rules", "sites"];
+const TABS = ["threads", "files", "data", "computer", "profile", "memory", "schedules", "rules", "sites"];
 
 export function Crew({ id, tab, rest }: { id: string; tab: string; rest: (string | undefined)[] }) {
   const { data: d, error, reload } = useFetch(() => api.get<BotDetail>(`/api/bots/${id}`), [id]);
@@ -30,6 +31,7 @@ export function Crew({ id, tab, rest }: { id: string; tab: string; rest: (string
   switch (tab) {
     case "threads": body = <ThreadsTab b={b} />; break;
     case "files": body = <FilesTab b={b} rest={rest} />; break;
+    case "data": body = <DataTab b={b} />; break;
     case "computer": body = <ComputerTab b={b} reload={reload} />; break;
     case "profile": body = <ProfileTab key={b.id} b={b} />; break;
     case "memory": body = <MemoryTab b={b} memory={d.memory} memoryIn={d.memoryIn} error={d.memoryError} reload={reload} />; break;

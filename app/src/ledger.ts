@@ -87,6 +87,38 @@ export function listLedgers(botId: string) {
 }
 export const mayRead = (reader: { id: string }, owner: { id: string; private: boolean }) => reader.id === owner.id || !owner.private;
 
+// ---------- the driver's view of a member's data ----------
+// Table names come from the ledger itself (the member chose them), so they are quoted, never spliced bare.
+const ident = (n: string) => `"${n.replace(/"/g, '""')}"`, lit = (n: string) => `'${n.replace(/'/g, "''")}'`;
+const TABLES = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name";
+export interface LedgerInfo { path: string; size: number; asOf: number | null; tables: { name: string; rows: number | null; columns: string[] }[]; error?: string }
+// Every ledger a member keeps, with its tables, row counts and columns. Two worker runs per ledger, cached per version.
+export async function ledgerOverview(botId: string): Promise<LedgerInfo[]> {
+  const out: LedgerInfo[] = [];
+  for (const path of listLedgers(botId)) {
+    const file = ledgerPath(botId, path);
+    if (!file) continue;
+    const size = statSync(file).size, t = await runQueries(file, { t: TABLES }), r0 = t.results.t;
+    if ("error" in r0) { out.push({ path, size, asOf: t.asOf, tables: [], error: r0.error }); continue; }
+    const names = r0.rows.map((x) => String(x.name)).slice(0, 30), q: Record<string, string> = {};
+    names.forEach((n, i) => { q[`c${i}`] = `SELECT count(*) AS n FROM ${ident(n)}`; q[`k${i}`] = `SELECT name FROM pragma_table_info(${lit(n)})`; });
+    const r = (await runQueries(file, q)).results;
+    const rows = (k: string) => { const x = r[k]; return x && !("error" in x) ? x.rows : null; };
+    out.push({ path, size, asOf: t.asOf, tables: names.map((n, i) => ({ name: n, rows: Number(rows(`c${i}`)?.[0]?.n ?? NaN) || (rows(`c${i}`) ? 0 : null), columns: (rows(`k${i}`) || []).map((x) => String(x.name)) })) });
+  }
+  return out;
+}
+// The newest 50 rows of one table (by rowid when it has one), for the driver to look at.
+export async function tablePreview(botId: string, path: string, table: string) {
+  const file = ledgerPath(botId, path);
+  if (!file) return { error: "No such ledger" };
+  const t = (await runQueries(file, { t: TABLES })).results.t;
+  if ("error" in t || !t.rows.some((x) => x.name === table)) return { error: "No such table" };
+  const r = (await runQueries(file, { a: `SELECT * FROM ${ident(table)} ORDER BY rowid DESC LIMIT 50`, b: `SELECT * FROM ${ident(table)} LIMIT 50` })).results;
+  const ok = !("error" in r.a) ? r.a : r.b;
+  return "error" in ok ? { error: ok.error } : { columns: ok.columns, rows: ok.rows };
+}
+
 // ---------- binding ----------
 // Which props a bound component gets from its query's rows. A bound component may leave these out of its spec.
 export const BOUND: Record<string, string[]> = {

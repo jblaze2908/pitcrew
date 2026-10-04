@@ -809,3 +809,32 @@ test("the agent's tab is brought to the front only when something could have mov
   await Bz.frontTab(mcp); open = 2; Bz.noteTabs(mcp, 2); assert.ok(Bz.needsFront(mcp), "a closed tab: check again");
   await Bz.frontTab(mcp); assert.ok(!Bz.needsFront(mcp)); assert.ok(Bz.needsFront(mcp, 1), "the driver is watching: always");
 });
+
+test("the driver sees each member's ledgers, tables, row counts and newest rows; table names can't inject SQL", async () => {
+  const L = await import("../app/dist/src/ledger.js");
+  const { DatabaseSync } = await import("node:sqlite");
+  mkdirSync(`${root}/bots/b_view/work/grocery`, { recursive: true });
+  const db = new DatabaseSync(`${root}/bots/b_view/work/grocery/ledger.db`);
+  db.exec(`CREATE TABLE orders(id INTEGER PRIMARY KEY, total REAL); CREATE TABLE "x"" FROM orders; DROP TABLE orders; --"(a)`);
+  for (let i = 1; i <= 60; i++) db.prepare("INSERT INTO orders(total) VALUES(?)").run(i * 10);
+  db.close();
+  const [l] = await L.ledgerOverview("b_view");
+  assert.equal(l.path, "grocery/ledger.db"); assert.ok(l.asOf > 0 && l.size > 0);
+  const orders = l.tables.find((t) => t.name === "orders"), odd = l.tables.find((t) => t.name.startsWith("x"));
+  assert.deepEqual([orders.rows, orders.columns], [60, ["id", "total"]]);
+  assert.deepEqual([odd.rows, odd.columns], [0, ["a"]]);
+  const p = await L.tablePreview("b_view", "grocery/ledger.db", "orders");
+  assert.equal(p.rows.length, 50); assert.equal(p.rows[0].id, 60, "newest first");
+  assert.equal((await L.tablePreview("b_view", "grocery/ledger.db", odd.name)).rows.length, 0);
+  assert.deepEqual(await L.tablePreview("b_view", "grocery/ledger.db", "orders; DROP TABLE orders"), { error: "No such table" });
+  assert.equal((await L.ledgerOverview("b_view"))[0].tables.find((t) => t.name === "orders").rows, 60, "still there");
+});
+
+test("files moved into .scratch read as tidied, not deleted", async () => {
+  const { scratchNames } = await import("../app/dist/src/snapshot.js");
+  mkdirSync(`${root}/bots/b_tidy/work/.scratch/grocery-archive/details`, { recursive: true });
+  writeFileSync(`${root}/bots/b_tidy/work/.scratch/grocery-archive/bulk_probe.mjs`, "x");
+  writeFileSync(`${root}/bots/b_tidy/work/.scratch/grocery-archive/details/order_1.yml`, "x");
+  assert.deepEqual([...scratchNames("b_tidy")].sort(), ["bulk_probe.mjs", "order_1.yml"]);
+  assert.equal(scratchNames("b_none").size, 0);
+});
