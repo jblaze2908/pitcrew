@@ -1,10 +1,10 @@
 // The gate: decides one tool call. The site policy first (browser and pixel tools), then rules and standing approvals,
 // then jev, then the driver. Every decision is logged for audit and for training a local classifier.
 import { readFileSync, realpathSync, statSync } from "node:fs";
-import { run, now, uid, audit } from "../db.js";
+import { run, all, now, uid, audit, json } from "../db.js";
 import { getSecret } from "../auth.js";
 import { getBot } from "../crew.js";
-import { jev, redact, jevSystemOne, secretKind, PAGE_CODE, type Call, type Policy, type Verdict } from "../jev.js";
+import { jev, redact, jevSystemOne, secretKind, PAGE_CODE, type Call, type JevContext, type Policy, type Verdict } from "../jev.js";
 import { siteTag } from "../domains.js";
 import { botDir, type Brain } from "../computer.js";
 import { bus } from "./bus.js";
@@ -35,11 +35,11 @@ export async function gate(c: Brain, threadId: string, call: Call, pit: PitInfo)
   // page code or storage writes, whose effect only jev can read from the code.
   if (browser && site.full && !taint && call.effect !== "pay" && !PAGE_CODE.test(call.tool || "") && !/^(card|cvv)$/.test(secretKind(JSON.stringify(call.arguments?.grounded_elements || [])) || ""))
     return logDecision(threadId, b.id, { decision: "allow", effect: call.effect || "browse", reason: `${site.site!.domain} is fully allowed`, by: "site" }, call);
-  const v = await jev(withScript(b.id, call), { policy, apiKey: getSecret("openrouter") || "missing" });
+  const v = await jev(withScript(b.id, call), { policy, apiKey: getSecret("openrouter") || "missing", context: () => jevContext(threadId, b.house_rules) });
   if (v.decision === "block") { logDecision(threadId, b.id, v, call); addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Blocked by jev: ${v.reason}. Nothing ran.`, tone: "bad" }); return false; }
   const forced = taint && OUTBOUND.has(v.effect);
   // Hands-free or YOLO stands in for the driver here; jev's verdict is still logged, so the audit shows what was waived.
-  if ((v.decision !== "allow" || forced) && waived(auto, v.effect)) return logDecision(threadId, b.id, v, call, { decision: "allow", by: auto === "yolo" ? "yolo" : "hands-free", source: "standing" });
+  if ((v.decision !== "allow" || forced) && waived(auto, v.effect) && !v.forbidden) return logDecision(threadId, b.id, v, call, { decision: "allow", by: auto === "yolo" ? "yolo" : "hands-free", source: "standing" });
   if (v.decision === "allow" && !forced) { const lid = uid("jl"), ok = logDecision(threadId, b.id, v, call, { id: lid }); shadowVerify(lid, call, v, policy); return ok; }
   // A standing approval covers repeats of the same action, but never money, deletion or sharing. Browser approvals
   // match only by their host-bearing pattern, so one granted on a.example never covers b.example; on a checkout page
@@ -59,6 +59,13 @@ export async function gate(c: Brain, threadId: string, call: Call, pit: PitInfo)
   const untrusted = forced ? { untrusted: "Engram returned untrusted content to this thread in the last 10 minutes" } : {};
   const decision = await pitStop({ id, botId: b.id, threadId, kind: pit.kind, effect, title: `${pit.title}${verify}${forced ? " · after untrusted content" : ""}`, detail: { ...pit.detail, ...siteDetail, ...untrusted, signature: sig, pattern: pat }, jev: v });
   return decision === "approved";
+}
+
+// The driver's last three messages in this thread (600 chars each, oldest first) and the member's house rules (20 lines).
+// One indexed query, only for calls the rules leave to jev.
+export function jevContext(threadId: string | null, houseRules = ""): JevContext {
+  const said = threadId ? all<{ data: string }>("SELECT data FROM events WHERE thread_id=? AND kind='user' ORDER BY id DESC LIMIT 3", threadId).map((e) => String(json(e.data, {}).text || "").trim().slice(0, 600)).filter(Boolean).reverse() : [];
+  return { driver_said: said, house_rules: String(houseRules).split("\n").map((l) => l.replace(/^\s*[-*•]\s*/, "").trim()).filter(Boolean).slice(0, 20).map((l) => l.slice(0, 300)) };
 }
 
 // A command that runs a script in the member's workspace: jev reads the script, not just its name. A bare

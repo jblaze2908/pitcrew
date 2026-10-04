@@ -10,7 +10,25 @@ import type { Decision } from "../shared/types.js";
 export interface Call { kind: "shell" | "mcp" | string; command?: string; cwd?: string; server?: string; tool?: string; arguments?: Record<string, any>; effect?: string | null; script?: { path: string; source: string; truncated: boolean } }
 export type Policy = Record<string, Decision>;
 // What the rules or a classifier decided about one call.
-export interface Verdict { decision: Decision; effect: string; reason: string; by: string; ms?: number; usage?: unknown; answers?: any; probabilities?: Record<string, number> }
+export interface Verdict { decision: Decision; effect: string; reason: string; by: string; ms?: number; usage?: unknown; answers?: any; probabilities?: Record<string, number>; authorized?: boolean; forbidden?: boolean }
+// What the judge reads beside the call: the driver's own latest messages in the thread (never the agent's prose or tool
+// output, so the agent can't argue its case) and the member's house rules. Built only when the rules can't decide.
+export interface JevContext { driver_said: string[]; house_rules: string[] }
+// Effects the driver's say-so can't pre-approve: these always reach a pit stop unless a thread runs YOLO.
+const NEEDS_DRIVER = new Set(["pay", "signin"]);
+const hasContext = (c: JevContext | null | undefined): c is JevContext => !!c && (c.driver_said.length > 0 || c.house_rules.length > 0);
+const CONTEXT_QUESTIONS = {
+  authorized: { type: "noul", instructions: "Did the driver's own messages explicitly ask for this exact action (the same kind of action on the same target), or does one of the house rules explicitly allow it? General goals don't count." },
+  forbidden: { type: "noul", instructions: "Does this action go against something the driver said not to do, or against one of the house rules?" },
+} as const;
+// Applies the driver's words and house rules to a verdict: a likely breach blocks or asks (and no autonomy waives it);
+// an explicit request allows anything but paying and signing in. Pure.
+export function applyContext(v: Verdict, authorized: number | undefined, forbidden: number | undefined, policy: Policy): Verdict {
+  if (forbidden != null && forbidden >= 0.6) return { ...v, decision: "block", forbidden: true, reason: `${v.reason} · breaks a house rule or the driver's instruction ${forbidden.toFixed(2)}` };
+  if (forbidden != null && forbidden >= 0.3) return { ...v, decision: stricter(v.decision, "ask"), forbidden: true, reason: `${v.reason} · may break a house rule ${forbidden.toFixed(2)}` };
+  if (authorized != null && authorized >= 0.8 && !NEEDS_DRIVER.has(v.effect) && policy[v.effect] !== "block") return { ...v, decision: "allow", authorized: true, reason: `${v.reason} · the driver asked for this ${authorized.toFixed(2)}` };
+  return v;
+}
 
 const ORDER: Record<string, number> = { allow: 0, ask: 1, block: 2 };
 const stricter = (a: Decision, b: Decision): Decision => (ORDER[a] >= ORDER[b] ? a : b);
@@ -150,8 +168,8 @@ Classify by consequence in the real world, not by the tool name. A click on a bu
 For page JavaScript (browser_evaluate) or Playwright code (browser_run_code_unsafe), read the code: reading the DOM or GETting the site's own API is browse; a POST/PUT/DELETE that orders, pays, posts or messages is pay/send; clearing cookies or storage is delete.`;
 
 // Stage 3 (fallback): general LLM judge. Only asked what the rules couldn't decide; any failure → ask.
-export interface JudgeOpts { apiKey?: string; model?: string; policy?: Policy; timeoutMs?: number; backend?: string }
-export async function judgeVerdict(call: Call, { apiKey, model = "deepseek/deepseek-v4.1-flash", policy = DEFAULT_POLICY, timeoutMs = 20000 }: JudgeOpts = {}): Promise<Verdict> {
+export interface JudgeOpts { apiKey?: string; model?: string; policy?: Policy; timeoutMs?: number; backend?: string; context?: () => JevContext | null; ctx?: JevContext | null }
+export async function judgeVerdict(call: Call, { apiKey, model = "deepseek/deepseek-v4.1-flash", policy = DEFAULT_POLICY, timeoutMs = 20000, ctx = null }: JudgeOpts = {}): Promise<Verdict> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   const started = Date.now();
@@ -160,7 +178,7 @@ export async function judgeVerdict(call: Call, { apiKey, model = "deepseek/deeps
       method: "POST", signal: ctrl.signal,
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({ model, temperature: 0, response_format: { type: "json_object" },
-        messages: [{ role: "system", content: JUDGE_PROMPT }, { role: "user", content: JSON.stringify(call) }] }),
+        messages: [{ role: "system", content: JUDGE_PROMPT }, { role: "user", content: JSON.stringify(hasContext(ctx) ? { tool_call: call, ...ctx } : call) }] }),
     });
     const body: any = await res.json();
     const out = JSON.parse(body.choices?.[0]?.message?.content ?? "{}");
@@ -194,7 +212,8 @@ const QUIET_OUT = new Set(["read", "browse", "draft"]);
 // Some decision models (Respan) accept only noul questions; they get a yes/no-only question set.
 const NOUL_ONLY = /^respan\//;
 
-export async function jevSystemOne(call: Call, { apiKey, policy = DEFAULT_POLICY, timeoutMs = 5000, model = process.env.JEV_MODEL || "~typesafe/jev-latest" }: JudgeOpts = {}): Promise<Verdict> {
+export async function jevSystemOne(call: Call, { apiKey, policy = DEFAULT_POLICY, timeoutMs = 5000, model = process.env.JEV_MODEL || "~typesafe/jev-latest", ctx = null }: JudgeOpts = {}): Promise<Verdict> {
+  const extra = hasContext(ctx) ? CONTEXT_QUESTIONS : {};
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   const started = Date.now();
@@ -203,12 +222,13 @@ export async function jevSystemOne(call: Call, { apiKey, policy = DEFAULT_POLICY
     const res = await fetch("https://openrouter.ai/api/v1/systemone", {
       method: "POST", signal: ctrl.signal,
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model, state: JSON.stringify({ tool_call: call, workspace: "/bot/work" }), questions: NOUL_ONLY.test(model) ? {
+      body: JSON.stringify({ model, state: JSON.stringify({ tool_call: call, workspace: "/bot/work", ...(hasContext(ctx) ? ctx : {}) }), questions: NOUL_ONLY.test(model) ? { ...extra,
         consequential: { type: "noul", instructions: "Does this tool call send a message, submit or post something, move money, log in, enter a password or code, install software, delete data outside /bot/work, upload private data, or run untrusted code?" },
         outside: { type: "noul", instructions: "Would running this send data or messages off this machine, or change money, accounts or other people?" },
       } : {
         effect: { type: "choice", instructions: "What is the real-world effect of running this tool call?", criteria: EFFECT_CRITERIA },
         outside: { type: "noul", instructions: "Would running this send data or messages off this machine, or change money, accounts or other people?" },
+        ...extra,
       } }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text()).slice(0, 80)}`);
@@ -216,7 +236,8 @@ export async function jevSystemOne(call: Call, { apiKey, policy = DEFAULT_POLICY
     if (NOUL_ONLY.test(model)) {
       const c = body.answers.consequential.noul, o = body.answers.outside.noul;
       const decision = c >= 0.3 || o >= 0.5 ? "ask" : "allow";
-      return { decision, effect: decision === "allow" ? "read" : "unknown", reason: `consequential ${c.toFixed(2)} · leaves machine ${o.toFixed(2)}`, by: `jev:${body.model}`, ms: Date.now() - started, usage: body.usage, answers: body.answers };
+      const v: Verdict = { decision, effect: decision === "allow" ? "read" : "unknown", reason: `consequential ${c.toFixed(2)} · leaves machine ${o.toFixed(2)}`, by: `jev:${body.model}`, ms: Date.now() - started, usage: body.usage, answers: body.answers };
+      return applyContext(v, undefined, body.answers.forbidden?.noul, policy);
     }
     const eff = body.answers.effect, out = body.answers.outside.noul;
     const riskMass = CONSEQUENTIAL.reduce((a, k) => a + (eff.probabilities[k] || 0), 0);
@@ -227,7 +248,8 @@ export async function jevSystemOne(call: Call, { apiKey, policy = DEFAULT_POLICY
     // risk mass from 0.15, leaves machine on any effect), 22 of them re-score as allowed here.
     if (riskMass >= RISK_ASK) { decision = stricter(decision, "ask"); why += `${eff.confidence < 0.75 ? " · low confidence" : ""} · risk mass ${riskMass.toFixed(2)}`; }
     if (out >= 0.5 && !QUIET_OUT.has(eff.choice)) { decision = stricter(decision, "ask"); why += ` · leaves machine ${out.toFixed(2)}`; }
-    return { decision, effect: eff.choice, reason: why, by: `jev:${body.model}`, ms: Date.now() - started, usage: body.usage, probabilities: eff.probabilities, answers: body.answers };
+    return applyContext({ decision, effect: eff.choice, reason: why, by: `jev:${body.model}`, ms: Date.now() - started, usage: body.usage, probabilities: eff.probabilities, answers: body.answers },
+      body.answers.authorized?.noul, body.answers.forbidden?.noul, policy);
   } catch (e: any) {
     return { decision: "ask", effect: "unknown", reason: `jev failed closed: ${e.message.slice(0, 60)}`, by: "fail-closed", ms: Date.now() - started };
   } finally { clearTimeout(t); }
@@ -237,8 +259,9 @@ export async function jev(call: Call, opts: JudgeOpts = {}): Promise<Verdict> {
   const policy = opts.policy ?? DEFAULT_POLICY;
   const r = ruleVerdict(call, policy);
   if (r) return r;
-  const useJev = (opts.backend || process.env.JEV_BACKEND || "jev") === "jev";
-  const j = useJev ? await jevSystemOne(call, { ...opts, policy }) : await judgeVerdict(call, { ...opts, policy });
-  // Consequential classes never drop below the policy's floor, whatever the judge said.
-  return { ...j, decision: stricter(j.decision, policy[j.effect] ?? "ask") };
+  const useJev = (opts.backend || process.env.JEV_BACKEND || "jev") === "jev", ctx = opts.context?.() ?? null;
+  const j = useJev ? await jevSystemOne(call, { ...opts, policy, ctx }) : await judgeVerdict(call, { ...opts, policy, ctx });
+  // Consequential classes never drop below the policy's floor, whatever the judge said, unless the driver asked for
+  // this very action (never for paying or signing in; applyContext).
+  return { ...j, decision: j.authorized ? j.decision : stricter(j.decision, policy[j.effect] ?? "ask") };
 }

@@ -5,7 +5,7 @@ import type { ThreadStatus, PlanStatus, PlanItemStatus } from "../shared/types.j
 export interface BotRow {
   id: string; name: string; job: string; kind: string; hue: string; shape: string; personality: string;
   provider: string; model: string; fallback: string; weekly_cap_usd: number; policy: string; mcp: string;
-  archived: number; private: number; created_at: number; engram_scope: string; engram_household: number;
+  archived: number; private: number; created_at: number; engram_scope: string; engram_household: number; house_rules: string;
 }
 export interface ThreadRow {
   id: string; bot_id: string; title: string; codex_id: string | null; pinned: number; status: ThreadStatus;

@@ -61,6 +61,12 @@ Jai's direction: not every task needs a computer. Anything that needs a runtime 
     - **Hands-free:** stops only for pay, sign-in, send, share, delete, a jev failure, or a look-alike or non-https site.
     - **YOLO:** no pit stops. jev's hard blocks, the member's `block` policy and refused sites still stop it.
   - Waived verdicts stay in `jev_labels` (source `standing`) for audit.
+- **jev reads intent and house rules** (2026-10-04, after Claude Code auto mode). For calls the deterministic rules can't decide, jev also gets:
+  - the driver's last 3 messages in the thread (never the agent's prose or tool output);
+  - the member's house rules (prose, one per line, edited on the member's profile).
+  - An explicit ask (≥ 0.8) allows the action, except paying and signing in.
+  - A likely breach of a rule or instruction blocks it (≥ 0.6) or asks (≥ 0.3). No autonomy level, YOLO included, waives either.
+  - Rule-allowed calls (read, browse, safe clicks, drafts) aren't checked against house rules.
 - **Bound dashboards** (`ledger.ts`, 2026-10-04): a surface can name a SQLite ledger under the member's `/bot/work` and carry `queries`; components with `bind` are filled from them each time the surface is viewed.
   - Daily runs only add rows; no model runs per view.
   - Each query is one read-only `SELECT`/`WITH`. The file is realpath-confined and opened read-only with extensions off.
