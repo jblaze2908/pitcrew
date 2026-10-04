@@ -36,7 +36,7 @@ export function titleFrom(text: unknown, attachments: string[] = []) {
   return s[0].toUpperCase() + s.slice(1);
 }
 // A greeting says nothing about what the thread is for, so the thread waits for its first real message.
-const SMALL_TALK = /^(hi+|hey+|hello+|yo|sup|hola|namaste|good (morning|afternoon|evening|night)|thanks?( you)?|ty|ok(ay)?|cool|test(ing)?|ping|are you there|you there)[\s!.?,]*$/i;
+const SMALL_TALK = /^(?:(?:hi+|hey+[ao]?|hello+|yo+|sup|wass?up|what'?s ?up|hola|namaste|gm|good (?:morning|afternoon|evening|night)|how are (?:you|u)(?: doing)?|how'?s it going|thanks?(?: you)?|ty|ok(?:ay)?|cool|test(?:ing)?|ping|(?:are )?you there|there)[\s!.?,]*)+$/i;
 export const isSmallTalk = (text: unknown) => SMALL_TALK.test(String(text || "").trim());
 export function nameThread(t: ThreadRow, text: string, attachments: string[]) {
   if (t.title !== UNTITLED || (isSmallTalk(text) && !attachments.length)) return;

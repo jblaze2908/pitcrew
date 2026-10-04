@@ -141,7 +141,7 @@ export interface SitesView { scope: string; modes: SiteMode[]; sites: SiteRow[] 
 export interface ModelInfo { id: string; name: string; price?: { in: number; out: number } | null }
 
 export interface FileChange { path: string; status: "added" | "modified" | "deleted" | string; lines?: number; before?: string | null; after?: string | null }
-export interface ChangeRun { id: string; thread_id: string; started_at: number; thread_title: string; changes: FileChange[] }
+export interface ChangeRun { id: string; thread_id: string; started_at: number; thread_title: string; cost_usd: number | null; changes: FileChange[] }
 export interface FileDiff extends FileChange { text?: boolean; size?: number; beforeText: string; afterText: string }
 export interface FsEntry { name: string; dir: boolean; size: number; mtime: number }
 export type FsNode = { type: "dir"; path: string; entries: FsEntry[] } | { type: "file"; path: string; size: number; mtime: number; image: boolean; text?: string };

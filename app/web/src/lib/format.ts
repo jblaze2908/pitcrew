@@ -17,6 +17,16 @@ export const clock = () => clockFmt.format(new Date()).replace(",", "");
 export const when = (t: number | null | undefined) => (t ? whenFmt.format(new Date(t)) : "");
 export const hourNow = () => +hourFmt.format(new Date());
 
+const hmFmt = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: IST });
+const keyFmt = new Intl.DateTimeFormat("en-CA", { timeZone: IST });
+const dayFmt = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: IST });
+export const hm = (t: number) => hmFmt.format(new Date(t));
+/** "Today", "Yesterday" or "Thu 2 Oct", by the IST calendar day. */
+export const dayLabel = (t: number) => {
+  const k = keyFmt.format(new Date(t));
+  return k === keyFmt.format(new Date()) ? "Today" : k === keyFmt.format(new Date(Date.now() - 86400000)) ? "Yesterday" : dayFmt.format(new Date(t)).replace(",", "");
+};
+
 export const until = (t: number) => {
   const m = Math.max(0, Math.round((t - Date.now()) / 60000));
   return m < 60 ? `${m}m` : m < 2880 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${Math.round(m / 1440)}d`;

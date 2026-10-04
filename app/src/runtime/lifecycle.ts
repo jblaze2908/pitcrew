@@ -8,6 +8,7 @@ import { getThread, addEvent, UNTITLED, titleFrom, isSmallTalk } from "./threads
 import { interrupt, sendMessage, startQueues } from "./turns.js";
 import { decide } from "./pitstops.js";
 import { tickSchedules } from "./schedules.js";
+import { backfillTitles } from "./titles.js";
 
 export async function killSwitch() {
   setSetting("paused", "1");
@@ -33,6 +34,7 @@ export function bootRuntime() {
     const first = all<{ data: string }>("SELECT data FROM events WHERE thread_id=? AND kind='user' ORDER BY id LIMIT 20", t.id).map((e) => json(e.data, {})).find((d) => !isSmallTalk(d.text) || d.attachments?.length);
     if (first) { const title = titleFrom(first.text, first.attachments || []); if (title !== UNTITLED) run("UPDATE threads SET title=? WHERE id=?", title, t.id); }
   }
+  setTimeout(() => backfillTitles().catch(() => {}), 60000).unref();
   setInterval(tickSchedules, 30000).unref();
   startShotSweeper();
   return cut;
