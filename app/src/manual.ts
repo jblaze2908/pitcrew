@@ -46,7 +46,7 @@ const PAGES = (driver: string): Record<string, string> => ({
   ].join("\n"),
   files: [
     "Files: /bot/work is your workspace.",
-    `- out/: what ${driver} sees (Library). publish_file shares one file as a link (for a report they'll keep or share; not for daily numbers).`,
+    `- out/: what ${driver} sees (Library). publish_file shares one file as a link, only when ${driver} asks for one.`,
     "- skills/: your skill library (git). downloads/: browser downloads. uploads/: what the driver attached. .scratch/: probes, raw dumps, one-off scripts; never shown as results.",
     "- A task's data (its ledger) lives in its own folder, e.g. /bot/work/grocery.",
     `- file:// is blocked in the browser; open workspace files at ${FILES_URL}<path>.`,
