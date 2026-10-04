@@ -97,23 +97,6 @@ export function Tool({ e, results }: { e: ThreadEvent; results?: Map<string, Rec
   return <details className={`tool${e.data.viaScript ? " nested" : ""}`}><summary><span className={`st ${st}`} /><StepIcon name={v.icon} /><span className="lbl">{v.label}</span>{v.detail && <span className="det">{v.detail}</span>}</summary><Debug d={e.data} /></details>;
 }
 
-function Changes({ d }: { d: Record<string, any> }) {
-  // Files only moved into .scratch say so in one line; they're working files, not results.
-  const tidied = d.tidied ? `Tidied ${d.tidied} working file${d.tidied === 1 ? "" : "s"} into .scratch` : "";
-  if (!d.count) return tidied ? <p className="sys faint">{tidied}</p> : null;
-  return (
-    <div className="changes">
-      <div className="spread"><b className="small">{`Changed ${d.count} file${d.count === 1 ? "" : "s"}${tidied ? ` · ${tidied.toLowerCase()}` : ""}`}</b><a className="small faint" href={`#/crew/${d.botId}/files/${d.turnId}`}>Review changes</a></div>
-      {(d.files as { path: string; status: string; lines?: number }[]).map((f) => (
-        <a key={f.path} className="cf" href={`#/crew/${d.botId}/files/${d.turnId}/${encodeURIComponent(f.path)}`}>
-          <span className={`pc-chip ${f.status === "added" ? "ok" : f.status === "deleted" ? "bad" : "blue"}`}>{f.status[0].toUpperCase()}</span>
-          <span className="pc-m small">{f.path}</span>
-          {f.lines ? <span className={`pc-m small ${f.lines > 0 ? "okc" : "badc"}`}>{`${f.lines > 0 ? "+" : ""}${f.lines} lines`}</span> : null}
-        </a>))}
-    </div>
-  );
-}
-
 type Learned = { memory_id: string; text: string; state: "saved" | "held" | "known" | "replaced" | "undone" };
 const LEARNED_STATE: Record<Learned["state"], string> = { saved: "saved", held: "waiting for you", known: "already known", replaced: "replaced an older one", undone: "undone" };
 /** What this run remembered; read per card from the turn, so an undo shows after a reload too. */
@@ -152,7 +135,8 @@ export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
     case "tool": return <Tool e={e} />;
     case "system": return <p className={`sys ${d.tone === "bad" ? "bad" : ""}`}>{d.text}</p>;
     case "error": return <p className="err">{d.text}</p>;
-    case "changes": return <Changes d={d} />;
+    // Older runs recorded a changed-files card; threads no longer draw it (Crew → Files keeps the history).
+    case "changes": return null;
     case "learned": return <LearnedCard d={d} />;
     case "delegation": return <DelegationCard d={(c.latest.get(d.id) || d) as Deleg} />;
     case "plan": return <PlanCard P={(c.latest.get(d.id) || d) as PlanSnapshot} />;

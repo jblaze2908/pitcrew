@@ -31,6 +31,7 @@ export const botDir = (id: string) => `${ROOT}/bots/${id}`;
 export const PW_OUT = "/bot/run/playwright";
 // Playwright MCP waits this long after each action for triggered work (default 500 ms; click 589-620 → 196-226 ms, measured).
 export const PW_SETTLE_MS = 100;
+const gitIdentity = (b: { id: string; name: string }) => { const n = b.name.replace(/[^\w .'-]/g, "") || b.id, e = `${b.id}@crew.pitcrew`; return ["-e", `GIT_AUTHOR_NAME=${n}`, "-e", `GIT_AUTHOR_EMAIL=${e}`, "-e", `GIT_COMMITTER_NAME=${n}`, "-e", `GIT_COMMITTER_EMAIL=${e}`]; };
 // Opt-in Playwright MCP capabilities: storage (cookies, local/session storage). Network request reads are core; request
 // mocking (the network cap) is covered by browser_run_code_unsafe. Part of the manifest cache key, so a change re-lists.
 export const PW_CAPS = "storage";
@@ -272,7 +273,9 @@ export class Computer {
       "--cpus", "1.5", "--memory", "2g", "--pids-limit", "768", "--shm-size", "512m",
       "--read-only", "--tmpfs", "/tmp:size=768m,mode=1777", "--tmpfs", `/home/crew:size=128m,uid=${CREW_UID},gid=${CREW_UID},mode=700`,
       "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--network", net, "-v", `${botDir(id)}:/bot`, ...policyMount(id),
-      "-e", `PITCREW_HUE=${HEX[b.hue] || HEX.c1}`, "-e", `PITCREW_NAME=${b.name.replace(/[^\w .'-]/g, "")}`, IMAGE]);
+      "-e", `PITCREW_HUE=${HEX[b.hue] || HEX.c1}`, "-e", `PITCREW_NAME=${b.name.replace(/[^\w .'-]/g, "")}`,
+      // Task folders are git repos (see crew.ts); commits carry the member as author, with no git config needed.
+      ...gitIdentity(b), IMAGE]);
     if (!r.ok) throw new Error(`Couldn't start the computer: ${r.err.trim().slice(0, 200)}`);
     // The brain joins this bot's network to reach its exec-server; nothing else is on it.
     const c = await docker(["network", "connect", net, BRAIN]);
