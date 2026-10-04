@@ -152,3 +152,13 @@ test("a masked edit that can't be pasted back keeps the model's whole image and 
   const bad = await dynamicTool({ bot: { id: bot.id }, mems: new Map() }, th, { tool: "generate_image", arguments: { prompt: "x", mask: "uploads/m-mask.png" }, threadId: th });
   assert.match(bad.contentItems[0].text, /mask needs the image/);
 });
+
+test("the thread reads an edit message back: the version, the marks, the pins and the model", async () => {
+  const { editOf } = await import("../app/dist/shared/edits.js");
+  const brushed = I.editMessage(bot.id, "Make the date gold", { image: "out/images/lighthouse.png", mask: "uploads/m-mask.png", marked: "uploads/m-marked.png", pins: [{ x: 0.5, y: 0.05, note: "Add Lakeview Towers" }, { x: 0.2, y: 0.8, note: "" }] });
+  assert.deepEqual(editOf(brushed.text), { image: "out/images/lighthouse.png", typed: "Make the date gold", marked: "uploads/m-marked.png", brushed: true, pins: ["Add Lakeview Towers", ""], model: "Nano Banana 2" });
+  const plan = editOf(I.editMessage(bot.id, "", { image: "out/images/lighthouse.png", model: "plan", pins: [] }).text);
+  assert.equal(plan.typed, ""); assert.equal(plan.model, "ChatGPT plan"); assert.equal(plan.brushed, false);
+  assert.deepEqual(editOf(I.editMessage(bot.id, "Bigger date", { image: "/bot/work/out/images/lighthouse.png" }).text), { image: "out/images/lighthouse.png", typed: "Bigger date", marked: null, brushed: false, pins: [], model: null });
+  assert.equal(editOf("Just a message"), null);
+});

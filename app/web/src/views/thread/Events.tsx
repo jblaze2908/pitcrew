@@ -1,6 +1,7 @@
 // One transcript event as an element. Tool calls are grouped by the caller (see groupEvents).
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Img, ImageIndex } from "../../lib/images";
+import { editOf, type EditAsk } from "../../../../shared/edits";
 import type { Bot, DelegationCard as Deleg, PitStop, PlanSnapshot, ThreadEvent } from "../../../../shared/types";
 import { DelegationCard } from "../../components/DelegationCard";
 import { PitCard } from "../../components/PitCard";
@@ -16,20 +17,39 @@ import { catches } from "./Painting";
 export const stepOk = (e: ThreadEvent) => e.data.status === "completed" && (e.data.exitCode == null || e.data.exitCode === 0);
 const isImg = (p: string) => /\.(png|jpe?g|webp|gif)$/i.test(p);
 
-export function UserMsg({ e, botId, fromName }: { e: ThreadEvent; botId: string; fromName: string }) {
+export function UserMsg({ e, botId, fromName, images, onView }: { e: ThreadEvent; botId: string; fromName: string; images?: ImageIndex; onView?: (im: Img) => void }) {
   const d = e.data;
   const via = d.via === "schedule" ? "scheduled · " : d.via === "delegation" ? `${fromName} asks · ` : d.via === "plan" || d.via === "resume" ? "Pitcrew · " : null;
+  const ed = editOf(d.text), loose = (p: string): Img => ({ id: `a:${p}`, path: p, parentId: null, botId, caption: "", at: e.ts });
+  const atts = ((d.attachments || []) as string[]).filter((p) => p !== ed?.marked);
   return (
     <div className="msg me">
       {via && <span className="pc-lab">{via}</span>}
-      {d.display || d.text}
-      {d.attachments?.length > 0 && (
-        <div className="sent-atts">{(d.attachments as string[]).map((p) => isImg(p)
-          ? <a key={p} href={`/files/${botId}/${p}?inline=1`} target="_blank" rel="noopener"><img src={`/files/${botId}/${p}?inline=1`} alt={p.split("/").pop()} loading="lazy" /></a>
+      {ed ? <EditAskView ed={ed} botId={botId} at={e.ts} images={images} onView={onView} /> : d.display || d.text}
+      {atts.length > 0 && (
+        <div className="sent-atts">{atts.map((p) => isImg(p)
+          ? <button key={p} className="img-open" title="Open" onClick={() => onView?.(loose(p))}><img src={`/files/${botId}/${p}?inline=1`} alt={p.split("/").pop()} loading="lazy" /></button>
           : <a key={p} className="pc-chip" href={`/files/${botId}/${p}`}>{p.split("/").pop()!.replace(/^[a-z0-9]+-/, "")}</a>)}
         </div>)}
     </div>
   );
+}
+
+/** The version an edit asks about, drawn with the driver's marks (the marked copy when there is one), then the words. */
+function EditAskView({ ed, botId, at, images, onView }: { ed: EditAsk; botId: string; at: number; images?: ImageIndex; onView?: (im: Img) => void }) {
+  const im = images?.all.filter((x) => x.path === ed.image && x.at <= at).pop();
+  const ver = im ? images!.chain(im.id).length : 0;
+  const thumb = ed.marked || ed.image;
+  const pins = ed.pins.length;
+  const sub = [ed.brushed ? "brushed" : "", pins ? `${pins} pin${pins > 1 ? "s" : ""}` : "", ed.model || ""].filter(Boolean).join(" · ");
+  return <>
+    <button className="edit-ref" title="Open" onClick={() => onView?.(im || { id: `a:${thumb}`, path: thumb, parentId: null, botId, caption: "", at })}>
+      <img src={`/files/${botId}/${thumb}?inline=1`} alt="" loading="lazy" />
+      <span><span>{ver ? `Editing v${ver}` : "Editing an image"}</span>{sub && <small>{sub}</small>}</span>
+    </button>
+    {ed.typed || (pins ? null : "Edit this image")}
+    {ed.pins.some(Boolean) && <span className="edit-pins">{ed.pins.map((n, i) => n && <span key={i}><b>{i + 1}</b>{n}</span>)}</span>}
+  </>;
 }
 
 function Shot({ e, b }: { e: ThreadEvent; b: Bot }) {
@@ -45,37 +65,47 @@ function Shot({ e, b }: { e: ThreadEvent; b: Bot }) {
   );
 }
 
-/** Images a member made (generate_image or Codex's image_gen), kept in its out/images, with their versions and actions. */
+/** Images a member made (generate_image or Codex's image_gen), kept in its out/images. 440px with actions on hover; a
+ * click opens the viewer (Viewer.tsx). A version that was edited further shrinks, so the newest one carries the thread. */
 function Images({ e, b, c }: { e: ThreadEvent; b: Bot; c: EventCtx }) {
   const d = e.data, paths = d.paths as string[], ids: string[] = paths.map((p, i) => d.ids?.[i] || `p:${p}`);
   // The paint caught while waiting covers the image, then falls away once (Painting.tsx).
   const [cover] = useState(() => (d.paintingId && catches.get(d.paintingId)) || null);
   const [gone, setGone] = useState(!cover);
   const [burst, setBurst] = useState<string | null>(null);
+  const [full, setFull] = useState(false);
   useEffect(() => { if (!cover) return; catches.delete(d.paintingId); const t = setTimeout(() => setGone(true), 1700); return () => clearTimeout(t); }, [cover, d.paintingId]);
-  const I = c.images, one = paths.length === 1 ? I?.byId.get(ids[0]) : undefined, chain = one ? I!.chain(one.id) : [];
-  const parent = one?.parentId ? I?.byId.get(one.parentId) : undefined;
+  const I = c.images, one = paths.length === 1 ? I?.byId.get(ids[0]) : undefined;
+  const ver = one ? I!.chain(one.id).length : 0, old = !!one && I!.edited.has(one.id), fam = one && !old ? I!.family(one.id) : [];
+  const parent = one?.parentId ? I!.byId.get(one.parentId) : undefined;
   const keep = async (id: string) => { if (id.startsWith("p:") || I?.kept.has(id)) return; setBurst(id); setTimeout(() => setBurst(null), 900); await c.onKeep?.(id); };
-  const meta = [d.pasted ? (d.pasted.ok ? "kept outside the brush" : "whole image changed") : null, d.model, d.cost != null ? `$${Number(d.cost).toFixed(3)}` : null].filter(Boolean).join(" · ");
+  const meta = [d.model, d.cost != null ? `$${Number(d.cost).toFixed(3)}` : null, d.pasted ? (d.pasted.ok ? "nothing changed outside the brush" : "whole image changed") : null].filter(Boolean) as string[];
   const Burst = () => <span className="burst" aria-hidden="true">{["--c5", "--c2", "--c3", "--c6", "--c1", "--c5"].map((h, i) => <i key={i} style={{ background: `var(${h})`, ["--a" as any]: `${i * 60}deg` }} />)}</span>;
   return (
     <div className="msg bot"><Face b={b} size="sm" mood="idle" />
-      <figure className="shot">
+      <figure className={`shot img-card${old ? " old" : ""}`}>
         <div className={`img-wrap${paths.length > 1 ? " shot-grid" : ""}`}>{paths.map((p, i) => {
-          const src = `/files/${d.botId}/${p}?inline=1`, im = I?.byId.get(ids[i]), kept = I?.kept.has(ids[i]);
-          return <div key={p} className={`img-tile${kept ? " kept" : ""}`}><a href={src} target="_blank" rel="noopener"><img src={src} alt={d.caption} loading="lazy" /></a>
-            {paths.length > 1 && im && <span className="img-acts"><button onClick={() => c.onEdit?.(im)}>Edit</button>{!ids[i].startsWith("p:") && <button onClick={() => keep(ids[i])}>{kept ? "Kept" : "Use this"}{burst === ids[i] && <Burst />}</button>}</span>}</div>;
+          const im = I?.byId.get(ids[i]), kept = I?.kept.has(ids[i]);
+          return <div key={p} className={`img-tile${kept ? " kept" : ""}`}>
+            <button className="img-open" title="Open" onClick={() => im && c.onView?.(im)}><img src={`/files/${d.botId}/${p}?inline=1`} alt={d.caption} loading="lazy" /></button>
+            {!old && paths.length === 1 && <span className="img-tag">Open</span>}
+            {kept && <span className="img-tag kept">Kept</span>}
+            {im && !old && <span className="img-acts">
+              <button onClick={() => c.onEdit?.(im)}>Edit</button>
+              {one && parent ? <button onClick={() => c.onCompare?.(im)}>{`Compare with v${ver - 1}`}</button> : <button onClick={() => c.onMore?.(im)}>More like this</button>}
+              {!ids[i].startsWith("p:") && !kept && <button onClick={() => keep(ids[i])}>Keep{burst === ids[i] && <Burst />}</button>}
+              <a href={`/files/${d.botId}/${p}`} download title="Download">↓</a>
+            </span>}
+          </div>;
         })}{!gone && cover && <div className="unveil" aria-hidden="true">{Array.from({ length: 48 }, (_, i) => <i key={i} style={{ background: cover[i] || undefined, ["--r" as any]: `${((i * 47) % 60) - 30}deg`, animationDelay: `${((i * 29) % 12) * 35}ms` }} />)}</div>}</div>
-        <figcaption className="small muted">{d.caption}{meta && <span className="faint">{` · ${meta}`}</span>}{cover && cover.length > 0 && <span className="faint">{` · thanks for the ${cover.length} squares`}</span>}</figcaption>
-        {chain.length > 1 && <div className="vers" aria-label="Versions">{chain.map((v, i) => <Fragment key={v.id}>{i > 0 && <i className="ln" />}
-          <button className={`ver${v.id === one!.id ? " on" : ""}${I!.kept.has(v.id) ? " kept" : ""}`} title={`Your next message edits v${i + 1}`} onClick={() => c.onPick?.(v)}><img src={`/files/${v.botId}/${v.path}?inline=1`} alt="" loading="lazy" /><span>{`v${i + 1}`}</span></button></Fragment>)}</div>}
-        {one && <div className="img-actions">
-          <button className="pc-pill s" onClick={() => c.onEdit?.(one)}>Edit</button>
-          <button className="pc-pill s o" onClick={() => c.onMore?.(one)}>More like this</button>
-          {parent && <button className="pc-pill s o" onClick={() => c.onCompare?.(parent, one)}>Compare</button>}
-          {!one.id.startsWith("p:") && (I!.kept.has(one.id) ? <span className="pc-chip ok">kept</span>
-            : <button className="pc-pill s o burst-host" onClick={() => keep(one.id)}>Use this{burst === one.id && <Burst />}</button>)}
-        </div>}
+        {old ? <figcaption className="small faint"><span><b className="img-ver">{`v${ver}`}</b>{` · edited into v${ver + 1} below`}</span></figcaption>
+          : <figcaption className="small muted">
+              <span className="img-line">{ver > 0 && <b className="img-ver">{`v${ver}`}</b>}{meta.map((m) => <span key={m} className="faint">{m}</span>)}{cover && cover.length > 0 && <span className="faint">{`thanks for the ${cover.length} squares`}</span>}</span>
+              {d.caption && <button className={`img-prompt${full ? " full" : ""}`} title={full ? "Show less" : "Show the whole prompt"} onClick={() => setFull((v) => !v)}><span>{d.caption}</span><u>{full ? "less" : "more"}</u></button>}
+            </figcaption>}
+        {fam.length > 1 && <div className="vers" aria-label="Versions">{fam.map((v, i) => <Fragment key={v.id}>{i > 0 && <i className="ln" />}
+          <button className={`ver${v.id === one!.id ? " on" : ""}${I!.kept.has(v.id) ? " kept" : ""}`} title="Open this version" onClick={() => c.onView?.(v)}>
+            <img src={`/files/${v.botId}/${v.path}?inline=1`} alt="" loading="lazy" /><span>{`v${I!.chain(v.id).length}`}</span></button></Fragment>)}</div>}
       </figure>
     </div>
   );
@@ -158,14 +188,14 @@ function LearnedCard({ d }: { d: Record<string, any> }) {
 }
 
 export interface EventCtx { cont?: boolean; b: Bot; fromName: string; pits: Record<string, PitStop>; latest: Map<string, Record<string, any>>; surface: (id: string) => ReactNode;
-  images?: ImageIndex; onEdit?: (im: Img) => void; onPick?: (im: Img) => void; onMore?: (im: Img) => void; onCompare?: (a: Img, b: Img) => void; onKeep?: (id: string) => Promise<unknown> }
+  images?: ImageIndex; onView?: (im: Img) => void; onCompare?: (im: Img) => void; onEdit?: (im: Img) => void; onMore?: (im: Img) => void; onKeep?: (id: string) => Promise<unknown> }
 
 /** The element for one event, or null when it draws nothing (an unknown pit stop or surface). */
 export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
   const d = e.data;
   switch (e.kind) {
     // A scheduled run's prompt is the same every time: one line, not a message bubble.
-    case "user": return d.via === "retro" ? <p className="sys">{d.display || "Retro"}</p> : d.via === "resume" ? <p className="sys">Picked up again after the usage limit reset</p> : d.via === "schedule" ? <p className="sys">{`Scheduled run · ${String(d.text || "").replace(/^\[Scheduled: ([^\]]+)\][\s\S]*/, "$1")}`}</p> : <UserMsg e={e} botId={c.b.id} fromName={c.fromName} />;
+    case "user": return d.via === "retro" ? <p className="sys">{d.display || "Retro"}</p> : d.via === "resume" ? <p className="sys">Picked up again after the usage limit reset</p> : d.via === "schedule" ? <p className="sys">{`Scheduled run · ${String(d.text || "").replace(/^\[Scheduled: ([^\]]+)\][\s\S]*/, "$1")}`}</p> : <UserMsg e={e} botId={c.b.id} fromName={c.fromName} images={c.images} onView={c.onView} />;
     // A follow-on message from the same member (only steps between) drops the face; the column stays for alignment.
     // A scheduled run with nothing notable (runtime/turns.ts isQuiet): one faint line.
     case "agent": if (/^\s*QUIET\b/.test(d.text || "")) return <p className="sys faint">{`Nothing new · ${String(d.text).replace(/^\s*QUIET:?\s*/, "")}`}</p>;
