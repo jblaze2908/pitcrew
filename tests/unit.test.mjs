@@ -409,6 +409,8 @@ test("the snapshot manifest survives a restart; the usage log is read from where
   writeFileSync(`${w}/a.txt`, "two"); utimesSync(`${w}/a.txt`, 1e9, 1e9);
   const S2 = await import("../app/dist/src/snapshot.js?restarted");
   assert.equal(S2.snapshot("b_snap").files["a.txt"].hash, h1);
+  mkdirSync(`${w}/.scratch/probe`, { recursive: true }); writeFileSync(`${w}/.scratch/probe/raw.json`, "{}");
+  assert.deepEqual(Object.keys(S2.snapshot("b_snap").files), ["a.txt"], ".scratch never shows as a change");
   mkdirSync(`${root}/brains/_usage`, { recursive: true });
   const log = `${root}/brains/_usage/b_use.jsonl`, line = (turn, cost) => `${JSON.stringify({ turn, input: 10, cached: 0, output: 2, cost })}\n`;
   writeFileSync(log, line("tu_old", 5)); const from = statSync(log).size; appendFileSync(log, line("tu_new", 0.25) + line("tu_new", 0.5));

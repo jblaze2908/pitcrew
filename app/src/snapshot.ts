@@ -11,7 +11,7 @@ export interface Snapshot { files: Record<string, FileState>; truncated: boolean
 export interface Change { path: string; status: "added" | "deleted" | "modified"; text: boolean; size: number; before: string | null; after: string | null; lines: number }
 
 // .playwright-mcp: browser snapshot files from before they moved to PW_OUT; tool output, not the crew's work.
-const SKIP = new Set(["node_modules", ".git", ".venv", "venv", "__pycache__", ".next", ".cache", ".turbo", ".pnpm-store", "target", ".playwright-mcp"]);
+const SKIP = new Set(["node_modules", ".git", ".venv", "venv", "__pycache__", ".next", ".cache", ".turbo", ".pnpm-store", "target", ".playwright-mcp", ".scratch"]);
 const MAX_FILES = 5000, MAX_TEXT = 1 << 20;
 const shadow = (id: string) => `${ROOT}/data/shadow/${id}`;
 const last = new Map<string, Record<string, FileState>>(); // bot id → previous manifest, to skip re-hashing unchanged files
