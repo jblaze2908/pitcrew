@@ -18,6 +18,8 @@ import type { Autonomy } from "./autonomy.js";
 const refusals = new Map<string, string>(); // thread id → why the last browser action was refused, for the agent's tool result
 const siteAsks = new Map<string, Promise<string>>(); // bot|thread|domain → pending pit stop
 export const takeRefusal = (threadId: string) => { const r = refusals.get(threadId); refusals.delete(threadId); return r; };
+// The text a declined tool call returns instead of the generic "declined at a pit stop", read once by takeRefusal.
+export const noteRefusal = (threadId: string, text: string) => { refusals.set(threadId, text); };
 export async function siteStep(b: Bot, threadId: string, call: Call, auto: Autonomy = "ask"): Promise<Pick<SiteVerdict, "policy" | "full" | "site" | "checkout"> | null> {
   if (call.kind !== "mcp" || !["browser", "computer"].includes(call.server!)) return { policy: b.policy };
   const a = call.arguments || {};

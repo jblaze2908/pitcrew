@@ -254,6 +254,13 @@ export function startQueued(threadId: string, quiet = false) {
 export const idleQueued = () => queuedThreads().filter((id) => !active.has(id));
 export const startQueues = (quiet = true) => idleQueued().map((id) => startQueued(id, quiet)).filter(Boolean).length;
 
+// A note from Pitcrew into the running turn (not the driver's words, so no user event): e.g. that a pit stop expired.
+export async function steerNote(threadId: string, text: string) {
+  const a = active.get(threadId), t = getThread(threadId);
+  if (!a?.codexTurnId || !t?.codex_id) return false;
+  await brain(getBot(t.bot_id)!).request("turn/steer", { threadId: t.codex_id, expectedTurnId: a.codexTurnId, input: toInput(t.bot_id, `[Pitcrew] ${text}`, []) });
+  return true;
+}
 /** The driver's "Send now": steers it into the running turn, or starts it. A failed delivery puts it back in place. */
 export async function sendQueuedNow(threadId: string, id: string) {
   const t = getThread(threadId), q = peekQueued(threadId, id);

@@ -63,6 +63,10 @@ export async function decide(id: string, decision: string, { scope = "once", not
   bus.emit("pitstop", { id, botId: ps.bot_id, threadId: ps.thread_id, status, pitstop: pitRow(row) });
   if (ps.thread_id && active.has(ps.thread_id)) setThreadStatus(ps.thread_id, "running");
   if (ps.thread_id && status === "expired") addEvent(ps.thread_id, null, "system", { text: `Pit stop expired after 30 minutes: nothing was done. (${ps.title})` });
+  // Codex reports a declined command as "rejected by user"; the member also hears it was only unanswered. Lazy import:
+  // turns.ts depends on this module.
+  if (ps.thread_id && status === "expired" && ps.kind === "command" && active.has(ps.thread_id))
+    import("./turns.js").then(async (T) => T.steerNote(ps.thread_id!, (await import("./gate.js")).EXPIRED_NOTE(ps.title))).catch(() => {});
   waits.get(id)?.(status); waits.delete(id);
   return row;
 }

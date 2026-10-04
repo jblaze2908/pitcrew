@@ -376,3 +376,18 @@ test("jev reads the driver's own words and house rules: an explicit ask allows, 
   });
   assert.deepEqual(await maybeRun, [false, true], "a possible breach asks even in YOLO");
 });
+
+test("an expired pit stop tells the tool call it went unanswered, not that it was refused", async () => {
+  const { gate } = await import("../app/dist/src/runtime/gate.js");
+  const S2 = await import("../app/dist/src/runtime/sitegate.js");
+  thread("t_exp");
+  const c = { bot: { id: b.id } }, call = { kind: "mcp", server: "crm", tool: "send_email", arguments: {} };
+  const r = await withFetch(jevSays("send", 0.99, { send: 0.99 }, 0.9), async () => {
+    const g = gate(c, "t_exp", call, { kind: "mcp", title: "crm: send email", detail: {} });
+    for (let i = 0; i < 20 && !pending(); i++) await flush();
+    await R.decide(pending().id, "expired"); return g;
+  });
+  assert.equal(r, false);
+  const note = S2.takeRefusal("t_exp");
+  assert.match(note, /expired because the driver didn't answer/); assert.match(note, /isn't a refusal/); assert.match(note, /crm: send email/);
+});
