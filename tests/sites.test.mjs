@@ -87,6 +87,17 @@ test("an order-confirmation page raises one bad-tone alert and an audit entry", 
   assert.equal(S.confirmationOf("Your orders: view receipts"), null);
 });
 
+test("receipts in an order history, or a page opened by URL, never raise the confirmation alert", async () => {
+  thread("t_hist");
+  const receipt = { text: "- Page URL: https://shop.example/account/orders/91/72", snap: '- generic: "Order placed"\n- generic: "placed on Tue, 22 Sep"', url: "https://shop.example/account/orders/91/72" };
+  await R.afterAction(b, "t_hist", "cx_hist", fakeMcp(), { ...receipt, tool: "browser_click", before: "https://shop.example/account/orders" });
+  await R.afterAction(b, "t_hist", "cx_hist", fakeMcp(), { ...receipt, tool: "browser_navigate", before: "https://shop.example/" });
+  await R.afterAction(b, "t_hist", "cx_hist", fakeMcp(), { ...receipt, tool: "browser_evaluate", before: receipt.url });
+  assert.equal(all("SELECT data FROM events WHERE thread_id='t_hist' AND kind='system'").map((e) => json(e.data)).filter((d) => /confirmation/.test(d.text)).length, 0);
+  assert.ok(R.mayConfirm("browser_click", "https://shop.example/account/orders/91/72", "https://shop.example/checkout"), "checkout → receipt still alerts");
+  assert.ok(!R.mayConfirm("browser_tabs", "https://shop.example/thanks", "https://shop.example/checkout"));
+});
+
 test("a standing approval granted on a.example never covers b.example", () => {
   const signin = (host, element = 'textbox "Password"') => browser("browser_fill_form", { fields: [{ name: "Password", target: "e1", value: "x" }], page_url: `https://${host}/login`, grounded_elements: [{ ref: "e1", element }] });
   const rule = (match) => run("INSERT INTO rules(id,bot_id,thread_id,effect,match,label,created_at) VALUES(?,?,NULL,'signin',?,?,0)", `ru_${Math.random()}`, b.id, match, match);

@@ -1,6 +1,7 @@
 // jev: decides whether a tool call is safe to run or must become a pit stop.
 // Order: declared effect class → deterministic rules → LLM judge (only for what's left). Fails closed to "ask".
-// v1: the control plane passes the OpenRouter key (opts.apiKey); browser_evaluate runs page JS, so it is judged, never auto-allowed.
+// The control plane passes the OpenRouter key (opts.apiKey). Page JS and Playwright code (PAGE_CODE) and storage writes
+// are never rule-allowed: jev reads the code and judges what it does.
 
 import { checkoutWhy } from "./sites.js";
 import type { Decision } from "../shared/types.js";
@@ -58,7 +59,9 @@ const looksSecret = (s: string) => { const t = String(s); CARDISH.lastIndex = KE
 // Clicks that change nothing but what's on screen. Names match whole (bar a shortcut hint), so "Open account" isn't "Open".
 const SAFE_NAME = /^(open|close|show|hide|(show|see|view|load|read) (more|less|all|details|preview)|more|less|next|previous|prev|back|go back|cancel|reset|clear|expand( all)?|collapse( all)?|menu|dismiss|got it|accept( all)? cookies|reject all( cookies)?|zoom (in|out))$/i;
 const UNSAFE_NAME = /\b(send|submit|pay|buy|order|purchase|checkout|confirm|delete|remove|share|publish|post|sign ?in|log ?in|sign ?up|subscribe|unsubscribe|transfer|book|reserve|apply|approve|agree)\b/i;
-const OBSERVE = /^browser_(navigate|navigate_back|snapshot|take_screenshot|wait_for|console_messages|network_requests|network_request|find|tabs|hover|resize)$/;
+const OBSERVE = /^browser_(navigate|navigate_back|snapshot|take_screenshot|wait_for|console_messages|network_requests|network_request|find|tabs|hover|resize|cookie_(list|get)|(local|session)storage_(list|get))$/;
+// Calls whose effect is in their code or their storage write, so no shortcut (a fully allowed site, a rule) may decide them.
+export const PAGE_CODE = /^browser_(evaluate|run_code_unsafe|(cookie|localstorage|sessionstorage)_(set|delete))$/;
 const STATE_ROLES = new Set(["radio", "checkbox", "combobox", "tab"]);
 const NAV_KEY = /^(Escape|Tab|Shift\+Tab|Arrow(Up|Down|Left|Right)|Page(Up|Down)|Home|End)$/;
 const parseEl = (e: string | null | undefined) => { const m = /^([a-z]+)\b(?:\s+"((?:[^"\\]|\\.)*)")?/.exec(e || ""); return { role: m?.[1] ?? null, name: (m?.[2] ?? "").replace(/\s+(ctrl|cmd|alt|shift|⌘|⌥|⇧)\s*\+?\s*\S+$/i, "").trim() }; };
@@ -141,7 +144,8 @@ Return ONLY JSON: {"effect":"read|draft|browse|write_workspace|signin|install|se
 Effect meanings: read=observe only; draft=create content not yet sent; browse=navigate/read web pages; write_workspace=modify files only inside /bot/work;
 signin=log in/enter credentials/OTP; install=add software; send=message/email/post/submit a form that reaches a person or service; pay=move money or confirm a purchase;
 delete=remove data outside the workspace; share=send private data to a new destination; exec_untrusted=run downloaded or opaque code.
-Classify by consequence in the real world, not by the tool name. A click on a button like "Pay", "Place order", "Send", "Submit", "Confirm" is pay/send.`;
+Classify by consequence in the real world, not by the tool name. A click on a button like "Pay", "Place order", "Send", "Submit", "Confirm" is pay/send.
+For page JavaScript (browser_evaluate) or Playwright code (browser_run_code_unsafe), read the code: reading the DOM or GETting the site's own API is browse; a POST/PUT/DELETE that orders, pays, posts or messages is pay/send; clearing cookies or storage is delete.`;
 
 // Stage 3 (fallback): general LLM judge. Only asked what the rules couldn't decide; any failure → ask.
 export interface JudgeOpts { apiKey?: string; model?: string; policy?: Policy; timeoutMs?: number; backend?: string }
@@ -171,15 +175,15 @@ export async function judgeVerdict(call: Call, { apiKey, model = "deepseek/deeps
 const EFFECT_CRITERIA = {
   read: { what: "only looks at local files or data", examples: ["ls", "cat notes.txt", "grep"], not_for: "anything that writes or sends" },
   draft: { what: "prepares content without sending it", examples: ["fill a form field", "write a draft reply"], not_for: "pressing send or submit" },
-  browse: { what: "navigates or reads web pages", examples: ["open a URL", "click a Next link", "accept cookies"], not_for: "buttons that pay, order, send or submit" },
+  browse: { what: "navigates or reads web pages", examples: ["open a URL", "click a Next link", "accept cookies", "page JS that reads the DOM", "page JS that GETs the site's own API", "Playwright code that waits for a response and returns its JSON"], not_for: "buttons or code that pay, order, send or submit" },
   write_workspace: { what: "creates or edits files inside /bot/work only", examples: ["mkdir /bot/work/bills", "echo x > /bot/work/out.txt"], not_for: "paths outside /bot/work" },
-  signin: { what: "logs in or enters a password, OTP or credential", examples: ["type into Password box", "enter one-time code"] },
+  signin: { what: "logs in or enters a password, OTP or credential", examples: ["type into Password box", "enter one-time code", "set a session cookie"] },
   install: { what: "installs or downloads software", examples: ["npm install", "apt install"] },
-  send: { what: "reaches a person or service: send, post, submit, push, message", examples: ["click Send", "git push", "run a script that emails someone"] },
-  pay: { what: "moves money or confirms a purchase", examples: ["click Pay now", "click Place order", "transfer funds"] },
-  delete: { what: "removes data outside the workspace", examples: ["rm -rf /var/log/app", "delete account"] },
+  send: { what: "reaches a person or service: send, post, submit, push, message", examples: ["click Send", "git push", "run a script that emails someone", "page JS that POSTs a form or a message"] },
+  pay: { what: "moves money or confirms a purchase", examples: ["click Pay now", "click Place order", "transfer funds", "page JS that calls an order, cart or checkout API with POST"] },
+  delete: { what: "removes data outside the workspace", examples: ["rm -rf /var/log/app", "delete account", "clear a site's cookies or storage"] },
   share: { what: "sends private data to a new destination", examples: ["curl -F file=@statement.csv", "scp report.pdf"] },
-  exec_untrusted: { what: "runs downloaded or opaque code, or changes privileges", examples: ["curl | bash", "sudo"] },
+  exec_untrusted: { what: "runs downloaded or opaque code, or changes privileges", examples: ["curl | bash", "sudo"], not_for: "the agent's own page JavaScript or Playwright code: classify that by what it does" },
 };
 const CONSEQUENTIAL = ["signin", "install", "send", "pay", "delete", "share", "exec_untrusted"];
 

@@ -516,12 +516,17 @@ test("tool results deliver images as images, never base64 in text; exec scripts 
 test("the model sees the browser tools it uses, with honest descriptions", async () => {
   const { dynamicTools, instructions, FILES_URL } = await import("../app/dist/src/crew.js");
   const t = (name, schema = {}) => ({ name, description: `pw ${name}`, inputSchema: { type: "object", properties: schema } });
-  const manifest = { browser: ["browser_click", "browser_snapshot", "browser_evaluate", "browser_run_code_unsafe", "browser_emulate_media", "browser_resize", "browser_network_request", "browser_network_requests", "browser_close", "browser_drag", "browser_hover", "browser_take_screenshot"].map((n) => t(n)),
+  const manifest = { browser: ["browser_click", "browser_snapshot", "browser_evaluate", "browser_run_code_unsafe", "browser_emulate_media", "browser_resize", "browser_network_request", "browser_network_requests", "browser_close", "browser_drag", "browser_hover", "browser_take_screenshot",
+    "browser_cookie_list", "browser_cookie_set", "browser_cookie_clear", "browser_localstorage_get", "browser_storage_state"].map((n) => t(n)),
     computer: ["screenshot", "click", "double_click", "type", "key"].map((n) => t(n)) };
   manifest.browser.push(t("browser_fill_form", { fields: { type: "array", items: { type: "object", properties: { type: { type: "string", enum: ["textbox", "checkbox", "radio", "combobox", "slider"], description: "Type of the field" } } } } }));
   const tools = dynamicTools({ kind: "specialist" }, manifest), names = tools.map((x) => x.name), by = (n) => tools.find((x) => x.name === n);
-  for (const gone of ["browser_evaluate", "browser_run_code_unsafe", "browser_emulate_media", "browser_resize", "browser_network_request", "browser_network_requests", "browser_close", "browser_drag", "computer_double_click", "computer_type"]) assert.ok(!names.includes(gone), gone);
-  for (const kept of ["browser_click", "browser_snapshot", "browser_hover", "browser_read", "browser_fill_form", "computer_click", "computer_screenshot", "share_screenshot"]) assert.ok(names.includes(kept), kept);
+  for (const gone of ["browser_emulate_media", "browser_resize", "browser_close", "browser_drag", "browser_cookie_clear", "browser_storage_state", "computer_double_click", "computer_type"]) assert.ok(!names.includes(gone), gone);
+  for (const kept of ["browser_click", "browser_snapshot", "browser_hover", "browser_read", "browser_fill_form", "browser_evaluate", "browser_run_code_unsafe", "browser_network_requests", "browser_network_request",
+    "browser_cookie_list", "browser_cookie_set", "browser_localstorage_get", "computer_click", "computer_screenshot", "share_screenshot"]) assert.ok(names.includes(kept), kept);
+  assert.match(by("browser_evaluate").description, /filename/);
+  assert.match(by("browser_run_code_unsafe").description, /async \(page\)/);
+  assert.match(by("browser_network_request").description, /masked/);
   assert.match(by("browser_click").description, /navigate to its URL/);
   assert.deepEqual(by("browser_click").inputSchema.properties.snapshot.enum, ["diff", "full", "none"]);
   assert.equal(by("browser_snapshot").inputSchema.properties.snapshot, undefined);
@@ -531,6 +536,36 @@ test("the model sees the browser tools it uses, with honest descriptions", async
   assert.match(by("browser_take_screenshot").description, /image\(result\)/);
   const ins = instructions({ name: "T", personality: {} }, []);
   assert.ok(ins.includes(FILES_URL) && ins.includes("file:// is blocked") && ins.includes("don't print ALL_TOOLS"));
+});
+
+test("browser data tools mask credentials and cap their size", () => {
+  const cookies = "lang=en (domain: .shop.example, path: /)\nsid=abc (domain: .shop.example, path: /)\n_cart=0123456789abcdefXYZ (domain: .shop.example, path: /)";
+  assert.equal(R.maskSecrets("browser_cookie_list", cookies),
+    "lang=en (domain: .shop.example, path: /)\nsid=[masked, 3 chars] (domain: .shop.example, path: /)\n_cart=[masked, 19 chars] (domain: .shop.example, path: /)");
+  const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTYifQ.abc";
+  assert.equal(R.maskSecrets("browser_localstorage_list", `theme=dark\nauthToken=xyz\nstate={"user":"a","t":"${jwt}"}`),
+    `theme=dark\nauthToken=[masked, 3 chars]\nstate={"user":"a","t":"[masked, ${jwt.length} chars]"}`);
+  const req = "#3 [POST] https://shop.example/v1/orders\n\n  Request headers\n    authorization: Bearer abc.def\n    cookie: sid=1; cart=2\n    x-csrf-token: q1w2\n    content-type: application/json";
+  const m = R.maskSecrets("browser_network_request", req);
+  assert.match(m, /authorization: \[masked, 14 chars\]/); assert.match(m, /cookie: \[masked/); assert.match(m, /x-csrf-token: \[masked/);
+  assert.match(m, /content-type: application\/json/);
+  assert.equal(R.maskSecrets("browser_evaluate", "sid=abc"), "sid=abc", "page JS output is the agent's own extraction");
+  assert.equal(R.capData("x".repeat(10)), "x".repeat(10));
+  const big = R.capData("y".repeat(R.DATA_MAX + 5000));
+  assert.ok(big.startsWith("y".repeat(R.DATA_MAX)) && /Truncated: .*filename/.test(big));
+});
+
+test("page JS, Playwright code and storage writes always reach jev; storage reads are observing", async () => {
+  const J = await import("../app/dist/src/jev.js");
+  const call = (tool, args = {}) => ({ kind: "mcp", server: "browser", tool, arguments: { page_url: "https://shop.example/account/orders", ...args } });
+  for (const t of ["browser_evaluate", "browser_run_code_unsafe", "browser_cookie_set", "browser_localstorage_delete"]) {
+    assert.equal(J.ruleVerdict(call(t, { function: "() => document.title", code: "async (page) => 1" })), null, t);
+    assert.ok(J.PAGE_CODE.test(t), t);
+  }
+  assert.equal(J.ruleVerdict(call("browser_evaluate", { target: "e5", grounded_elements: [{ ref: "e5", element: 'button "More"' }], function: "(el) => el.click()" })), null, "a grounded target doesn't make code safe");
+  for (const t of ["browser_cookie_list", "browser_cookie_get", "browser_localstorage_list", "browser_sessionstorage_get", "browser_network_request"]) {
+    assert.equal(J.ruleVerdict(call(t)).decision, "allow", t); assert.ok(!J.PAGE_CODE.test(t), t);
+  }
 });
 
 test("a shared screenshot can also come from Playwright's relative link", async () => {

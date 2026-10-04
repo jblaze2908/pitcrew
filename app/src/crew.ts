@@ -126,6 +126,8 @@ export function instructions(b: Pick<Bot, "name" | "personality"> & Partial<Bot>
       `- Refs die when the page navigates or reloads; act only on refs from the latest result.`,
       `- To open a link, browser_navigate to its /url instead of clicking it.`,
       `- Read pages with browser_snapshot or browser_read (page text as markdown). Take screenshots only when layout or visuals matter.`,
+      `- For bulk or repeated reads (order history, lists, many pages), don't click through page by page. First check browser_network_requests for the site's own API and read its responses; else extract with browser_evaluate (or browser_run_code_unsafe), looping and filtering inside one call and returning compact JSON. Save big results with filename and process them in the shell.`,
+      `- If a plain HTTP fetch from the shell can read it (public page, open API), skip the browser.`,
       `- Use browser_fill_form for radios, checkboxes and selects too, several fields per call.`,
       `- computer_* pixel actions already return a screenshot of the result; don't take another.`,
       `- file:// is blocked in the browser. Open workspace files at ${FILES_URL}<path under /bot/work>, e.g. ${FILES_URL}out/report.html (read-only).`,
@@ -187,10 +189,11 @@ function crewRoster(b: Bot, driver: string) {
 }
 
 // Browser (Playwright over CDP) and pixel tools come from the computer image's own manifest, under their usual names.
-// Page JS is never offered; the rest of HIDDEN went unused in prod rollouts and only cost prompt tokens (the runtime
-// still uses browser_hover and browser_tabs itself).
-const NO_PAGE_JS = new Set(["browser_evaluate", "browser_run_code_unsafe"]);
-const HIDDEN = new Set(["browser_emulate_media", "browser_resize", "browser_network_request", "browser_network_requests", "browser_close", "browser_drag", "computer_double_click", "computer_type"]);
+// Page JS, Playwright code, network and storage are offered and gated per call (jev reads the code; see gate.ts). HIDDEN
+// went unused in prod rollouts or is covered by browser_run_code_unsafe, and only cost prompt tokens (the runtime still
+// uses browser_hover and browser_tabs itself).
+const HIDDEN = new Set(["browser_emulate_media", "browser_resize", "browser_close", "browser_drag", "browser_cookie_clear", "browser_localstorage_clear",
+  "browser_sessionstorage_clear", "browser_storage_state", "browser_set_storage_state", "computer_double_click", "computer_type"]);
 // Actions whose result carries the page afterwards (see shapeSnapshot in runtime/pageText.ts).
 export const SNAPSHOT_ACTIONS = /^browser_(click|type|navigate|navigate_back|press_key|select_option|fill_form|hover|handle_dialog|file_upload|drop|tabs|wait_for)$/;
 const SHOT_HINT = "In an exec script it returns the image as a data: URL string: show it with image(result), never text(result).";
@@ -201,13 +204,17 @@ const DESCRIBE: Record<string, string> = {
   browser_file_upload: "Pick files in a file chooser that is already open. First click the page's upload control; the result's Modal state then shows a file chooser. Then pass absolute paths (under /bot/work). Omit paths to cancel the chooser.",
   browser_take_screenshot: `Screenshot of the current page (JPEG unless you pass type). Use it only when layout or visuals matter; read with browser_snapshot or browser_read. ${SHOT_HINT}`,
   browser_snapshot: "Accessibility snapshot of the current page, with refs to act on. Over 12 KB it is truncated: scope it with target (a ref) or depth, or search it with browser_find.",
+  browser_evaluate: "Run JavaScript in the page and get its return value as JSON. function is () => { ... } (async allowed), or (element) => { ... } with target. Use it to read in bulk: map over the DOM, or fetch the site's own API (the page's login applies). Filter inside the function so only what you need comes back; over 24 KB the result is cut, so pass filename (a path under /bot/work) for big results and read the file from the shell. Each call is checked for its real effect: code that orders, pays, posts or sends waits for the driver.",
+  browser_run_code_unsafe: "Run a Playwright function on your computer's browser controller, for what browser_evaluate can't do: capture network responses (page.waitForResponse), drive several steps in one call, read cookies (page.context().cookies()), or open a CDP session (page.context().newCDPSession(page)). code is async (page) => { ... return value; }; pass it inline. Return a small JSON value; over 24 KB the result is cut. Checked like browser_evaluate.",
+  browser_network_requests: "List the page's network requests since it loaded (static assets left out unless static is true). filter is a URL regexp, e.g. \"/api/|graphql\". Then read one with browser_network_request. The fastest way to bulk data: the site's own API responses.",
+  browser_network_request: "Headers and body of one request from browser_network_requests, by its number; part narrows it to one section (response-body is usually what you want). Auth and cookie header values are masked. Over 24 KB the result is cut, so pass filename (a path under /bot/work) for big bodies and parse the file from the shell.",
 };
 const FIELD_TYPE = "Kind of control, not its HTML type: textbox for any text, email, password or number input and textareas; checkbox; radio; combobox for a select/dropdown (value = the option's text); slider. checkbox and radio values are \"true\" or \"false\".";
 const SNAPSHOT_ARG = { type: "string", enum: ["diff", "full", "none"], description: "What the result shows of the page afterwards: diff (default: what changed since your last snapshot; full on a new page), full, or none." };
 const PIXEL = "pixel control of the computer's screen; the result includes a screenshot of the screen after the action, so don't take another";
 // One tool from an MCP server's tools/list, as the computer image reports it.
 export interface McpTool { name: string; description?: string; inputSchema?: Record<string, any> }
-export interface ToolManifest { browser: McpTool[]; computer: McpTool[]; image?: string; execInfo?: unknown }
+export interface ToolManifest { browser: McpTool[]; computer: McpTool[]; image?: string; caps?: string; execInfo?: unknown }
 function browserTool(x: McpTool) {
   const inputSchema: Record<string, any> = structuredClone(x.inputSchema || { type: "object", properties: {} });
   const field = inputSchema.properties?.fields?.items?.properties?.type;
@@ -219,7 +226,7 @@ const BROWSER_READ = { type: "function", name: "browser_read", description: "Rea
   inputSchema: { type: "object", properties: { target: { type: "string", description: "Ref of the element to read, from the latest snapshot. Omit for the whole page." }, element: { type: "string", description: "What that element is, in words." } } } };
 export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { browser: [], computer: [] }, { engram = false } = {}) {
   const runtime = [
-    ...manifest.browser.filter((x) => !NO_PAGE_JS.has(x.name) && !HIDDEN.has(x.name)).map(browserTool),
+    ...manifest.browser.filter((x) => !HIDDEN.has(x.name)).map(browserTool),
     ...(manifest.browser.some((x) => x.name === "browser_snapshot") ? [BROWSER_READ] : []),
     ...manifest.computer.filter((x) => !HIDDEN.has(`computer_${x.name}`)).map((x) => ({ type: "function", name: `computer_${x.name}`, description: `${x.description || x.name} (${x.name === "screenshot" ? `pixel control of the computer's screen. ${SHOT_HINT}` : PIXEL})`, inputSchema: x.inputSchema || { type: "object", properties: {} } })),
   ];
