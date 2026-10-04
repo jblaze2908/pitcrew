@@ -16,7 +16,8 @@ const MAX_RUNS = 6; // a thread still on small talk after this many runs keeps i
 export function cleanTitle(s: unknown) {
   const t = String(s || "").split("\n")[0].replace(/^["'“”‘’`*#\s]+|["'“”‘’`*.\s]+$/g, "").replace(/^title:\s*/i, "").replace(/\s+/g, " ").trim();
   const words = t.split(" ").length;
-  return t && !/^none$/i.test(t) && words <= 8 && t.length <= 70 ? t : null;
+  const mixed = /[A-Za-z][\u0400-\u04FF]|[\u0400-\u04FF][A-Za-z]/.test(t); // seen on gpt-6-luna: "уточification"
+  return t && !mixed && !/^none$/i.test(t) && words <= 8 && t.length <= 70 ? t : null;
 }
 
 /** The opening exchanges with greetings dropped: up to 3 driver messages and the first reply to each, 600 chars apiece. */

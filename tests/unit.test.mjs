@@ -883,6 +883,8 @@ test("threads are named by the plan model once they have a topic, never over a t
   assert.equal(Tt.cleanTitle('"Blinkit order backfill."'), "Blinkit order backfill");
   assert.equal(Tt.cleanTitle("Title: Goa trip in December"), "Goa trip in December");
   assert.equal(Tt.cleanTitle("NONE"), null);
+  assert.equal(Tt.cleanTitle("Tijori tool availability уточification"), null);
+  assert.equal(Tt.cleanTitle("Поездка в Гоа"), "Поездка в Гоа");
   assert.equal(Tt.cleanTitle("Here is a long explanation of what this thread is about and why it matters a lot"), null);
   run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_name','b_quiet','New thread',0,0)");
   const say = (kind, text) => run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('th_name',NULL,?,?,0)", kind, JSON.stringify({ text }));
