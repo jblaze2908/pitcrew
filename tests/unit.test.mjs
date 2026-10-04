@@ -1058,3 +1058,57 @@ test("the Chief proposes a retirement; the driver approves it and the member lea
   const notChief = await Tl.dynamicTool({ bot: { id: "ret_b" }, mems: new Map() }, "th_ret", { tool: "propose_retire", threadId: "cx_r", arguments: { member: "Keeper", why: "y" } });
   assert.equal(notChief.success, false);
 });
+
+test("the Chief as workspace admin: profile and model changes, file listing and deletion all wait for the driver", async () => {
+  const M = await import("../app/dist/src/runtime/manage.js");
+  const Tl = await import("../app/dist/src/runtime/tools.js");
+  const { getBot } = await import("../app/dist/src/crew.js");
+  const { existsSync } = await import("node:fs");
+  run("INSERT INTO bots(id,name,kind,job,provider,model,created_at) VALUES('chief_w','Chief W','chief','','openrouter','m0',0),('adm_a','Bills','specialist','Pays bills','openrouter','old-model',0)");
+  run("INSERT INTO bots(id,name,kind,job,private,created_at) VALUES('adm_p','Journal','specialist','Private',1,0)");
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_adm','chief_w','a',0,0)");
+  const c = { bot: { id: "chief_w" }, mems: new Map() };
+  const waitPit = async (kind) => { let ps; for (let i = 0; i < 50 && !(ps = one("SELECT * FROM pitstops WHERE kind=? AND status='pending'", kind)); i++) await new Promise((r) => setTimeout(r, 5)); return ps; };
+
+  // Profile and model: only the editable fields, normalised, trimmed to what changes; the driver's grants are refused.
+  assert.match(M.memberChange("Bills", { private: true }, "x").error, /Not yours to change: private/);
+  assert.match(M.memberChange("Bills", { soul: "x" }, "x").error, /propose_soul/);
+  assert.match(M.memberChange("Bills", { policy: { pay: "allow" } }, "x").error, /always asks/);
+  assert.match(M.memberChange("Bills", { job: "Pays bills" }, "x").error, /Nothing would change/);
+  assert.match(M.memberChange("Bills", { job: "y" }, " ").error, /Say why/);
+  const prop = Tl.dynamicTool(c, "th_adm", { tool: "propose_member_change", threadId: "cx_w", arguments: { member: "Bills", changes: { model: "new-model", job: "Pays and files bills", weekly_cap_usd: 9, policy: { send: "allow" } }, why: "3 retros: the old model looped" } });
+  let ps = await waitPit("member");
+  assert.equal(ps.title, "Change Bills: job, model, weekly_cap_usd, policy.send");
+  assert.equal(getBot("adm_a").model, "old-model", "nothing changes before approval");
+  await R.decide(ps.id, "approve");
+  assert.match((await prop).contentItems[0].text, /Bills is updated/);
+  const a = getBot("adm_a");
+  assert.deepEqual([a.model, a.job, a.weekly_cap_usd, a.policy.send], ["new-model", "Pays and files bills", 9, "allow"]);
+  const prov = M.memberChange("Bills", { provider: "openai" }, "cheaper").detail;
+  assert.deepEqual(prov.diff.map((d) => d.field), ["provider", "model"], "a provider change brings that provider's default model");
+
+  // Files: listed and deleted inside the member's workspace only; a private member's are off limits.
+  const work = `${root}/bots/adm_a/work`;
+  mkdirSync(`${work}/.scratch/old`, { recursive: true }); mkdirSync(`${work}/out`, { recursive: true });
+  writeFileSync(`${work}/.scratch/old/dump.json`, "{}"); writeFileSync(`${work}/out/report.md`, "# r");
+  symlinkSync(`${work}/out/report.md`, `${work}/link.md`);
+  assert.match(M.memberFiles("Bills").text, /\.scratch\/\nlink\.md · .*\nout\//);
+  assert.match(M.memberFiles("Journal").error, /private/);
+  assert.match(M.fileDeletion("Journal", ["x"], "y").error, /private/);
+  assert.match(M.fileDeletion("Bills", ["../../adm_p/work"], "y").error, /Not in Bills's workspace/);
+  assert.match(M.fileDeletion("Bills", ["/bot/work"], "y").error, /Not in Bills's workspace/);
+  const del = Tl.dynamicTool(c, "th_adm", { tool: "delete_member_files", threadId: "cx_w", arguments: { member: "Bills", paths: ["/bot/work/.scratch/old", "link.md"], why: "stale probes" } });
+  ps = await waitPit("files");
+  assert.equal(ps.title, "Delete 2 items from Bills's files");
+  assert.ok(existsSync(`${work}/.scratch/old/dump.json`), "nothing is deleted before approval");
+  await R.decide(ps.id, "approve");
+  assert.match((await del).contentItems[0].text, /Deleted from Bills's workspace: \.scratch\/old, link\.md/);
+  assert.ok(!existsSync(`${work}/.scratch/old`)); assert.ok(!existsSync(`${work}/link.md`));
+  assert.ok(existsSync(`${work}/out/report.md`), "deleting a link keeps its target");
+
+  const kept = Tl.dynamicTool(c, "th_adm", { tool: "delete_member_files", threadId: "cx_w", arguments: { member: "Bills", paths: ["out"], why: "y" } });
+  ps = await waitPit("files"); await R.decide(ps.id, "deny");
+  assert.match((await kept).contentItems[0].text, /kept the files/); assert.ok(existsSync(`${work}/out/report.md`));
+  const notChief = await Tl.dynamicTool({ bot: { id: "adm_a" }, mems: new Map() }, "th_adm", { tool: "member_files", threadId: "cx_w", arguments: { member: "Bills" } });
+  assert.equal(notChief.success, false);
+});

@@ -56,6 +56,7 @@ const PAGES = (driver: string): Record<string, string> => ({
     "- ask_crew_member asks one a question or gives a task in their job; their reply comes back.",
     "- query_ledger reads a member's ledger read-only (not a private member's). read_thread / find_threads read your own past threads (the Chief can read non-private members').",
     "- whats_new lists harness changes you haven't seen.",
+    "- Crew Chief only, as workspace admin: propose_member_change, propose_soul, propose_retire, delete_member_files and propose_crew_member each open a pit stop; nothing changes until the driver approves. Private members: setup and retiring only, never their files. Privacy, household access and connectors stay the driver's settings.",
   ].join("\n"),
 });
 export const TOPICS = ["browser", "dashboards", "schedules", "memory", "skills", "approvals", "files", "crew"];
