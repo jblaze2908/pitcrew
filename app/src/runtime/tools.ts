@@ -1,9 +1,9 @@
 // Pitcrew's own dynamic tools: surfaces, shared screenshots, memory, schedules, finding threads, hiring, and the
 // Chief's delegation and plans. Browser and pixel tools go on to runtimeTool.
 import { one, run, now, uid, audit, getSetting } from "../db.js";
-import { getBot, normaliseSpec } from "../crew.js";
+import { getBot, listBots, normaliseSpec } from "../crew.js";
 import { validateSurface } from "../surfaces.js";
-import { resolveSurface } from "../ledger.js";
+import { resolveSurface, ledgerPath, listLedgers, mayRead, runQueries } from "../ledger.js";
 import { imageFrom, saveShot, type ToolResult } from "../shots.js";
 import type { Brain } from "../computer.js";
 import { active } from "./state.js";
@@ -133,6 +133,19 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
         const who = r.public_url ? "anyone with the link can open it" : r.status === "share_pending" ? `only ${driver} until they approve sharing it in Pit stops` : `only ${driver} can open it`;
         return say(`Published as ${r.id}, version ${r.version}. Link (${who}): ${r.url} To update it, publish again with id ${r.id}.`);
       } catch (e: any) { return say(`Couldn't publish: ${e.message}`, false); }
+    }
+    case "query_ledger": {
+      const who = String(a.member || "").trim().toLowerCase();
+      const owner = who ? listBots().find((x) => x.id === who || x.name.toLowerCase() === who) : b;
+      if (!owner) return say(`No crew member called "${a.member}".`, false);
+      if (!mayRead(b, owner)) return say(`${owner.name} is private; its ledgers stay with it.`, false);
+      if (!a.source) { const l = listLedgers(owner.id); return say(l.length ? `${owner.name}'s ledgers (under /bot/work):\n${l.map((x) => `- ${x}`).join("\n")}` : `${owner.name} keeps no ledgers.`); }
+      const file = ledgerPath(owner.id, a.source);
+      if (!file) return say(`${owner.name} has no ledger at ${a.source}; call query_ledger without source to list them.`, false);
+      const r = (await runQueries(file, { q: String(a.sql || "") })).results.q;
+      if ("error" in r) return say(`Query failed: ${r.error}`, false);
+      const body = JSON.stringify(r.rows);
+      return say(`${r.rows.length} row${r.rows.length === 1 ? "" : "s"}${r.truncated ? " (cut at 500)" : ""} from ${owner.name}'s ${a.source}:\n${body.length > 24000 ? `${body.slice(0, 24000)}…` : body}`);
     }
     case "find_threads": {
       const found = findThreads(b.id, a.query, { exclude: threadId, limit: Math.min(Number(a.limit) || 8, 20) });

@@ -783,3 +783,15 @@ test("a usage-limit failure picks the thread back up when the limit resets, at m
   assert.deepEqual(Rs.dueResumes(Date.parse("2026-10-05T00:00:00Z")), []);
   assert.match(all("SELECT data FROM events WHERE thread_id='th_lim' AND kind='system'").map((e) => e.data).join(), /picks up again at 04:55 IST/);
 });
+
+test("crew members read each other's ledgers read-only, except a private member's", async () => {
+  const L = await import("../app/dist/src/ledger.js");
+  const { DatabaseSync } = await import("node:sqlite");
+  mkdirSync(`${root}/bots/b_own/work/grocery/.scratch`, { recursive: true });
+  const db = new DatabaseSync(`${root}/bots/b_own/work/grocery/ledger.db`); db.exec("CREATE TABLE t(x)"); db.close();
+  writeFileSync(`${root}/bots/b_own/work/grocery/.scratch/raw.db`, "");
+  assert.deepEqual(L.listLedgers("b_own"), ["grocery/ledger.db"], "scratch and dot folders aren't ledgers");
+  assert.ok(L.mayRead({ id: "b_x" }, { id: "b_own", private: false }));
+  assert.ok(!L.mayRead({ id: "b_x" }, { id: "b_own", private: true }));
+  assert.ok(L.mayRead({ id: "b_own" }, { id: "b_own", private: true }), "a private member reads its own");
+});
