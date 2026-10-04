@@ -43,6 +43,23 @@ function Shot({ e, b }: { e: ThreadEvent; b: Bot }) {
   );
 }
 
+/** Images a member made (generate_image or Codex's image_gen), kept in its out/images. */
+function Images({ e, b }: { e: ThreadEvent; b: Bot }) {
+  const d = e.data, paths = d.paths as string[];
+  const meta = [d.from?.length ? `edited from ${(d.from as string[]).map((p) => p.split("/").pop()).join(", ")}` : null, d.model, d.cost != null ? `$${Number(d.cost).toFixed(3)}` : null].filter(Boolean).join(" · ");
+  return (
+    <div className="msg bot"><Face b={b} size="sm" mood="idle" />
+      <figure className="shot">
+        <div className={paths.length > 1 ? "shot-grid" : undefined}>{paths.map((p) => {
+          const src = `/files/${d.botId}/${p}?inline=1`;
+          return <a key={p} href={src} target="_blank" rel="noopener"><img src={src} alt={d.caption} loading="lazy" /></a>;
+        })}</div>
+        <figcaption className="small muted">{d.caption}{meta && <span className="faint">{` · ${meta}`}</span>}</figcaption>
+      </figure>
+    </div>
+  );
+}
+
 /** A Code Mode script: its code, and its output once the turn has it (a scriptResult event, merged in by callId). */
 function Script({ e, result }: { e: ThreadEvent; result?: Record<string, any> }) {
   const st = !result ? "" : result.status === "completed" ? "ok" : "bad", lines = String(e.data.code || "").split("\n").length;
@@ -132,6 +149,7 @@ export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
     case "agent": if (/^\s*QUIET\b/.test(d.text || "")) return <p className="sys faint">{`Nothing new · ${String(d.text).replace(/^\s*QUIET:?\s*/, "")}`}</p>;
       return <div className={`msg bot${c.cont ? " cont" : ""}`}>{c.cont ? <span /> : <Face b={c.b} size="sm" mood="idle" />}<Md text={d.text} /></div>;
     case "shot": return <Shot e={e} b={c.b} />;
+    case "image": return <Images e={e} b={c.b} />;
     case "tool": return <Tool e={e} />;
     case "system": return <p className={`sys ${d.tone === "bad" ? "bad" : ""}`}>{d.text}</p>;
     case "error": return <p className="err">{d.text}</p>;

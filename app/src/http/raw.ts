@@ -17,7 +17,7 @@ function serveFile(req: IncomingMessage, res: ServerResponse, botId: string, rel
   try { base = realpathSync(`${botDir(botId)}/work`); full = realpathSync(join(base, normalize(decodeURIComponent(rel)))); } catch { return send(res, 404, "Not found"); }
   if (!full.startsWith(base + "/") || !statSync(full).isFile()) return send(res, 404, "Not found");
   // Images may render inline (thumbnails); everything else is a download. Inline responses are sandboxed.
-  const IMG: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif" };
+  const IMG: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml" };
   const inline = new URL(req.url!, "http://x").searchParams.get("inline") === "1" && IMG[extname(full).toLowerCase()];
   res.writeHead(200, inline
     ? { "Content-Type": inline, "Content-Security-Policy": "sandbox; default-src 'none'", "X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600", "Content-Length": statSync(full).size }

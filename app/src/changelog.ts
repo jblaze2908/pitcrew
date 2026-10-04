@@ -15,4 +15,5 @@ export const CHANGELOG: { date: string; note: string }[] = [
   { date: "2026-10-04", note: "The Crew Chief can propose_retire a member whose job is gone, duplicated or idle; the driver approves. Retiring stops its schedules and keeps its threads and memory." },
   { date: "2026-10-04", note: "The Crew Chief is the workspace admin: propose_member_change (profile, model, budget, policy), member_files and delete_member_files; each change waits for the driver." },
   { date: "2026-10-04", note: "publish_file is opt-in: publish only when the driver asks for a page, file or link, or to share something. Otherwise answer in the thread." },
+  { date: "2026-10-04", note: "Images: generate_image makes or edits images with any OpenRouter model (pass images to edit); on the ChatGPT plan Codex's image_gen works too. Both save to /bot/work/out/images and show in the chat. harness_help images." },
 ];

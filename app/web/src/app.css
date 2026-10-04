@@ -420,6 +420,7 @@ svg text{fill:var(--ink-3);font:10px var(--font-data)}
 .codeview{width:100%;height:calc(100vh - 300px);min-height:420px;border:1px solid var(--line-2);border-radius:var(--radius-sm);background:#0d0d10}
 .col>.seg{align-self:flex-start}
 .shot{margin:0;display:flex;flex-direction:column;gap:6px}
+.shot-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px}
 .shot img{display:block;max-width:100%;max-height:480px;border:1px solid var(--line);border-radius:10px;object-fit:contain;object-position:left top}
 .perms{display:flex;flex-direction:column}
 .perm{display:grid;grid-template-columns:132px minmax(0,1fr) auto;align-items:center;gap:12px;padding:9px 0;border-top:1px solid var(--line)}

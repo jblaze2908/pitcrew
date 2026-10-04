@@ -108,7 +108,7 @@ export async function startTurn(threadId: string, text: string, attachments: str
     if (!c.up) await ensureMemberToken(b);
     await c.ensure();
     let codexId = t.codex_id;
-    const tools = dynamicTools(b, await toolManifest(), { engram: memberLinked(b) }), sig = toolsSig(tools);
+    const tools = dynamicTools(b, await toolManifest(), { engram: memberLinked(b), images: providerReady("openrouter") }), sig = toolsSig(tools);
     // Dynamic tools are fixed at thread/start: resume and fork keep the old set (codex 0.156.1; their params have no
     // dynamicTools). When the set changed since this Codex thread started, start a new one and carry a recap over.
     if (codexId && t.tools_sig !== sig) {
@@ -217,8 +217,9 @@ export async function finishTurn(threadId: string, status: string, error?: strin
   const billed = billedUsage(b.id, a.turnId, a.usageFrom);
   if (billed) Object.assign(u, { input: billed.input, cached: billed.cached, output: billed.output });
   const cost = billed?.cost != null ? { usd: billed.cost, basis: "billed" } : await estimateCost(b.provider, b.model, u).catch(() => ({ usd: 0, basis: "unknown" }));
+  // extraUsd: what the turn's tools billed outside the model (generate_image).
   run("UPDATE turns SET status=?, error=?, ended_at=?, input_tokens=?, cached_tokens=?, output_tokens=?, cost_usd=?, cost_basis=? WHERE id=?",
-    status, error || null, now(), u.input, u.cached, u.output, cost.usd, cost.basis, a.turnId);
+    status, error || null, now(), u.input, u.cached, u.output, cost.usd + (a.extraUsd || 0), cost.basis, a.turnId);
   if (error) addEvent(threadId, a.turnId, "error", { text: error });
   if (status === "failed" && isUsageLimit(error)) armResume(threadId, error!); else if (status === "completed") clearResume(threadId);
   // A thread still on its provisional title gets named from the conversation (titles.ts), off the hot path.

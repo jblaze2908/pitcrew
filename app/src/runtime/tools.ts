@@ -23,6 +23,8 @@ import { IST, say } from "./util.js";
 import { remember, forget, publishFile } from "../engram.js";
 import { noteLearned } from "./learned.js";
 import { memberLinked } from "../engramStore.js";
+import { generateImage } from "../images.js";
+import { weekSpend } from "./spend.js";
 
 const ist = (t: number | null) => (t ? new Date(t + IST).toISOString().slice(0, 16).replace("T", " ") : "—");
 
@@ -156,6 +158,17 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
         const who = r.public_url ? "anyone with the link can open it" : r.status === "share_pending" ? `only ${driver} until they approve sharing it in Pit stops` : `only ${driver} can open it`;
         return say(`Published as ${r.id}, version ${r.version}. Link (${who}): ${r.url} To update it, publish again with id ${r.id}.`);
       } catch (e: any) { return say(`Couldn't publish: ${e.message}`, false); }
+    }
+    case "generate_image": {
+      if (weekSpend(b.id) >= b.weekly_cap_usd) return say(`You've reached this week's spending cap ($${b.weekly_cap_usd.toFixed(2)}); images bill against it.`, false);
+      try {
+        const r = await generateImage(b.id, a), turn = active.get(threadId);
+        if (turn && r.cost) turn.extraUsd = (turn.extraUsd || 0) + r.cost;
+        const caption = String(a.prompt).trim().slice(0, 300), edit = Array.isArray(a.images) && a.images.length > 0;
+        addEvent(threadId, turn?.turnId, "image", { botId: b.id, paths: r.paths, caption, model: r.model, cost: r.cost, ...(edit ? { from: a.images.map(String).slice(0, 16) } : {}) });
+        audit("crew", "image.generated", { botId: b.id, threadId, model: r.model, n: r.paths.length, cost: r.cost, edit });
+        return say(`Saved ${r.paths.map((p) => `/bot/work/${p}`).join(", ")} (${r.model}${r.cost != null ? `, $${r.cost.toFixed(3)}` : ""}); ${getSetting("driver_name", "the driver")} sees ${r.paths.length > 1 ? "them" : "it"} in this chat. Check with view_image before calling it done.`);
+      } catch (e: any) { return say(e.message, false); }
     }
     case "query_ledger": {
       const who = String(a.member || "").trim().toLowerCase();

@@ -3,6 +3,7 @@
 import { one, all, run, now, uid, json, getSetting, setSetting, audit } from "./db.js";
 import { DEFAULT_POLICY } from "./jev.js";
 import { DEFAULT_MODEL } from "./providers.js";
+import { DEFAULT_IMAGE_MODEL } from "./images.js";
 import { CATALOGUE } from "./surfaces.js";
 import type { Bot, EngramScope, Hue, Shape, Personality, ProviderId } from "../shared/types.js";
 import type { BotRow } from "./models.js";
@@ -136,6 +137,7 @@ export function harnessCore(driver: string) {
     `- Bulk web reads: the site's own API first (browser_network_requests, browser_replay_request), else one browser_evaluate loop; never page-by-page clicks. A plain fetch from the shell beats the browser for public pages.`,
     `- Recurring work: data in a SQLite ledger shown by a bound dashboard (render_surface with source and queries). A "[Scheduled: …]" run replies "QUIET: <what you checked>" unless an alert fired, something failed, ${driver} must act, or the digest is due.`,
     `- Showing ${driver}: render_surface for tables, charts and forms; share_screenshot for the screen; publish_file only when they ask for a link or file.`,
+    `- Images: make or edit them with image_gen or generate_image, whichever you have; they land in out/images (harness_help images).`,
     `- In exec scripts call tools.browser_click({...}); don't print ALL_TOOLS; a screenshot comes back as a data: URL: show it with image(result).`,
     `- Details: harness_help(topic), topics ${TOPICS.join(", ")}.`].join("\n");
 }
@@ -251,7 +253,7 @@ const BROWSER_READ = { type: "function", name: "browser_read", description: "Rea
   inputSchema: { type: "object", properties: { target: { type: "string", description: "Ref of the element to read, from the latest snapshot. Omit for the whole page." }, element: { type: "string", description: "What that element is, in words." } } } };
 const BROWSER_REPLAY = { type: "function", name: "browser_replay_request", description: "Re-send request #index from browser_network_requests from the page's own logged-in session, with its original headers (you never see them), optionally changing it: body replaces the body, merge sets fields in a JSON body (e.g. a next-page cursor), query sets URL parameters. The way to page through a site's own API in bulk. Returns status and body (24 KB; pass save, a path under /bot/work, for the whole body). Checked like page JS: anything that orders, pays, posts or sends waits for the driver.",
   inputSchema: { type: "object", properties: { index: { type: "integer", minimum: 1 }, body: { description: "New body: a string, or an object sent as JSON." }, merge: { type: "object", description: "Fields to set in the original JSON body." }, query: { type: "object", description: "URL parameters to set." }, method: { type: "string" }, save: { type: "string", description: "Write the full response body to this path under /bot/work." } }, required: ["index"] } };
-export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { browser: [], computer: [] }, { engram = false } = {}) {
+export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { browser: [], computer: [] }, { engram = false, images = false } = {}) {
   const runtime = [
     ...manifest.browser.filter((x) => !HIDDEN.has(x.name)).map(browserTool),
     ...(manifest.browser.some((x) => x.name === "browser_snapshot") ? [BROWSER_READ] : []),
@@ -271,7 +273,7 @@ export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { br
       inputSchema: { type: "object", properties: { member: { type: "string" }, source: { type: "string", description: "Ledger path under their /bot/work, e.g. grocery/ledger.db" }, sql: { type: "string" } } } },
     { type: "function", name: "suggest_improvement", description: "Suggest a change only Pitcrew can make (a missing tool, a rule that got in the way, a confusing result), with the evidence: runs, numbers, what happened. The driver reviews suggestions; you can't change the harness yourself.",
       inputSchema: { type: "object", properties: { area: { type: "string", enum: ["tool", "approvals", "prompt", "runtime", "other"] }, title: { type: "string" }, evidence: { type: "string" }, proposal: { type: "string" } }, required: ["title", "evidence"] } },
-    { type: "function", name: "harness_help", description: "How part of Pitcrew works, in detail: browser, dashboards, schedules, memory, skills, approvals, files or crew.",
+    { type: "function", name: "harness_help", description: "How part of Pitcrew works, in detail: browser, dashboards, schedules, memory, skills, approvals, files, images or crew.",
       inputSchema: { type: "object", properties: { topic: { type: "string", enum: TOPICS } }, required: ["topic"] } },
     { type: "function", name: "whats_new", description: "Harness changes you haven't seen yet (new tools, rules, ways of working). Marks them seen.", inputSchema: { type: "object", properties: {} } },
     { type: "function", name: "skill_view", description: "Load one of your skills (/bot/work/skills/<name>/SKILL.md), or a file inside it (file: references/x.md, scripts/y.py). Load the skill before doing a task it covers.",
@@ -288,6 +290,12 @@ export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { br
     { type: "function", name: "cancel_schedule", description: "Delete one of your schedules for good. To stop it for a while, update_schedule with paused: true.",
       inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
   ];
+  // Only with an OpenRouter key, which bills each image; ChatGPT-plan members also have Codex's own image_gen.
+  if (images) tools.push({ type: "function", name: "generate_image",
+    description: `Make or edit images with any OpenRouter image model; saved to /bot/work/out/images and shown in this chat. To edit or restyle, pass images (workspace paths). Model choice and options: harness_help images. Default model ${DEFAULT_IMAGE_MODEL}.`,
+    inputSchema: { type: "object", properties: { prompt: { type: "string" }, images: { type: "array", items: { type: "string" }, description: "Workspace images to edit or use as references" },
+      model: { type: "string" }, aspect_ratio: { type: "string" }, resolution: { type: "string" }, quality: { type: "string" }, background: { type: "string", enum: ["auto", "transparent", "opaque"] },
+      output_format: { type: "string", enum: ["png", "jpeg", "webp", "svg"] }, n: { type: "integer", minimum: 1, maximum: 4 }, name: { type: "string", description: "File name, without extension" } }, required: ["prompt"] } });
   // Only for a member linked to Engram, which hosts the published files.
   if (engram) tools.push({ type: "function", name: "publish_file",
     description: "Only when the driver asks for a link or file: publish one file from /bot/work (md, html, pdf, an image, or any single file) as a page they open at a link. Private to the driver; public only when they ask to share it and approve. Pass id to update one you published (same link, new version).",
