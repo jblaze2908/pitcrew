@@ -23,7 +23,7 @@ import { IST, say } from "./util.js";
 import { remember, forget, publishFile } from "../engram.js";
 import { noteLearned } from "./learned.js";
 import { memberLinked } from "../engramStore.js";
-import { generateImage, paletteFor, DEFAULT_IMAGE_MODEL } from "../images.js";
+import { generateImage, paletteFor, DEFAULT_IMAGE_MODEL, recordImage, imageAt } from "../images.js";
 import { startPainting, endPainting } from "./painting.js";
 import { weekSpend } from "./spend.js";
 
@@ -168,10 +168,13 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
         const r = await generateImage(b.id, a), turn = active.get(threadId);
         if (turn && r.cost) turn.extraUsd = (turn.extraUsd || 0) + r.cost;
         const caption = String(a.prompt).trim().slice(0, 300), edit = Array.isArray(a.images) && a.images.length > 0;
+        const parentId = (edit ? imageAt(b.id, String(a.images[0])) : null) ?? imageAt(b.id, turn?.editOf);
+        const ids = r.paths.map((p, i) => recordImage(b.id, threadId, p, { parentId, model: r.model, cost: i ? null : r.cost }));
         endPainting(threadId, pid);
-        addEvent(threadId, turn?.turnId, "image", { botId: b.id, paths: r.paths, caption, model: r.model, cost: r.cost, paintingId: pid, ...(edit ? { from: a.images.map(String).slice(0, 16) } : {}) });
+        addEvent(threadId, turn?.turnId, "image", { botId: b.id, paths: r.paths, ids, parentId, caption, model: r.model, cost: r.cost, paintingId: pid, ...(r.pasted ? { pasted: r.pasted } : {}), ...(edit ? { from: a.images.map(String).slice(0, 16) } : {}) });
         audit("crew", "image.generated", { botId: b.id, threadId, model: r.model, n: r.paths.length, cost: r.cost, edit });
-        return say(`Saved ${r.paths.map((p) => `/bot/work/${p}`).join(", ")} (${r.model}${r.cost != null ? `, $${r.cost.toFixed(3)}` : ""}); ${getSetting("driver_name", "the driver")} sees ${r.paths.length > 1 ? "them" : "it"} in this chat. Check with view_image before calling it done.`);
+        const kept = !r.pasted ? "" : r.pasted.ok ? " Everything outside the mask is unchanged." : ` The rest of the image could not be kept as it was (${r.pasted.why}); this is the model's whole version, so check it.`;
+        return say(`${kept.trim() ? `${kept.trim()} ` : ""}Saved ${r.paths.map((p) => `/bot/work/${p}`).join(", ")} (${r.model}${r.cost != null ? `, $${r.cost.toFixed(3)}` : ""}); ${getSetting("driver_name", "the driver")} sees ${r.paths.length > 1 ? "them" : "it"} in this chat. Check with view_image before calling it done.`);
       } catch (e: any) { endPainting(threadId, pid); return say(e.message, false); }
     }
     case "query_ledger": {

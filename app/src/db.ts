@@ -108,6 +108,10 @@ db.exec(`CREATE TABLE IF NOT EXISTS queued (
   id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, text TEXT NOT NULL, attachments TEXT NOT NULL DEFAULT '[]',
   trigger TEXT NOT NULL, display TEXT, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS queued_thread ON queued(thread_id, created_at)`);
+// Images the crew made (images.ts): one row per file, with the version it was edited from and when the driver kept it.
+db.exec(`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, thread_id TEXT, path TEXT NOT NULL, parent_id TEXT, model TEXT,
+  cost REAL, kept_at INTEGER, created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS images_path ON images(bot_id, path)`);
 // Columns added after v1 shipped; ALTER fails harmlessly once they exist.
 for (const sql of ["ALTER TABLE turns ADD COLUMN changes TEXT", "ALTER TABLE jev_labels ADD COLUMN shadow TEXT",
   "ALTER TABLE threads ADD COLUMN origin TEXT", "ALTER TABLE bots ADD COLUMN private INTEGER NOT NULL DEFAULT 0",

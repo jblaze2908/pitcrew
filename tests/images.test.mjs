@@ -110,3 +110,45 @@ test("Codex image_gen results are saved to out/images and shown; a used-up plan 
   assert.equal(evs[1].status, "failed");
   assert.match(evs[1].error, /image limit is used up/);
 });
+
+test("an edit message names the image, the marks and how to call the tool; paths stay in the workspace", () => {
+  writeFileSync(`${work}/uploads/m-mask.png`, PNG); writeFileSync(`${work}/uploads/m-marked.png`, PNG);
+  const brushed = I.editMessage(bot.id, "Make the date gold", { image: "out/images/lighthouse.png", mask: "uploads/m-mask.png", marked: "uploads/m-marked.png", pins: [{ x: 0.5, y: 0.05, note: "Add Lakeview Towers" }], model: "plan" });
+  assert.match(brushed.text, /\[Edit of \/bot\/work\/out\/images\/lighthouse\.png\]/);
+  assert.match(brushed.text, /Pin 1 \(top centre\): Add Lakeview Towers/);
+  assert.match(brushed.text, /generate_image with images \[\/bot\/work\/out\/images\/lighthouse\.png, \/bot\/work\/uploads\/m-marked\.png\], mask \/bot\/work\/uploads\/m-mask\.png, model google\/gemini-3\.1-flash-image/, "a mask can't go to the plan's image_gen");
+  assert.deepEqual(brushed.attachments, ["uploads/m-marked.png"], "the member sees the marked copy");
+  const plan = I.editMessage(bot.id, "Warmer lamps", { image: "out/images/lighthouse.png", model: "plan", pins: [] });
+  assert.match(plan.text, /image_gen with referenced_image_paths \[\/bot\/work\/out\/images\/lighthouse\.png\]/);
+  const chat = I.editMessage(bot.id, "Bigger date", { image: "/bot/work/out/images/lighthouse.png" });
+  assert.equal(chat.text, "Bigger date\n\n[Editing image /bot/work/out/images/lighthouse.png]");
+  assert.equal(I.editTarget(chat.text), "/bot/work/out/images/lighthouse.png");
+  assert.throws(() => I.editMessage(bot.id, "x", { image: "../../outside.png" }), /outside \/bot\/work/);
+});
+
+test("versions: an edit's image names its parent, whichever tool made it", async () => {
+  const th = "th_img";
+  run("UPDATE bots SET weekly_cap_usd=10 WHERE id=?", bot.id);
+  active.set(th, { turnId: "tu_v" });
+  await dynamicTool({ bot: { id: bot.id }, mems: new Map() }, th, { tool: "generate_image", arguments: { prompt: "Gold date", images: ["/bot/work/out/images/lighthouse.png"], name: "lighthouse-v2" }, threadId: th });
+  const v2 = JSON.parse(one("SELECT data FROM events WHERE thread_id=? AND kind='image' ORDER BY id DESC LIMIT 1", th).data);
+  const v1 = one("SELECT id FROM images WHERE path='out/images/lighthouse.png'").id;
+  assert.equal(v2.parentId, v1);
+  assert.equal(one("SELECT parent_id p FROM images WHERE id=?", v2.ids[0]).p, v1);
+  // Codex's image_gen has no arguments to read: the turn's "[Editing image …]" target is the parent.
+  byCodex.set("cx_v", th); active.set(th, { turnId: "tu_v3", editOf: "/bot/work/out/images/lighthouse-v2.png" });
+  onNotify({ bot: { id: bot.id } }, "item/completed", { threadId: "cx_v", item: { type: "imageGeneration", id: "ig_v3", status: "completed", revisedPrompt: "Lighthouse v3", result: PNG.toString("base64"), failure: null } });
+  const v3 = JSON.parse(one("SELECT data FROM events WHERE thread_id=? AND kind='image' ORDER BY id DESC LIMIT 1", th).data);
+  assert.equal(v3.parentId, v2.ids[0]);
+});
+
+test("a masked edit that can't be pasted back keeps the model's whole image and says so", async () => {
+  const th = "th_img"; active.set(th, { turnId: "tu_m" });
+  const r = await dynamicTool({ bot: { id: bot.id }, mems: new Map() }, th, { tool: "generate_image", arguments: { prompt: "Gold date", images: ["out/images/lighthouse.png", "uploads/m-marked.png"], mask: "uploads/m-mask.png", name: "masked" }, threadId: th });
+  assert.equal(r.success, true);
+  assert.match(r.contentItems[0].text, /could not be kept as it was/);
+  const ev = JSON.parse(one("SELECT data FROM events WHERE thread_id=? AND kind='image' ORDER BY id DESC LIMIT 1", th).data);
+  assert.equal(ev.pasted.ok, false);
+  const bad = await dynamicTool({ bot: { id: bot.id }, mems: new Map() }, th, { tool: "generate_image", arguments: { prompt: "x", mask: "uploads/m-mask.png" }, threadId: th });
+  assert.match(bad.contentItems[0].text, /mask needs the image/);
+});
