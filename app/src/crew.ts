@@ -128,7 +128,7 @@ export function instructions(b: Pick<Bot, "name" | "personality"> & Partial<Bot>
       `- Refs die when the page navigates or reloads; act only on refs from the latest result.`,
       `- To open a link, browser_navigate to its /url instead of clicking it.`,
       `- Read pages with browser_snapshot or browser_read (page text as markdown). Take screenshots only when layout or visuals matter.`,
-      `- For bulk or repeated reads (order history, lists, many pages), don't click through page by page. First check browser_network_requests for the site's own API and read its responses; else extract with browser_evaluate (or browser_run_code_unsafe), looping and filtering inside one call and returning compact JSON. Save big results with filename and process them in the shell.`,
+      `- For bulk or repeated reads (order history, lists, many pages), don't click through page by page. First check browser_network_requests for the site's own API and read its responses, then page through it with browser_replay_request (merge the next cursor, save each page under /bot/work); else extract with browser_evaluate (or browser_run_code_unsafe), looping and filtering inside one call and returning compact JSON. Save big results with filename and process them in the shell.`,
       `- If a plain HTTP fetch from the shell can read it (public page, open API), skip the browser.`,
       `- Use browser_fill_form for radios, checkboxes and selects too, several fields per call.`,
       `- computer_* pixel actions already return a screenshot of the result; don't take another.`,
@@ -229,10 +229,13 @@ function browserTool(x: McpTool) {
 }
 const BROWSER_READ = { type: "function", name: "browser_read", description: "Read the current page's content as compact markdown (headings, text, lists, links with their URLs, form fields, tables), up to 12 KB; the main landmark when the page has one. Pass target (a ref) to read just that part. For reading; use browser_snapshot when you need refs to act on.",
   inputSchema: { type: "object", properties: { target: { type: "string", description: "Ref of the element to read, from the latest snapshot. Omit for the whole page." }, element: { type: "string", description: "What that element is, in words." } } } };
+const BROWSER_REPLAY = { type: "function", name: "browser_replay_request", description: "Re-send request #index from browser_network_requests from the page's own logged-in session, with its original headers (you never see them), optionally changing it: body replaces the body, merge sets fields in a JSON body (e.g. a next-page cursor), query sets URL parameters. The way to page through a site's own API in bulk. Returns status and body (24 KB; pass save, a path under /bot/work, for the whole body). Checked like page JS: anything that orders, pays, posts or sends waits for the driver.",
+  inputSchema: { type: "object", properties: { index: { type: "integer", minimum: 1 }, body: { description: "New body: a string, or an object sent as JSON." }, merge: { type: "object", description: "Fields to set in the original JSON body." }, query: { type: "object", description: "URL parameters to set." }, method: { type: "string" }, save: { type: "string", description: "Write the full response body to this path under /bot/work." } }, required: ["index"] } };
 export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { browser: [], computer: [] }, { engram = false } = {}) {
   const runtime = [
     ...manifest.browser.filter((x) => !HIDDEN.has(x.name)).map(browserTool),
     ...(manifest.browser.some((x) => x.name === "browser_snapshot") ? [BROWSER_READ] : []),
+    ...(manifest.browser.some((x) => x.name === "browser_run_code_unsafe") ? [BROWSER_REPLAY] : []),
     ...manifest.computer.filter((x) => !HIDDEN.has(`computer_${x.name}`)).map((x) => ({ type: "function", name: `computer_${x.name}`, description: `${x.description || x.name} (${x.name === "screenshot" ? `pixel control of the computer's screen. ${SHOT_HINT}` : PIXEL})`, inputSchema: x.inputSchema || { type: "object", properties: {} } })),
   ];
   const tools: Record<string, any>[] = [...runtime,

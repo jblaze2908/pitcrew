@@ -740,3 +740,25 @@ test("a scheduled run that ends QUIET keeps the thread's place; one with news mo
   assert.ok(one("SELECT updated_at u FROM threads WHERE id='th_news'").u > 1000);
   assert.ok(T.isQuiet("QUIET: nothing") && T.isQuiet("  QUIET") && !T.isQuiet("Quietly, 3 orders came in"));
 });
+
+test("replaying a captured request keeps its headers inside Playwright and applies only the asked change", async () => {
+  const Bz = await import("../app/dist/src/runtime/browser.js");
+  const details = "### Result\n#7 [POST] https://shop.example/v1/layout/order_history?x=1\n\n  General\n    status:    [200] OK";
+  assert.deepEqual(Bz.replayTarget(details, { page: 2 }), { method: "POST", url: "https://shop.example/v1/layout/order_history?x=1&page=2" });
+  assert.equal(Bz.replayTarget("### Error\nRequest #9 not found"), null);
+  const src = "https://shop.example/v1/layout/order_history?x=1";
+  let sent = null;
+  const page = {
+    requests: async () => [{ url: () => src, method: () => "POST", allHeaders: async () => ({ authorization: "Bearer secret", cookie: "sid=1", host: "shop.example", "content-length": "20", "x-device": "d1", ":path": "/" }), postData: () => '{"cursor":"p1","size":10}' }],
+    request: { fetch: async (url, init) => { sent = { url, ...init }; return { status: () => 200, headers: () => ({ "content-type": "application/json" }), text: async () => '{"ok":true}' }; } },
+  };
+  const code = Bz.replayCode({ method: "POST", source: src, url: `${src}&page=2`, merge: { cursor: "p2\"`);evil()//" } });
+  const out = await eval(`(${code})`)(page);
+  assert.deepEqual(out, { status: 200, type: "application/json", text: '{"ok":true}', found: true });
+  assert.deepEqual(sent.headers, { authorization: "Bearer secret", "x-device": "d1" }, "host, length, cookie and pseudo-headers dropped; the context sends cookies itself");
+  assert.deepEqual(JSON.parse(sent.data), { cursor: "p2\"`);evil()//", size: 10 }, "model strings stay data");
+  assert.equal(sent.maxRedirects, 0);
+  const work = `${root}/bots/b_rep/work`; mkdirSync(work, { recursive: true });
+  assert.ok(Bz.workFile("b_rep", "/bot/work/grocery/raw/page2.json").endsWith("/work/grocery/raw/page2.json"));
+  for (const bad of ["../x.json", "/etc/x", "a/../../x"]) assert.equal(Bz.workFile("b_rep", bad), null, bad);
+});

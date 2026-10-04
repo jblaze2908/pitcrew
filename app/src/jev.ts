@@ -81,7 +81,7 @@ const SAFE_NAME = /^(open|close|show|hide|(show|see|view|load|read) (more|less|a
 const UNSAFE_NAME = /\b(send|submit|pay|buy|order|purchase|checkout|confirm|delete|remove|share|publish|post|sign ?in|log ?in|sign ?up|subscribe|unsubscribe|transfer|book|reserve|apply|approve|agree)\b/i;
 const OBSERVE = /^browser_(navigate|navigate_back|snapshot|take_screenshot|wait_for|console_messages|network_requests|network_request|find|tabs|hover|resize|cookie_(list|get)|(local|session)storage_(list|get))$/;
 // Calls whose effect is in their code or their storage write, so no shortcut (a fully allowed site, a rule) may decide them.
-export const PAGE_CODE = /^browser_(evaluate|run_code_unsafe|(cookie|localstorage|sessionstorage)_(set|delete))$/;
+export const PAGE_CODE = /^browser_(evaluate|run_code_unsafe|replay_request|(cookie|localstorage|sessionstorage)_(set|delete))$/;
 const STATE_ROLES = new Set(["radio", "checkbox", "combobox", "tab"]);
 const NAV_KEY = /^(Escape|Tab|Shift\+Tab|Arrow(Up|Down|Left|Right)|Page(Up|Down)|Home|End)$/;
 const parseEl = (e: string | null | undefined) => { const m = /^([a-z]+)\b(?:\s+"((?:[^"\\]|\\.)*)")?/.exec(e || ""); return { role: m?.[1] ?? null, name: (m?.[2] ?? "").replace(/\s+(ctrl|cmd|alt|shift|⌘|⌥|⇧)\s*\+?\s*\S+$/i, "").trim() }; };
