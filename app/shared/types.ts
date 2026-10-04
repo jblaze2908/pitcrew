@@ -47,6 +47,8 @@ export interface PitStop {
   status: "pending" | "approved" | "denied" | "expired"; scope: string | null; note: string | null;
   created_at: number; expires_at: number; decided_at: number | null;
   learn: { label: string; streak: number; need: number } | null;
+  /** What "allow similar" would cover, for a pending command or tool pit stop. */
+  similar?: string | null;
 }
 
 export interface State {
@@ -67,6 +69,8 @@ export interface Thread {
   ctx_tokens: number | null; ctx_window: number | null; carry: string | null; archived: number;
   /** JSON string of Origin, or null. */
   origin: string | null; created_at: number; updated_at: number; running: boolean;
+  /** ask | handsfree | yolo: how much the thread runs without pit stops (runtime/autonomy.ts). */
+  autonomy: string;
 }
 
 export type EventKind = "user" | "agent" | "tool" | "system" | "error" | "shot" | "changes" | "pitstop" | "surface" | "delegation" | "plan" | "learned";

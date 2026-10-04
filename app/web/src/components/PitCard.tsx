@@ -77,8 +77,8 @@ export function PitCard({ p: given, onDone }: { p: PitStop; onDone?: (r: PitStop
     {openLink("Open plan")}</div>;
   else actions = <>{noteInput}<div className="acts">
     {btn("Approve once", () => decide("approve", "once"), true)}
-    {p.thread_id && btn("For this thread", () => decide("approve", "thread"))}
-    {!noAlways && btn("Always for this member", () => decide("approve", "always"))}
+    {p.thread_id && btn("Allow similar in this thread", () => decide("approve", "thread"))}
+    {!noAlways && btn("Allow similar always", () => decide("approve", "always"))}
     {btn("Deny", () => decide("deny"))}
     {openLink("Open thread")}</div></>;
 
@@ -91,6 +91,7 @@ export function PitCard({ p: given, onDone }: { p: PitStop; onDone?: (r: PitStop
       <p className="t">{p.title}</p>
       {body}
       {j.reason && <p className="why">{`jev · ${j.by || ""} · ${j.reason}${j.ms ? ` · ${j.ms} ms` : ""}`}</p>}
+      {p.similar && !["pay", "delete", "share"].includes(p.effect) && <p className="small faint">{`Similar means: ${p.similar}.`}</p>}
       {p.learn && <p className="small faint">{p.learn.need - p.learn.streak <= 1
         ? `Approve this and ${who} stops asking for “${p.learn.label}”.`
         : `Approve “${p.learn.label}” ${p.learn.need - p.learn.streak} times in a row and ${who} stops asking.`}</p>}

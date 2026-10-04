@@ -1,11 +1,12 @@
 // The gate: decides one tool call. The site policy first (browser and pixel tools), then rules and standing approvals,
 // then jev, then the driver. Every decision is logged for audit and for training a local classifier.
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { run, now, uid, audit } from "../db.js";
 import { getSecret } from "../auth.js";
 import { getBot } from "../crew.js";
 import { jev, redact, jevSystemOne, secretKind, PAGE_CODE, type Call, type Policy, type Verdict } from "../jev.js";
 import { siteTag } from "../domains.js";
-import type { Brain } from "../computer.js";
+import { botDir, type Brain } from "../computer.js";
 import { bus } from "./bus.js";
 import { active } from "./state.js";
 import { addEvent } from "./threads.js";
@@ -15,6 +16,7 @@ import { waitLease } from "./lease.js";
 import { pitStop } from "./pitstops.js";
 import { hostOf } from "./util.js";
 import { OUTBOUND, tainted } from "./taint.js";
+import { autonomyOf, waived } from "./autonomy.js";
 
 // How a gated call shows up if it becomes a pit stop.
 export interface PitInfo { kind: string; title: string; detail: Record<string, unknown> }
@@ -23,7 +25,8 @@ export interface PitInfo { kind: string; title: string; detail: Record<string, u
 export async function gate(c: Brain, threadId: string, call: Call, pit: PitInfo) {
   const b = getBot(c.bot.id)!;
   if (call.kind === "mcp" && ["browser", "computer"].includes(call.server!) && !(await waitLease(b.id, threadId, call))) return false;
-  const site = await siteStep(b, threadId, call);
+  const auto = autonomyOf(threadId);
+  const site = await siteStep(b, threadId, call, auto);
   if (!site) return false;
   const policy = site.policy!, sig = signature(call), pat = pattern(call), browser = call.kind === "mcp" && call.server === "browser";
   // Untrusted content from Engram in this thread: no shortcut may stand in for the driver on an outbound effect.
@@ -32,9 +35,11 @@ export async function gate(c: Brain, threadId: string, call: Call, pit: PitInfo)
   // page code or storage writes, whose effect only jev can read from the code.
   if (browser && site.full && !taint && call.effect !== "pay" && !PAGE_CODE.test(call.tool || "") && !/^(card|cvv)$/.test(secretKind(JSON.stringify(call.arguments?.grounded_elements || [])) || ""))
     return logDecision(threadId, b.id, { decision: "allow", effect: call.effect || "browse", reason: `${site.site!.domain} is fully allowed`, by: "site" }, call);
-  const v = await jev(call, { policy, apiKey: getSecret("openrouter") || "missing" });
+  const v = await jev(withScript(b.id, call), { policy, apiKey: getSecret("openrouter") || "missing" });
   if (v.decision === "block") { logDecision(threadId, b.id, v, call); addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Blocked by jev: ${v.reason}. Nothing ran.`, tone: "bad" }); return false; }
   const forced = taint && OUTBOUND.has(v.effect);
+  // Hands-free or YOLO stands in for the driver here; jev's verdict is still logged, so the audit shows what was waived.
+  if ((v.decision !== "allow" || forced) && waived(auto, v.effect)) return logDecision(threadId, b.id, v, call, { decision: "allow", by: auto === "yolo" ? "yolo" : "hands-free", source: "standing" });
   if (v.decision === "allow" && !forced) { const lid = uid("jl"), ok = logDecision(threadId, b.id, v, call, { id: lid }); shadowVerify(lid, call, v, policy); return ok; }
   // A standing approval covers repeats of the same action, but never money, deletion or sharing. Browser approvals
   // match only by their host-bearing pattern, so one granted on a.example never covers b.example; on a checkout page
@@ -54,6 +59,21 @@ export async function gate(c: Brain, threadId: string, call: Call, pit: PitInfo)
   const untrusted = forced ? { untrusted: "Engram returned untrusted content to this thread in the last 10 minutes" } : {};
   const decision = await pitStop({ id, botId: b.id, threadId, kind: pit.kind, effect, title: `${pit.title}${verify}${forced ? " · after untrusted content" : ""}`, detail: { ...pit.detail, ...siteDetail, ...untrusted, signature: sig, pattern: pat }, jev: v });
   return decision === "approved";
+}
+
+// A command that runs a script in the member's workspace: jev reads the script, not just its name. A bare
+// `python3 /bot/work/x.py` used to be judged blind and asked at low confidence. One stat and one bounded read per such
+// command; the script is resolved under the bot's own work dir on the host (realpath, so no symlink leaves it).
+const RUNS = /\b(?:python3?|node|bash|sh|bun|deno(?:\s+run)?)\s+(\/bot\/work\/[\w.\/@+-]+\.(?:py|mjs|cjs|js|ts|sh))\b/, SCRIPT_MAX = 6000;
+export function withScript(botId: string, call: Call): Call {
+  const m = call.kind === "shell" ? RUNS.exec(String(call.command || "")) : null;
+  if (!m) return call;
+  try {
+    const root = realpathSync(`${botDir(botId)}/work`), f = realpathSync(`${botDir(botId)}${m[1].slice("/bot".length)}`);
+    if (!f.startsWith(`${root}/`) || statSync(f).size > 1 << 20) return call;
+    const src = readFileSync(f, "utf8");
+    return { ...call, script: { path: m[1], source: src.slice(0, SCRIPT_MAX), truncated: src.length > SCRIPT_MAX } };
+  } catch { return call; }
 }
 
 // Shadow jev: a background second opinion on every rule-allowed browser or shell call, stored on that call's label row

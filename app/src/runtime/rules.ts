@@ -28,7 +28,8 @@ export function pattern(call: Call) {
 export function describePattern(p: string | null | undefined) {
   const m = /^browser:([^:]+):([^:]+):(.+)$/.exec(p || "");
   if (m) return `${m[1].replace(/_/g, " ")} ${m[3].replace(/\+/g, " or ")} on ${m[2]}`;
-  return String(p || "").replace(/^cmd:/, "run ").replace(/^mcp:/, "").replace("/", " ");
+  const s = String(p || "");
+  return s.startsWith("cmd:") ? `run ${s.slice(4)}` : s.replace(/^mcp:/, "").replace("/", " ");
 }
 // Standing approvals hold only for the effect they were granted for: "always" on a link click never covers a Send.
 function ruleFor(botId: string, threadId: string, matches: (string | null)[], effect: string) {

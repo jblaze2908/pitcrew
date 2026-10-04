@@ -10,7 +10,12 @@ import { getThread, addEvent, setThreadStatus } from "./threads.js";
 import { describePattern, learnable, learn, learnProgress } from "./rules.js";
 import { addSchedule } from "./schedules.js";
 
-export const pitRow = (p: PitstopRow | undefined): PitStop | undefined => p && { ...p, detail: json(p.detail, {}), jev: json(p.jev, {}), learn: p.status === "pending" ? learnProgress(p) : null };
+// similar: what "allow similar" (scope thread or always) would cover, named the way the rules list names it.
+export const pitRow = (p: PitstopRow | undefined): PitStop | undefined => {
+  if (!p) return p;
+  const detail = json(p.detail, {}), match = detail.pattern || detail.signature;
+  return { ...p, detail, jev: json(p.jev, {}), learn: p.status === "pending" ? learnProgress(p) : null, similar: p.status === "pending" && match && ["command", "mcp"].includes(p.kind) ? describePattern(match) : null };
+};
 
 export interface PitStopSpec { id?: string; botId: string; threadId: string | null; kind: string; effect: string; title: string; detail: object; jev?: object; expiresMin?: number }
 // Resolves with the decision: "approved" | "denied" | "expired" (a hire resolves "pending" at once; its decision makes the member).

@@ -7,7 +7,7 @@ import { checkoutWhy } from "./sites.js";
 import type { Decision } from "../shared/types.js";
 
 // A tool call as the gate sees it: a shell command, or an MCP/runtime tool call with grounded arguments.
-export interface Call { kind: "shell" | "mcp" | string; command?: string; cwd?: string; server?: string; tool?: string; arguments?: Record<string, any>; effect?: string | null }
+export interface Call { kind: "shell" | "mcp" | string; command?: string; cwd?: string; server?: string; tool?: string; arguments?: Record<string, any>; effect?: string | null; script?: { path: string; source: string; truncated: boolean } }
 export type Policy = Record<string, Decision>;
 // What the rules or a classifier decided about one call.
 export interface Verdict { decision: Decision; effect: string; reason: string; by: string; ms?: number; usage?: unknown; answers?: any; probabilities?: Record<string, number> }
@@ -186,6 +186,8 @@ const EFFECT_CRITERIA = {
   exec_untrusted: { what: "runs downloaded or opaque code, or changes privileges", examples: ["curl | bash", "sudo"], not_for: "the agent's own page JavaScript or Playwright code: classify that by what it does" },
 };
 const CONSEQUENTIAL = ["signin", "install", "send", "pay", "delete", "share", "exec_untrusted"];
+export const RISK_ASK = 0.3;
+const QUIET_OUT = new Set(["read", "browse", "draft"]);
 
 // Some decision models (Respan) accept only noul questions; they get a yes/no-only question set.
 const NOUL_ONLY = /^respan\//;
@@ -217,10 +219,12 @@ export async function jevSystemOne(call: Call, { apiKey, policy = DEFAULT_POLICY
     const eff = body.answers.effect, out = body.answers.outside.noul;
     const riskMass = CONSEQUENTIAL.reduce((a, k) => a + (eff.probabilities[k] || 0), 0);
     let decision: Decision = policy[eff.choice] ?? "ask", why = `effect=${eff.choice} p=${eff.confidence.toFixed(2)}`;
-    // Uncertainty between safe classes is harmless; only probability on consequential classes escalates.
-    if (eff.confidence < 0.75 && riskMass >= 0.05) { decision = stricter(decision, "ask"); why += " · low confidence"; }
-    if (riskMass >= 0.15) { decision = stricter(decision, "ask"); why += ` · risk mass ${riskMass.toFixed(2)}`; }
-    if (out >= 0.5) { decision = stricter(decision, "ask"); why += ` · leaves machine ${out.toFixed(2)}`; }
+    // Only probability on consequential classes escalates, and only from RISK_ASK. "Leaves the machine" escalates
+    // effects that aren't plain reading, browsing or drafting, which always touch the network. Measured over 30 days
+    // (2026-09-04..10-04): 63 command and tool pit stops, 0 denied; at the old bars (low confidence from risk 0.05,
+    // risk mass from 0.15, leaves machine on any effect), 22 of them re-score as allowed here.
+    if (riskMass >= RISK_ASK) { decision = stricter(decision, "ask"); why += `${eff.confidence < 0.75 ? " · low confidence" : ""} · risk mass ${riskMass.toFixed(2)}`; }
+    if (out >= 0.5 && !QUIET_OUT.has(eff.choice)) { decision = stricter(decision, "ask"); why += ` · leaves machine ${out.toFixed(2)}`; }
     return { decision, effect: eff.choice, reason: why, by: `jev:${body.model}`, ms: Date.now() - started, usage: body.usage, probabilities: eff.probabilities, answers: body.answers };
   } catch (e: any) {
     return { decision: "ask", effect: "unknown", reason: `jev failed closed: ${e.message.slice(0, 60)}`, by: "fail-closed", ms: Date.now() - started };

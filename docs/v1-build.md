@@ -51,6 +51,16 @@ Jai's direction: not every task needs a computer. Anything that needs a runtime 
   - Cookie values, auth and cookie headers, and token-named storage values are masked in what the model sees (`maskSecrets` in `pageText.ts`). Files written with `filename` stay unmasked on the computer.
   - Data results are capped at 24 KB, with a pointer to `filename`.
   - The shell can reach CDP on 127.0.0.1:9222 too. That is accepted: the computer is the agent's own sandbox, and shell commands are gated by jev like everything else.
+- **Fewer pit stops** (2026-10-04). Over 30 days there were 63 command and tool pit stops and none was denied.
+  - jev now asks only from consequential risk mass 0.3. "Leaves the machine" no longer escalates read, browse or draft.
+  - A command that runs a `/bot/work` script sends jev the script's source.
+  - Plain new Engram memories save without a pit stop.
+  - Each pit stop names what "allow similar" covers.
+  - Per-thread autonomy in the thread header (`runtime/autonomy.ts`):
+    - **Ask me** (default).
+    - **Hands-free:** stops only for pay, sign-in, send, share, delete, a jev failure, or a look-alike or non-https site.
+    - **YOLO:** no pit stops. jev's hard blocks, the member's `block` policy and refused sites still stop it.
+  - Waived verdicts stay in `jev_labels` (source `standing`) for audit.
 - **Pointer:** a content-script extension draws the crew member's creature cursor (hue + name tag) from real input events, with click ripples and a typing indicator; it persists across page loads.
 - **Files view:** workspace snapshots at turn start and end (re-hash only changed files; contents deduped in root-only `/srv/pitcrew/data/shadow/<id>`), per-run changes however they were made, Myers line diff in the browser (unified / split), file browser that works with the computer off.
 - Live view scales to fit; Chrome's "Restore pages?" bubble and the Chrome for Testing infobar are suppressed.

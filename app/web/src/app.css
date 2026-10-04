@@ -85,6 +85,9 @@ main{overflow:auto;min-width:0;scrollbar-gutter:stable}
 .convo{display:grid;grid-template-rows:auto 1fr auto;grid-template-columns:minmax(0,1fr);min-height:0;min-width:0;border-right:1px solid var(--line)}
 .convo header{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px}
 .convo header .pc-h2{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.autonomy{display:flex;gap:4px;flex:none}
+.autonomy .pc-pill.yolo{background:var(--bad);border-color:var(--bad);color:var(--on-signal)}
+@media (max-width:640px){.convo header{flex-wrap:wrap}}
 .stream{overflow:auto;padding:20px 24px 28px;display:flex;flex-direction:column;gap:14px}
 .stream>*{flex:none} /* an overflow:hidden card (the plan) would otherwise shrink to fit and clip its items */
 .msg{max-width:760px}
