@@ -11,7 +11,7 @@ import { bus } from "./bus.js";
 import { active } from "./state.js";
 import { addEvent } from "./threads.js";
 import { signature, pattern, standingRule, learnedTrust } from "./rules.js";
-import { siteStep } from "./sitegate.js";
+import { siteStep, noteRefusal } from "./sitegate.js";
 import { waitLease } from "./lease.js";
 import { pitStop } from "./pitstops.js";
 import { hostOf } from "./util.js";
@@ -58,8 +58,12 @@ export async function gate(c: Brain, threadId: string, call: Call, pit: PitInfo)
   const siteDetail = site.site?.domain ? { site: { domain: site.site.domain, host: site.site.host, https: site.site.https, checkout: site.checkout || null } } : {};
   const untrusted = forced ? { untrusted: "Engram returned untrusted content to this thread in the last 10 minutes" } : {};
   const decision = await pitStop({ id, botId: b.id, threadId, kind: pit.kind, effect, title: `${pit.title}${verify}${forced ? " · after untrusted content" : ""}`, detail: { ...pit.detail, ...siteDetail, ...untrusted, signature: sig, pattern: pat }, jev: v });
+  // An expired pit stop isn't a refusal: the driver wasn't there. Said so to the tool call; a command, whose decline
+  // Codex reports as "rejected by user", also gets a steered note (pitstops.ts).
+  if (decision === "expired" && call.kind !== "shell") noteRefusal(threadId, EXPIRED_NOTE(pit.title));
   return decision === "approved";
 }
+export const EXPIRED_NOTE = (title: string) => `Not done yet: the pit stop for "${title.slice(0, 160)}" expired because the driver didn't answer within 30 minutes. That isn't a refusal. Don't try it another way; finish what you can without it and say clearly what is waiting on the driver, so they can approve it when they're back.`;
 
 // The driver's last three messages in this thread (600 chars each, oldest first) and the member's house rules (20 lines).
 // One indexed query, only for calls the rules leave to jev.
