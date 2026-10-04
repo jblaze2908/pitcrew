@@ -1,5 +1,6 @@
 // View models: what the web app's main reads (state, a thread, a member card, telemetry) assemble from the store.
 import { one, all, now, json, getSetting } from "../db.js";
+import { resolveSurface } from "../ledger.js";
 import { httpErr } from "../auth.js";
 import * as P from "../providers.js";
 import * as R from "../runtime/index.js";
@@ -41,14 +42,16 @@ export function state(): State {
     engram: { linked: linked(), url: engramUrl() },
   };
 }
-export function threadView(id: string): ThreadView {
+export async function threadView(id: string): Promise<ThreadView> {
   const t = R.getThread(id);
   if (!t) throw httpErr(404, "No such thread");
   const events: ThreadEvent[] = all<EventRow>("SELECT * FROM events WHERE thread_id=? ORDER BY id DESC LIMIT 400", id).reverse().map((e) => ({ ...e, data: json(e.data, {}) }) as ThreadEvent);
   const pitIds = events.filter((e) => e.kind === "pitstop").map((e) => e.data.id);
   const surfIds = events.filter((e) => e.kind === "surface").map((e) => e.data.id);
   const pits = pitIds.length ? all<PitstopRow>(`SELECT * FROM pitstops WHERE id IN (${pitIds.map(() => "?").join(",")})`, ...pitIds).map(pitRow) as PitStop[] : [];
-  const surfaces = surfIds.length ? all<Pick<SurfaceRow, "id" | "title" | "spec" | "saved">>(`SELECT id,title,spec,saved FROM surfaces WHERE id IN (${surfIds.map(() => "?").join(",")})`, ...surfIds).map((s) => ({ ...s, spec: json(s.spec) })) : [];
+  // Bound dashboards run their queries here (cached per ledger version; ledger.ts), once per thread load.
+  const surfaces = surfIds.length ? await Promise.all(all<Pick<SurfaceRow, "id" | "title" | "spec" | "saved" | "bot_id">>(`SELECT id,title,spec,saved,bot_id FROM surfaces WHERE id IN (${surfIds.map(() => "?").join(",")})`, ...surfIds)
+    .map(({ bot_id, ...s }) => resolveSurface({ ...s, spec: json(s.spec) }, bot_id))) : [];
   return { thread: { ...t, running: R.isRunning(id) }, bot: getBot(t.bot_id)!, events, pitstops: pits, surfaces, queued: R.listQueued(id) };
 }
 export function telemetry() {

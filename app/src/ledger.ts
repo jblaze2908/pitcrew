@@ -1,0 +1,117 @@
+// Bound dashboards: a surface can name a ledger (a SQLite file in its member's /bot/work) and carry queries instead of
+// values. Pitcrew runs them when the surface is viewed, so the numbers always match the ledger and no model runs per view.
+// Safety: the file is realpath-confined to that member's work dir and opened read-only with extensions off, each query is
+// one SELECT/WITH statement (so no ATTACH can reach another file), and a worker enforces a deadline and a row cap.
+// Cost: one stat per view; queries run only when the ledger changed (cache keyed on the file's and its WAL's mtime+size).
+import { Worker } from "node:worker_threads";
+import { realpathSync, statSync } from "node:fs";
+import { botDir } from "./computer.js";
+
+export const LEDGER_EXT = /\.(db|sqlite|sqlite3)$/i, MAX_QUERIES = 20, MAX_SQL = 3000, MAX_ROWS = 500, DEADLINE_MS = 3000;
+export type QueryResult = { columns: string[]; rows: Record<string, unknown>[]; truncated: boolean } | { error: string };
+
+// A ledger path as the member wrote it (relative to /bot/work, or under /bot/work), as its host path, or null.
+export function ledgerPath(botId: string, source: unknown): string | null {
+  const rel = String(source || "").replace(/^\/bot\/work\//, "");
+  if (!rel || rel.startsWith("/") || !LEDGER_EXT.test(rel) || rel.split("/").includes("..")) return null;
+  try {
+    const root = realpathSync(`${botDir(botId)}/work`), f = realpathSync(`${root}/${rel}`);
+    return f.startsWith(`${root}/`) && statSync(f).isFile() ? f : null;
+  } catch { return null; }
+}
+
+// Why a query can't run, or null. Strings, quoted names and comments are blanked first, so a keyword inside them
+// doesn't count and a ";" inside a string doesn't end the statement. One pass over the text.
+export function sqlProblem(sql: unknown): string | null {
+  const s = String(sql || "");
+  if (!s.trim()) return "empty query";
+  if (s.length > MAX_SQL) return `longer than ${MAX_SQL} chars`;
+  const bare = s.replace(/'(?:[^']|'')*'|"(?:[^"]|"")*"|`[^`]*`|\[[^\]]*\]|--[^\n]*|\/\*[\s\S]*?(\*\/|$)/g, " ").trim().replace(/;\s*$/, "");
+  if (bare.includes(";")) return "one statement only";
+  if (!/^(select|with)\b/i.test(bare)) return "must be a SELECT (or WITH … SELECT)";
+  const bad = /\b(attach|detach|pragma|vacuum|reindex|analyze|insert|update|delete|replace|create|drop|alter|begin|commit|rollback|savepoint|release|load_extension)\b/i.exec(bare);
+  return bad ? `"${bad[1]}" isn't allowed: dashboards only read` : null;
+}
+
+const cache = new Map<string, QueryResult>(); // ledger version + sql → result; insertion order is the eviction order
+const CACHE_MAX = 300;
+const version = (f: string) => [f, `${f}-wal`].map((p) => { try { const s = statSync(p); return `${s.mtimeMs}:${s.size}`; } catch { return "-"; } }).join("|");
+
+// Runs the named queries against one ledger. Cached results come back without starting a worker.
+export async function runQueries(file: string, queries: Record<string, string>): Promise<{ results: Record<string, QueryResult>; asOf: number | null }> {
+  const v = version(file), results: Record<string, QueryResult> = {}, todo: { name: string; sql: string }[] = [];
+  for (const [name, sql] of Object.entries(queries)) {
+    const why = sqlProblem(sql);
+    if (why) { results[name] = { error: why }; continue; }
+    const hit = cache.get(`${v}\n${sql}`);
+    if (hit) results[name] = hit; else todo.push({ name, sql });
+  }
+  if (todo.length) {
+    const got = await new Promise<Record<string, QueryResult>>((resolve) => {
+      const w = new Worker(new URL("./ledgerWorker.js", import.meta.url), { workerData: { path: file, queries: todo, maxRows: MAX_ROWS }, resourceLimits: { maxOldGenerationSizeMb: 64 } });
+      const fail = (msg: string) => resolve(Object.fromEntries(todo.map((q) => [q.name, { error: msg }])));
+      const t = setTimeout(() => { w.terminate(); fail(`took longer than ${DEADLINE_MS / 1000} s`); }, DEADLINE_MS);
+      w.once("message", (m) => { clearTimeout(t); resolve(m); w.terminate(); });
+      w.once("error", (e) => { clearTimeout(t); fail(String(e.message).slice(0, 200)); });
+    });
+    for (const q of todo) {
+      results[q.name] = got[q.name] || { error: "no result" };
+      if (!("error" in results[q.name]) || !/longer than/.test((results[q.name] as { error: string }).error)) {
+        cache.set(`${v}\n${q.sql}`, results[q.name]);
+        if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!);
+      }
+    }
+  }
+  let asOf: number | null = null;
+  try { asOf = Math.max(statSync(file).mtimeMs, (() => { try { return statSync(`${file}-wal`).mtimeMs; } catch { return 0; } })()); } catch {}
+  return { results, asOf };
+}
+
+// ---------- binding ----------
+// Which props a bound component gets from its query's rows. A bound component may leave these out of its spec.
+export const BOUND: Record<string, string[]> = {
+  Stat: ["value"], Meter: ["value", "max"], Text: ["text"], Table: ["rows"], List: ["items"], Timeline: ["items"],
+  BarChart: ["data"], Donut: ["data"], LineChart: ["series"], Sparkline: ["values"],
+};
+const num = (v: unknown) => (typeof v === "number" ? v : Number(v));
+const first = (r: Record<string, unknown>, k: string, i = 0) => (r[k] !== undefined ? r[k] : Object.values(r)[i]);
+const str = (v: unknown, max: number) => (v == null ? "" : String(v)).slice(0, max);
+const TONES = new Set(["default", "muted", "ok", "bad", "blue", "up", "down", "flat"]);
+const STATES = new Set(["done", "running", "needs", "failed"]);
+
+// The component with its bound props filled from rows (column names as documented in the catalogue), or a bad-tone Text
+// saying what went wrong. Pure; the caps match the catalogue's, so a bound surface renders like a literal one.
+export function fill(n: Record<string, any>, r: QueryResult | undefined): Record<string, any> {
+  const { bind, ...rest } = n;
+  if (!r) return { type: "Text", text: `No query named "${bind}"`, tone: "bad" };
+  if ("error" in r) return { type: "Text", text: `${n.title || n.label || n.type}: ${r.error}`, tone: "bad" };
+  const rows = r.rows, r0 = rows[0] || {};
+  switch (n.type) {
+    case "Stat": return { ...rest, value: rows.length ? first(r0, "value") ?? "—" : "—", ...(r0.delta != null ? { delta: str(r0.delta, 60) } : {}), ...(TONES.has(String(r0.tone)) ? { tone: r0.tone } : {}) };
+    case "Meter": return { ...rest, value: num(first(r0, "value")) || 0, max: num(r0.max ?? Object.values(r0)[1] ?? rest.max) || 1 };
+    case "Text": return { ...rest, text: str(first(r0, "text"), 2000) || " " };
+    case "Table": return { ...rest, rows: rows.slice(0, 200) };
+    case "List": return { ...rest, items: rows.slice(0, 100).map((x) => ({ title: str(first(x, "title"), 200), ...(x.detail != null ? { detail: str(x.detail, 400) } : {}), ...(x.meta != null ? { meta: str(x.meta, 80) } : {}) })) };
+    case "Timeline": return { ...rest, items: rows.slice(0, 100).map((x) => ({ text: str(first(x, "text"), 300), ...(x.time != null ? { time: str(x.time, 60) } : {}), ...(STATES.has(String(x.state)) ? { state: x.state } : {}) })) };
+    case "BarChart": case "Donut": return { ...rest, data: rows.slice(0, n.type === "Donut" ? 8 : 50).map((x) => ({ label: str(first(x, "label"), 80), value: num(first(x, "value", 1)) || 0 })) };
+    case "Sparkline": return { ...rest, values: rows.slice(0, 200).map((x) => num(first(x, "value")) || 0) };
+    case "LineChart": {
+      const by = new Map<string, { x: string; y: number }[]>();
+      for (const x of rows) { const k = str(x.series ?? n.title ?? "value", 80); if (!by.has(k) && by.size >= 5) continue; (by.get(k) || by.set(k, []).get(k)!).push({ x: str(first(x, "x"), 40), y: num(x.y ?? Object.values(x)[1]) || 0 }); }
+      return { ...rest, series: [...by].map(([name, points]) => ({ name, points: points.slice(0, 200) })) };
+    }
+    default: return rest;
+  }
+}
+
+// A stored surface as the driver sees it: queries run, bound props filled, plus when the ledger last changed.
+export async function resolveSurface<S extends { bot_id?: string; spec: any }>(s: S, botId = s.bot_id): Promise<S & { data?: { source: string; asOf: number | null; errors: string[] } }> {
+  const spec = s.spec;
+  if (!spec?.source || !spec.queries || !botId) return s;
+  const file = ledgerPath(botId, spec.source);
+  const { results, asOf } = file ? await runQueries(file, spec.queries) : { results: Object.fromEntries(Object.keys(spec.queries).map((k) => [k, { error: `ledger ${spec.source} not found` }])), asOf: null };
+  const walk = (n: any): any => (!n || typeof n !== "object" ? n : { ...(n.bind ? fill(n, results[n.bind]) : n), ...(n.children ? { children: n.children.map(walk) } : {}) });
+  const errors = Object.entries(results).flatMap(([k, r]) => ("error" in r ? [`${k}: ${r.error}`] : []));
+  const { source, queries, ...shown } = spec;
+  return { ...s, spec: { ...shown, root: walk(spec.root) }, data: { source, asOf, errors } };
+}

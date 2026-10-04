@@ -2,6 +2,8 @@
 // tokens only. Specs are dynamic JSON from the crew, hence `any` for nodes.
 import { createContext, useContext, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { Surface as SurfaceRow } from "../../../shared/types";
+import { api } from "../lib/api";
+import { ago } from "../lib/format";
 
 type Values = Record<string, unknown>;
 interface Ctx { onAction: (action: string, values: Values) => Promise<void> | void; locked: boolean }
@@ -24,13 +26,21 @@ const isNum = (f?: string) => ["number", "money", "percent"].includes(f || "");
 const hue = (h: string) => ({ "--hue": h }) as CSSProperties;
 
 /** `extra` sits in the header (Keep in Library, or a link back); `lockOnAction` disables the inputs once one is sent. */
-export function Surface({ s, extra, onAction, lockOnAction = false }: { s: SurfaceRow; extra?: ReactNode; onAction: Ctx["onAction"]; lockOnAction?: boolean }) {
+export function Surface({ s: given, extra, onAction, lockOnAction = false }: { s: SurfaceRow; extra?: ReactNode; onAction: Ctx["onAction"]; lockOnAction?: boolean }) {
   const [locked, setLocked] = useState(false);
+  // A bound dashboard re-reads its ledger on refresh; the server runs the queries (cached per ledger version).
+  const [fresh, setFresh] = useState<SurfaceRow | null>(null);
+  const s = fresh && fresh.id === given.id ? fresh : given;
+  const refresh = async () => setFresh(await api.get<SurfaceRow>(`/api/surfaces/${s.id}`));
   const act = async (action: string, values: Values) => { await onAction(action, values); if (lockOnAction) setLocked(true); };
   return (
     <SurfaceCtx.Provider value={{ onAction: act, locked }}>
       <div className="surface">
-        <div className="head"><span className="pc-lab">Surface</span><b className="pc-h3">{s.spec?.title}</b>{extra}</div>
+        <div className="head"><span className="pc-lab">{s.data ? "Dashboard" : "Surface"}</span><b className="pc-h3">{s.spec?.title}</b>{extra}</div>
+        {s.data && <p className="small faint row" style={{ gap: 8 }}>
+          <span title={s.data.source}>{s.data.asOf ? `Data as of ${ago(s.data.asOf)}` : "Ledger not found"}</span>
+          <button className="small faint" onClick={refresh}>Refresh</button>
+        </p>}
         <Node n={s.spec?.root} />
       </div>
     </SurfaceCtx.Provider>
@@ -52,7 +62,7 @@ function Node({ n }: { n: any }): ReactNode {
     case "Quote": return <p className="pc-quote">{n.text}</p>;
     case "Lab": return <p className="pc-lab">{n.text}</p>;
     case "Receipt": return <p className="small muted">[ok] {n.text}{n.source && <> · <a href={n.source} target="_blank" rel="noopener noreferrer" className="md">{hostOf(n.source)}</a></>}</p>;
-    case "Stat": return <div className="sf-stat col" style={{ gap: 4 }}><p className="pc-lab">{n.label}</p><span className="v num">{n.value}</span>{n.delta && <span className={`d ${n.tone === "down" || n.tone === "bad" ? "down" : n.tone === "up" || n.tone === "ok" ? "up" : "faint"}`}>{n.delta}</span>}</div>;
+    case "Stat": return <div className="sf-stat col" style={{ gap: 4 }}><p className="pc-lab">{n.label}</p><span className="v num">{n.format ? fmt(n.value, n.format) : n.value}</span>{n.delta && <span className={`d ${n.tone === "down" || n.tone === "bad" ? "down" : n.tone === "up" || n.tone === "ok" ? "up" : "faint"}`}>{n.delta}</span>}</div>;
     case "Meter": return <div className="col" style={{ gap: 6 }}><div className="spread small"><span>{n.label}</span><span className="num faint">{`${fmt(n.value, "number")} / ${fmt(n.max, "number")}${n.unit ? " " + n.unit : ""}`}</span></div><div className="meter"><b style={{ width: `${Math.min(100, (n.value / (n.max || 1)) * 100)}%`, background: hueVar(n.hue) }} /></div></div>;
     case "Badge": return <span className={`pc-chip ${toneClass(n.tone)}`}>{n.text}</span>;
     case "Table": return <div className="scrollx"><table className="tbl"><thead><tr>{n.columns.map((c: any) => <th key={c.key} className={isNum(c.format) ? "num" : ""}>{c.label}</th>)}</tr></thead>

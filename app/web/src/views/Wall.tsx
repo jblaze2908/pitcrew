@@ -5,6 +5,10 @@ import { AsksList } from "../components/AsksList";
 import { CrewCard } from "../components/CrewCard";
 import { DigestCard } from "../components/Engram";
 import { PitCard } from "../components/PitCard";
+import { Surface } from "../components/Surface";
+import { toast } from "../lib/toast";
+import { useFetch } from "../lib/useFetch";
+import type { KeptSurface } from "../../../shared/types";
 import { Meter } from "../components/ui";
 import { api } from "../lib/api";
 import { hourNow, plural, usd } from "../lib/format";
@@ -16,6 +20,8 @@ export function Wall() {
   const hour = hourNow();
   const greet = hour < 5 ? "Late night" : hour < 12 ? "Morning" : hour < 17 ? "Afternoon" : "Evening";
   const n = S.pitstops.length;
+  // Kept dashboards bound to a ledger: always current, since they read the ledger on view (server/ledger.ts).
+  const boards = useFetch(() => api.get<KeptSurface[]>("/api/surfaces?bound=1", { quiet: true }), []);
   return (
     <div className="page">
       <div className="spread"><h1 className="pc-hello">{`${greet}, ${S.driverName}. `}{n ? <em>{`${plural(n, "pit stop")} need${n > 1 ? "" : "s"} you.`}</em> : "All quiet."}</h1></div>
@@ -36,6 +42,12 @@ export function Wall() {
         <section className="col">
           <div className="spread"><p className="pc-lab">Box, box: waiting on you</p>{n > 1 && <a className="small faint" href="#/pitstops">Batch decide</a>}</div>
           <div className="grid2">{S.pitstops.slice(0, 6).map((p) => <PitCard key={p.id} p={p} />)}</div>
+        </section>)}
+      {!!boards.data?.length && (
+        <section className="col">
+          <p className="pc-lab">Dashboards</p>
+          <div className="grid2">{boards.data.slice(0, 4).map((s) => <Surface key={s.id} s={s} extra={<a className="small faint" href={`#/t/${s.thread_id}`} style={{ marginLeft: "auto" }}>{s.bot_name}</a>}
+            onAction={async (action, values) => { await api.post(`/api/surfaces/${s.id}/action`, { action, values }); toast("Sent to the crew"); }} />)}</div>
         </section>)}
       {S.engram.linked && <DigestCard />}
       <div className="grid3">

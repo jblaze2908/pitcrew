@@ -11,6 +11,7 @@ import { readBody, jsonBody, raw, text, trimmed, flag, truthy, given, field, pic
 import { AUTONOMY, type Autonomy } from "../runtime/autonomy.js";
 import { addEvent } from "../runtime/threads.js";
 import { threadView } from "./views.js";
+import { resolveSurface } from "../ledger.js";
 import type { Ask, Origin, PlanStatus, RoutePick } from "../../shared/types.js";
 import type { SurfaceRow, ThreadRow } from "../models.js";
 
@@ -82,7 +83,7 @@ export const threadRoutes = new Hono<Env>()
     audit("driver", "ask.rerouted", { threadId: id, from: t.bot_id, to: to.id });
     return c.json(await openRouted(to.id, first.text, { kind: "routed", by: "driver", from: t.bot_id }));
   })
-  .get("/api/threads/:id", signedIn, (c) => { const id = c.req.param("id"), v = threadView(id); R.prewarmBrain(id); return c.json(v); })
+  .get("/api/threads/:id", signedIn, async (c) => { const id = c.req.param("id"), v = await threadView(id); R.prewarmBrain(id); return c.json(v); })
   .patch("/api/threads/:id", signedIn, async (c) => {
     const id = c.req.param("id"), b = await jsonBody(c, ThreadEdit);
     if (b.title !== undefined) run("UPDATE threads SET title=? WHERE id=?", b.title, id);
@@ -125,4 +126,11 @@ export const threadRoutes = new Hono<Env>()
     return c.json(await R.sendMessage(s.thread_id, { text, mode: "auto", trigger: "surface", display }));
   })
   .post("/api/surfaces/:id/save", signedIn, async (c) => { const b = await jsonBody(c, Save); run("UPDATE surfaces SET saved=? WHERE id=?", b.saved ? 1 : 0, c.req.param("id")); return c.json({ ok: true }); })
-  .get("/api/surfaces", signedIn, (c) => c.json(all<SurfaceRow & { bot_name: string; hue: string }>("SELECT s.id,s.title,s.spec,s.thread_id,s.bot_id,s.created_at,b.name bot_name,b.hue FROM surfaces s JOIN bots b ON b.id=s.bot_id WHERE s.saved=1 ORDER BY s.created_at DESC").map((s) => ({ ...s, spec: json(s.spec) }))));
+  // Kept surfaces (Library); ?bound=1 only the dashboards bound to a ledger (the Wall).
+  .get("/api/surfaces", signedIn, async (c) => c.json(await Promise.all(all<SurfaceRow & { bot_name: string; hue: string }>(`SELECT s.id,s.title,s.spec,s.thread_id,s.bot_id,s.created_at,b.name bot_name,b.hue FROM surfaces s JOIN bots b ON b.id=s.bot_id WHERE s.saved=1${c.req.query("bound") ? " AND json_extract(s.spec,'$.source') IS NOT NULL" : ""} ORDER BY s.created_at DESC`).map((s) => resolveSurface({ ...s, spec: json(s.spec) })))))
+  // One surface as the driver sees it now: a bound dashboard's refresh.
+  .get("/api/surfaces/:id", signedIn, async (c) => {
+    const s = one<SurfaceRow>("SELECT id,title,spec,saved,bot_id FROM surfaces WHERE id=?", c.req.param("id"));
+    if (!s) throw httpErr(404, "No such surface");
+    return c.json(await resolveSurface({ ...s, spec: json(s.spec) }));
+  });

@@ -678,3 +678,48 @@ test("a step's recorded input hides secrets by key and by form-field label, and 
   assert.ok(!debugArgs({ card_number: "4111111111111111" }).includes("4111"));
   assert.equal(debugArgs(undefined), null);
 });
+
+test("bound dashboards: one read-only SELECT per query, confined to the member's work dir, filled at view time", async () => {
+  const L = await import("../app/dist/src/ledger.js");
+  const { validateSurface } = await import("../app/dist/src/surfaces.js");
+  const { DatabaseSync } = await import("node:sqlite");
+  const { symlinkSync } = await import("node:fs");
+  for (const [sql, ok] of [["SELECT 1", true], ["with x as (select 1 v) select v from x;", true], ["select 'a;b' as t", true], ["select 1 -- attach\n", true],
+    ["select 1; select 2", false], ["ATTACH DATABASE '/srv/pitcrew/data/pitcrew.db' AS p", false], ["pragma table_info(t)", false], ["select * from pragma_table_info('t')", true],
+    ["delete from orders", false], ["with x as (select 1) delete from orders", false], ["select load_extension('x')", false], ["", false]])
+    assert.equal(L.sqlProblem(sql) === null, ok, sql);
+
+  const work = `${root}/bots/b_led/work`; mkdirSync(`${work}/g`, { recursive: true });
+  const db = new DatabaseSync(`${work}/g/ledger.db`);
+  db.exec("CREATE TABLE orders(day TEXT, item TEXT, paid REAL); CREATE TABLE big(n INTEGER)");
+  const ins = db.prepare("INSERT INTO orders VALUES(?,?,?)"); [["2026-10-01", "Milk", 60], ["2026-10-01", "Eggs", 90], ["2026-10-02", "Milk", 62]].forEach((r) => ins.run(...r));
+  db.exec("WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM c WHERE n < 900) INSERT INTO big SELECT n FROM c"); db.close();
+  writeFileSync(`${root}/bots/b_led/outside.db`, ""); symlinkSync(`${root}/bots/b_led/outside.db`, `${work}/link.db`);
+  assert.ok(L.ledgerPath("b_led", "g/ledger.db")); assert.ok(L.ledgerPath("b_led", "/bot/work/g/ledger.db"));
+  for (const bad of ["../outside.db", "link.db", "g/ledger.csv", "/etc/passwd", "g/missing.db"]) assert.equal(L.ledgerPath("b_led", bad), null, bad);
+
+  const file = L.ledgerPath("b_led", "g/ledger.db");
+  const r = await L.runQueries(file, { spend: "SELECT sum(paid) value FROM orders", top: "SELECT item label, count(*) value FROM orders GROUP BY item ORDER BY value DESC", many: "SELECT n FROM big", bad: "SELECT nope FROM orders", write: "DELETE FROM orders" });
+  assert.equal(r.results.spend.rows[0].value, 212);
+  assert.deepEqual(r.results.top.rows.map((x) => x.label), ["Milk", "Eggs"]);
+  assert.equal(r.results.many.rows.length, L.MAX_ROWS); assert.equal(r.results.many.truncated, true);
+  assert.match(r.results.bad.error, /no such column/); assert.match(r.results.write.error, /only read|SELECT/);
+  assert.ok(r.asOf > 0);
+  assert.deepEqual((await L.runQueries(file, { spend: "SELECT sum(paid) value FROM orders" })).results.spend, r.results.spend, "cached until the ledger changes");
+
+  const spec = { title: "Groceries", source: "g/ledger.db", queries: { spend: "SELECT sum(paid) value FROM orders", top: "SELECT item label, count(*) value FROM orders GROUP BY item", gone: "SELECT x FROM nope" },
+    root: { type: "Grid", columns: 2, children: [{ type: "Stat", label: "Spend", format: "money", bind: "spend" }, { type: "BarChart", title: "Top", bind: "top" }, { type: "Table", columns: [{ key: "x", label: "X" }], bind: "gone" }] } };
+  assert.deepEqual(validateSurface(spec).errors, []);
+  assert.match(validateSurface({ ...spec, queries: { ...spec.queries, spend: "DROP TABLE orders" } }).errors.join(), /spend: must be a SELECT/);
+  assert.match(validateSurface({ ...spec, root: { type: "Stat", label: "x", bind: "nothere" } }).errors.join(), /names no query/);
+  assert.match(validateSurface({ title: "t", root: { type: "Stat", label: "x" } }).errors.join(), /needs "value"/, "unbound Stat still needs a value");
+  const shown = await L.resolveSurface({ id: "sf_1", title: "Groceries", spec, bot_id: "b_led" });
+  const [stat, bars, failed] = shown.spec.root.children;
+  assert.deepEqual([stat.value, stat.format, stat.bind], [212, "money", undefined]);
+  assert.deepEqual([...bars.data].sort((a, b) => a.label.localeCompare(b.label)), [{ label: "Eggs", value: 1 }, { label: "Milk", value: 2 }]);
+  assert.equal(failed.type, "Text"); assert.equal(failed.tone, "bad");
+  assert.equal(shown.spec.queries, undefined, "queries never reach the browser");
+  assert.equal(shown.data.source, "g/ledger.db"); assert.deepEqual(shown.data.errors, ["gone: no such table: nope"]);
+  const missing = await L.resolveSurface({ id: "sf_2", title: "x", spec: { ...spec, source: "g/none.db" }, bot_id: "b_led" });
+  assert.equal(missing.data.asOf, null); assert.equal(missing.spec.root.children[0].type, "Text");
+});

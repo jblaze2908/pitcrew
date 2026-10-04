@@ -1,4 +1,6 @@
-// Generative UI: the crew emits a declarative surface; Pitcrew renders it with its own components.
+// Generative UI: the crew emits a declarative surface; Pitcrew renders it with its own components. A surface may also
+// name a ledger and carry queries; components with `bind` get their data from those at view time (ledger.ts).
+import { BOUND, LEDGER_EXT, MAX_QUERIES, sqlProblem } from "./ledger.js";
 // The catalogue is the allowlist: unknown components or props, raw colours and oversized data are rejected, never degraded.
 
 // A prop or field spec: what checkValue accepts for one value.
@@ -19,7 +21,7 @@ const FORMAT = oneOf("text", "number", "money", "date", "percent");
 const OPTION = obj({ value: str(200), label: str(200) }, ["value", "label"]);
 const field = (extra: Record<string, Spec> = {}): Component => ({ props: { name: { t: "name" }, label: str(200), required: bool, help: str(300), ...extra }, req: ["name", "label"], field: true });
 
-export const CATALOGUE: Record<string, Component> = {
+const CATALOGUE_LITERAL: Record<string, Component> = {
   Section: { props: { title: str(200) }, children: true },
   Stack: { props: { direction: oneOf("row", "column"), gap: oneOf("s", "m", "l") }, children: true },
   Grid: { props: { columns: { t: "int", min: 1, max: 4 } }, children: true },
@@ -30,7 +32,7 @@ export const CATALOGUE: Record<string, Component> = {
   Quote: { props: { text: str() }, req: ["text"] },
   Lab: { props: { text: str(120) }, req: ["text"] },
   Receipt: { props: { text: str(400), source: { t: "url" } }, req: ["text"] },
-  Stat: { props: { label: str(120), value: str(60), delta: str(60), tone: TONE, hue: HUE }, req: ["label", "value"] },
+  Stat: { props: { label: str(120), value: str(60), delta: str(60), tone: TONE, hue: HUE, format: FORMAT }, req: ["label", "value"] },
   Meter: { props: { label: str(120), value: num, max: num, unit: str(20), hue: HUE }, req: ["label", "value", "max"] },
   Badge: { props: { text: str(60), tone: TONE }, req: ["text"] },
   Table: { props: { columns: arr(obj({ key: { t: "name" }, label: str(120), format: FORMAT }, ["key", "label"]), 12), rows: arr({ t: "row" }, 200) }, req: ["columns", "rows"] },
@@ -52,6 +54,9 @@ export const CATALOGUE: Record<string, Component> = {
   Toggle: field({ value: bool }),
   Choice: { props: { action: { t: "name" }, prompt: str(300), options: arr(obj({ id: { t: "name" }, label: str(200), detail: str(400) }, ["id", "label"]), 12) }, req: ["action", "options"] },
 };
+
+// Bindable components also take `bind`: the name of one of the surface's queries.
+export const CATALOGUE: Record<string, Component> = Object.fromEntries(Object.entries(CATALOGUE_LITERAL).map(([k, d]) => [k, BOUND[k] ? { ...d, props: { ...d.props, bind: { t: "name" } } } : d]));
 
 const MAX_NODES = 400, MAX_DEPTH = 8;
 
@@ -80,7 +85,7 @@ function checkValue(spec: Spec, v: any, path: string, errs: string[]): void {
 export function validateSurface(surface: any): { ok: boolean; errors: string[]; actions?: string[] } {
   const errs: string[] = [];
   let nodes = 0;
-  const actions = new Set<string>();
+  const actions = new Set<string>(), binds = new Set<string>();
   const walk = (n: any, path: string, depth: number, inForm: boolean): unknown => {
     if (++nodes > MAX_NODES) { if (nodes === MAX_NODES + 1) errs.push(`surface has more than ${MAX_NODES} components`); return; }
     if (depth > MAX_DEPTH) return errs.push(`${path}: nested deeper than ${MAX_DEPTH}`);
@@ -89,7 +94,8 @@ export function validateSurface(surface: any): { ok: boolean; errors: string[]; 
     if (!def) return errs.push(`${path}: unknown component "${n.type}". Allowed: ${Object.keys(CATALOGUE).join(", ")}`);
     if (def.field && !inForm) errs.push(`${path}: ${n.type} must be inside a Form`);
     for (const k of Object.keys(n)) if (k !== "type" && k !== "children" && !def.props[k]) errs.push(`${path}.${k}: unknown prop for ${n.type}`);
-    for (const r of def.req || []) if (n[r] === undefined) errs.push(`${path}: ${n.type} needs "${r}"`);
+    if (n.bind !== undefined) binds.add(String(n.bind));
+    for (const r of def.req || []) if (n[r] === undefined && !(n.bind !== undefined && BOUND[n.type]?.includes(r))) errs.push(`${path}: ${n.type} needs "${r}"`);
     for (const [k, s] of Object.entries(def.props)) if (n[k] !== undefined) checkValue(s, n[k], `${path}.${k}`, errs);
     if (n.action) actions.add(n.action);
     if (n.children !== undefined) {
@@ -100,13 +106,23 @@ export function validateSurface(surface: any): { ok: boolean; errors: string[]; 
   };
   if (!surface || typeof surface !== "object") return { ok: false, errors: ["surface must be an object with title and root"] };
   if (typeof surface.title !== "string" || !surface.title.trim() || surface.title.length > 200) errs.push("title: required, up to 200 chars");
-  for (const k of Object.keys(surface)) if (!["title", "root"].includes(k)) errs.push(`unknown field "${k}"`);
+  for (const k of Object.keys(surface)) if (!["title", "root", "source", "queries"].includes(k)) errs.push(`unknown field "${k}"`);
   walk(surface.root, "root", 0, false);
+  const q = surface.queries;
+  if (q !== undefined || surface.source !== undefined || binds.size) {
+    if (typeof surface.source !== "string" || !LEDGER_EXT.test(surface.source)) errs.push("source: a SQLite ledger under /bot/work (.db, .sqlite or .sqlite3)");
+    if (!q || typeof q !== "object" || Array.isArray(q)) errs.push("queries: an object of name → SQL");
+    else {
+      if (Object.keys(q).length > MAX_QUERIES) errs.push(`queries: at most ${MAX_QUERIES}`);
+      for (const [name, sql] of Object.entries(q)) { if (!/^[a-z][\w]{0,39}$/i.test(name)) errs.push(`queries.${name}: name must be a word`); const why = sqlProblem(sql); if (why) errs.push(`queries.${name}: ${why}`); }
+      for (const b of binds) if (!(b in q)) errs.push(`bind "${b}" names no query`);
+    }
+  }
   return { ok: errs.length === 0, errors: errs.slice(0, 25), actions: [...actions] };
 }
 
 // Stable text for the tool description, so the catalogue stays in cached instructions, not in per-turn state.
 export function catalogueDoc() {
   const fmt = (s: Spec): string => s.t === "enum" ? s.v.join("|") : s.t === "array" ? `[${fmt(s.of)}]` : s.t === "object" ? `{${Object.entries(s.props).map(([k, v]) => `${k}${s.req.includes(k) ? "" : "?"}:${fmt(v)}`).join(",")}}` : s.t;
-  return Object.entries(CATALOGUE).map(([name, d]) => `${name}(${Object.entries(d.props).map(([k, v]) => `${k}${(d.req || []).includes(k) ? "" : "?"}:${fmt(v)}`).join(", ")})${d.children ? " [children]" : ""}${d.field ? " [inside Form]" : ""}`).join("\n");
+  return Object.entries(CATALOGUE_LITERAL).map(([name, d]) => `${name}(${Object.entries(d.props).map(([k, v]) => `${k}${(d.req || []).includes(k) ? "" : "?"}:${fmt(v)}`).join(", ")})${d.children ? " [children]" : ""}${d.field ? " [inside Form]" : ""}`).join("\n");
 }
