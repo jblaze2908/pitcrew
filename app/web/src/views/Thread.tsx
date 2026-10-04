@@ -197,7 +197,8 @@ function Autonomy({ id, value, onChange }: { id: string; value: string; onChange
 
 function Title({ id, title, onRenamed }: { id: string; title: string; onRenamed: (t: string) => void }) {
   const [editing, setEditing] = useState<string | null>(null);
-  if (editing == null) return <h1 className="pc-h2" title="Click to rename" onClick={() => setEditing(title)}>{title}</h1>;
+  const auto = async () => { const r = await api.post<{ title: string }>(`/api/threads/${id}/retitle`); onRenamed(r.title); };
+  if (editing == null) return <h1 className="pc-h2" title="Click to rename" onClick={() => setEditing(title)}>{title}<button className="small faint" style={{ marginLeft: 8 }} title="Name it from the conversation" onClick={(e) => { e.stopPropagation(); auto(); }}>Auto-name</button></h1>;
   const done = async () => { const t = editing || title; setEditing(null); await api.patch(`/api/threads/${id}`, { title: t }); onRenamed(t); };
   return <input autoFocus value={editing} onChange={(e) => setEditing(e.target.value)} onBlur={done} onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }} />;
 }

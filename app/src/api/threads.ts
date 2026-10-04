@@ -12,6 +12,7 @@ import { AUTONOMY, type Autonomy } from "../runtime/autonomy.js";
 import { addEvent } from "../runtime/threads.js";
 import { threadView } from "./views.js";
 import { resolveSurface } from "../ledger.js";
+import { nameFromConversation } from "../runtime/titles.js";
 import type { Ask, Origin, PlanStatus, RoutePick } from "../../shared/types.js";
 import type { SurfaceRow, ThreadRow } from "../models.js";
 
@@ -86,7 +87,7 @@ export const threadRoutes = new Hono<Env>()
   .get("/api/threads/:id", signedIn, async (c) => { const id = c.req.param("id"), v = await threadView(id); R.prewarmBrain(id); return c.json(v); })
   .patch("/api/threads/:id", signedIn, async (c) => {
     const id = c.req.param("id"), b = await jsonBody(c, ThreadEdit);
-    if (b.title !== undefined) run("UPDATE threads SET title=? WHERE id=?", b.title, id);
+    if (b.title !== undefined) run("UPDATE threads SET title=?, title_auto=0 WHERE id=?", b.title, id);
     if (b.archived !== undefined) run("UPDATE threads SET archived=? WHERE id=?", b.archived, id);
     if (b.autonomy !== undefined && R.getThread(id) && R.getThread(id)!.autonomy !== b.autonomy) {
       run("UPDATE threads SET autonomy=? WHERE id=?", b.autonomy, id);
@@ -100,6 +101,12 @@ export const threadRoutes = new Hono<Env>()
   .post("/api/threads/:id/queue/:qid/send-now", signedIn, async (c) => c.json(await R.sendQueuedNow(c.req.param("id"), c.req.param("qid"))))
   .post("/api/threads/:id/interrupt", signedIn, async (c) => c.json({ ok: await R.interrupt(c.req.param("id")) }))
   .post("/api/threads/:id/refresh", signedIn, (c) => { const id = c.req.param("id"); if (!R.getThread(id)) throw httpErr(404, "No such thread"); return c.json(R.refresh(id)); })
+  // Hands the title back to the conversation: named now by titles.ts, and kept automatic until renamed by hand again.
+  .post("/api/threads/:id/retitle", signedIn, async (c) => {
+    const id = c.req.param("id"); if (!R.getThread(id)) throw httpErr(404, "No such thread");
+    run("UPDATE threads SET title_auto=1 WHERE id=?", id);
+    return c.json({ title: (await nameFromConversation(id)) ?? R.getThread(id)!.title });
+  })
   .post("/api/threads/:id/compact", signedIn, async (c) => { await R.compact(c.req.param("id")); return c.json({ ok: true }); })
   .post("/api/threads/:id/fresh", signedIn, (c) => {
     const id = c.req.param("id"), t = R.getThread(id); if (!t) throw httpErr(404, "No such thread");
