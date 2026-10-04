@@ -7,10 +7,10 @@ import { resolveSurface, ledgerPath, listLedgers, mayRead, runQueries } from "..
 import { imageFrom, saveShot, type ToolResult } from "../shots.js";
 import type { Brain } from "../computer.js";
 import { active } from "./state.js";
-import { addEvent, findThreads, threadLink } from "./threads.js";
+import { addEvent, findThreads, threadLink, readThread } from "./threads.js";
 import { computer } from "./machines.js";
 import { pitStop } from "./pitstops.js";
-import { addSchedule, listSchedules, updateSchedule, deleteSchedule } from "./schedules.js";
+import { addSchedule, listSchedules, updateSchedule, deleteSchedule, lastScheduledRun } from "./schedules.js";
 import { askCrew } from "./delegation.js";
 import { planTool } from "./plans.js";
 import { runtimeTool, type ToolCall } from "./browser.js";
@@ -105,7 +105,7 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
     }
     case "list_schedules": {
       const list = listSchedules(b.id);
-      return say(list.length ? list.map((s) => `${s.id} · ${s.spec}${s.enabled ? ` · next ${ist(s.next_run)} IST` : " · paused"}\n  ${s.prompt}`).join("\n") : "No schedules.");
+      return say(list.length ? list.map((s) => { const l = lastScheduledRun(s); return `${s.id} · ${s.spec}${s.enabled ? ` · next ${ist(s.next_run)} IST` : " · paused"}${l ? ` · last run ${ist(l.at)} IST: ${l.status}${l.summary ? `, "${l.summary}"` : ""}` : " · not run yet"}\n  ${s.prompt}`; }).join("\n") : "No schedules.");
     }
     case "update_schedule": {
       try {
@@ -146,6 +146,15 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
       if ("error" in r) return say(`Query failed: ${r.error}`, false);
       const body = JSON.stringify(r.rows);
       return say(`${r.rows.length} row${r.rows.length === 1 ? "" : "s"}${r.truncated ? " (cut at 500)" : ""} from ${owner.name}'s ${a.source}:\n${body.length > 24000 ? `${body.slice(0, 24000)}…` : body}`);
+    }
+    case "read_thread": {
+      const id = /th_[\w-]{4,40}/.exec(String(a.thread || ""))?.[0];
+      const r = id ? readThread(id, Number(a.after) || 0) : null;
+      if (!r) return say("No such thread; give its id or link (from find_threads).", false);
+      const owner = getBot(r.botId);
+      // A member reads its own threads; the Chief also reads non-private members' (it coordinates them).
+      if (r.botId !== b.id && !(b.kind === "chief" && owner && !owner.private)) return say("That thread belongs to another crew member.", false);
+      return say(`${r.title}\n\n${r.text || "(nothing after that point)"}${r.next ? `\n\n[more: call read_thread with after: ${r.next}]` : "\n\n[end of thread]"}`);
     }
     case "find_threads": {
       const found = findThreads(b.id, a.query, { exclude: threadId, limit: Math.min(Number(a.limit) || 8, 20) });

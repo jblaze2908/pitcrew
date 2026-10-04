@@ -12,6 +12,7 @@ export { pattern, describePattern, standingRule, LEARN_AFTER, learnProgress } fr
 export { shadowVerify, logDecision } from "./gate.js";
 export { pitRow, pitStop, decide } from "./pitstops.js";
 export { siteStep, afterAction, mayConfirm } from "./sitegate.js";
+export { lastScheduledRun } from "./schedules.js";
 export { toContentItems, frontTab } from "./browser.js";
 export { findMember } from "./delegation.js";
 export { parseHandoff } from "./planStore.js";

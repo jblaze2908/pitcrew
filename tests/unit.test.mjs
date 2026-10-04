@@ -851,3 +851,27 @@ test("json() falls back to its default for NULL and empty columns, so a fresh pl
   const r = await P.planTool(getBot("chief_p"), "t_plan", { goal: "Collect feedback", constraints: ["short"], add: [{ key: "m", member: "Member P", task: "Review your chats" }] });
   assert.ok(r.success !== false, JSON.stringify(r).slice(0, 300));
 });
+
+test("read_thread pages a whole thread: messages in full, tool calls as one line each", async () => {
+  const Th = await import("../app/dist/src/runtime/threads.js");
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_read','b_quiet','Blinkit backfill',0,0)");
+  const ev = (kind, data) => run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('th_read',NULL,?,?,0)", kind, JSON.stringify(data));
+  ev("user", { text: "backfill everything", via: "driver" }); ev("tool", { type: "script", code: "x" });
+  ev("tool", { type: "browser", title: "navigate blinkit.com", status: "completed" }); ev("tool", { type: "commandExecution", title: "$ python3 parse.py", status: "declined" });
+  ev("pitstop", { id: "ps_1" }); ev("agent", { text: "x".repeat(15000) }); ev("agent", { text: "y".repeat(15000) }); ev("system", { text: "Changed schedule" });
+  const p1 = Th.readThread("th_read");
+  assert.match(p1.text, /^Driver: backfill everything\n  · completed · navigate blinkit.com\n  · declined · \$ python3 parse.py\n  · pit stop ps_1\nAgent: x{15000}$/);
+  assert.ok(p1.next, "a second page");
+  const p2 = Th.readThread("th_read", p1.next);
+  assert.match(p2.text, /^Agent: y{15000}\nNote: Changed schedule$/); assert.equal(p2.next, null);
+  assert.equal(Th.readThread("th_none"), null);
+});
+
+test("a schedule shows its last run: when, how it ended, and the first line of the reply", async () => {
+  const S = await import("../app/dist/src/runtime/schedules.js");
+  run("INSERT INTO threads(id,bot_id,title,pinned,created_at,updated_at) VALUES('th_sch_last','b_sch2','Scheduled work',1,0,0)");
+  assert.equal(S.lastScheduledRun({ bot_id: "b_sch2", thread_id: null, last_run: null }), null);
+  run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,started_at) VALUES('tu_sl','th_sch_last','b_sch2','completed','schedule',5000)");
+  run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('th_sch_last','tu_sl','agent',?,5001)", JSON.stringify({ text: "QUIET: checked 1 page, no new orders\nmore" }));
+  assert.deepEqual(S.lastScheduledRun({ bot_id: "b_sch2", thread_id: null, last_run: 4990 }), { at: 5000, status: "completed", summary: "QUIET: checked 1 page, no new orders", threadId: "th_sch_last" });
+});

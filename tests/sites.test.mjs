@@ -431,3 +431,14 @@ test("after three jev blocks in a row the driver decides; hard rule blocks never
   for (let i = 0; i < 4; i++) assert.equal(await gate(c, "t_esc_rule", { kind: "shell", command: "sudo whoami" }, pit), false);
   assert.equal(one("SELECT 1 FROM pitstops WHERE thread_id='t_esc_rule'"), undefined);
 });
+
+test("a blocked tool call hears jev's reason, not a generic decline", async () => {
+  const { gate } = await import("../app/dist/src/runtime/gate.js");
+  const S2 = await import("../app/dist/src/runtime/sitegate.js");
+  thread("t_blk");
+  run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('t_blk',NULL,'user',?,0)", JSON.stringify({ text: "tidy up" }));
+  const says = async () => ({ ok: true, json: async () => ({ model: "jev-test", answers: { effect: { choice: "read", confidence: 0.9, probabilities: { read: 0.9 } }, outside: { noul: 0 }, authorized: { noul: 0 }, forbidden: { noul: 0.9 } } }) });
+  assert.equal(await withFetch(says, () => gate({ bot: { id: b.id } }, "t_blk", { kind: "mcp", server: "crm", tool: "wipe", arguments: {} }, { kind: "mcp", title: "crm: wipe", detail: {} })), false);
+  const note = S2.takeRefusal("t_blk");
+  assert.match(note, /Blocked, not run: "crm: wipe"/); assert.match(note, /breaks a house rule/); assert.match(note, /didn't refuse it/);
+});

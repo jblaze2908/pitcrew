@@ -47,7 +47,13 @@ export async function gate(c: Brain, threadId: string, call: Call, pit: PitInfo)
     // After ESCALATE_AFTER jev blocks in a row the driver decides instead (hard rules never escalate); past
     // STOP_AFTER blocks in one run the run stops, so a member can't keep probing for a way through.
     if (n.total >= STOP_AFTER) { addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Stopped: jev blocked ${n.total} actions in this run. Tell ${b.name} how to go on, or change its house rules.`, tone: "bad" }); import("./turns.js").then((T) => T.interrupt(threadId)).catch(() => {}); return false; }
-    if (n.consecutive < ESCALATE_AFTER || v.by === "rule") { addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Blocked by jev: ${v.reason}. Nothing ran.`, tone: "bad" }); return false; }
+    if (n.consecutive < ESCALATE_AFTER || v.by === "rule") {
+      addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Blocked by jev: ${v.reason}. Nothing ran.`, tone: "bad" });
+      // Codex reports a declined command only as "rejected by user"; the member also hears what was blocked and why.
+      if (call.kind === "shell") import("./turns.js").then((T) => T.steerNote(threadId, BLOCKED_NOTE(pit.title, v.reason))).catch(() => {});
+      else noteRefusal(threadId, BLOCKED_NOTE(pit.title, v.reason));
+      return false;
+    }
     const decision = await pitStop({ botId: b.id, threadId, kind: pit.kind, effect: v.effect === "unknown" ? "ask" : v.effect, title: `${pit.title} · jev blocked ${n.consecutive} in a row`, detail: { ...pit.detail, signature: sig, pattern: pat, escalated: true }, jev: v });
     if (decision === "approved") { trustScript(b.id, script, "driver"); return allowed(threadId, true); }
     if (decision === "expired" && call.kind !== "shell") noteRefusal(threadId, EXPIRED_NOTE(pit.title));
@@ -94,6 +100,7 @@ function allowed(threadId: string, ok: boolean) { const n = blocks.get(threadId)
 function trustScript(botId: string, script: Call["script"], by: string) {
   if (script && !script.downloaded && !script.truncated) run("INSERT OR REPLACE INTO script_trust(bot_id,sha,path,by,at) VALUES(?,?,?,?,?)", botId, script.sha, script.path, by, now());
 }
+export const BLOCKED_NOTE = (title: string, reason: string) => `Blocked, not run: "${title.slice(0, 160)}". jev's reason: ${reason}. The driver didn't refuse it; a safety rule did. Don't try the same thing another way; if it's needed, say why and the driver can allow it.`;
 export const EXPIRED_NOTE = (title: string) => `Not done yet: the pit stop for "${title.slice(0, 160)}" expired because the driver didn't answer within 30 minutes. That isn't a refusal. Don't try it another way; finish what you can without it and say clearly what is waiting on the driver, so they can approve it when they're back.`;
 
 // The driver's last three messages in this thread (600 chars each, oldest first) and the member's house rules (20 lines).

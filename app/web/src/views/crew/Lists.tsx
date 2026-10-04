@@ -67,7 +67,9 @@ function ScheduleRow({ s, reload }: { s: Schedule; reload: () => void }) {
   );
   return (
     <tr>
-      <td className="pc-m">{s.spec}</td><td>{s.prompt}</td><td className="small faint">{s.enabled ? (s.next_run ? `next ${when(s.next_run)}` : "") : "paused"}</td>
+      <td className="pc-m">{s.spec}</td><td>{s.prompt}</td>
+      <td className="small faint">{s.enabled ? (s.next_run ? `next ${when(s.next_run)}` : "") : "paused"}
+        {s.last && <><br /><a className={s.last.status === "failed" ? "badc" : "faint"} href={s.last.threadId ? `#/t/${s.last.threadId}` : undefined} title={s.last.summary}>{`last ${when(s.last.at)} · ${s.last.status}${s.last.summary ? ` · ${s.last.summary.slice(0, 60)}` : ""}`}</a></>}</td>
       <td className="num"><div className="row" style={{ justifyContent: "flex-end" }}>
         <button className="small faint" onClick={() => setEdit({ spec: s.spec, prompt: s.prompt })}>Edit</button>
         <button className="small faint" onClick={() => patch({ enabled: !s.enabled })}>{s.enabled ? "Pause" : "Resume"}</button>
