@@ -762,3 +762,24 @@ test("replaying a captured request keeps its headers inside Playwright and appli
   assert.ok(Bz.workFile("b_rep", "/bot/work/grocery/raw/page2.json").endsWith("/work/grocery/raw/page2.json"));
   for (const bad of ["../x.json", "/etc/x", "a/../../x"]) assert.equal(Bz.workFile("b_rep", bad), null, bad);
 });
+
+test("a usage-limit failure picks the thread back up when the limit resets, at most three times in a row", async () => {
+  const Rs = await import("../app/dist/src/runtime/resume.js");
+  const failedAt = Date.parse("2026-10-03T20:24:34Z"); // 01:54 IST, the Blinkit backfill's failure
+  const msg = "You've hit your usage limit. Upgrade to Pro or try again at 4:54 AM.";
+  assert.equal(Rs.retryAt(msg, failedAt), Date.parse("2026-10-03T23:24:00Z") + 90000, "4:54 AM IST, later that night");
+  assert.equal(Rs.retryAt(msg, Date.parse("2026-10-04T00:00:00Z")), Date.parse("2026-10-04T23:24:00Z") + 90000, "already past: the next day");
+  assert.equal(Rs.retryAt("Rate limit reached, try again in 20 minutes", 0), 20 * 60000 + 90000);
+  assert.equal(Rs.retryAt("Something else broke", 0), null);
+  assert.ok(Rs.isUsageLimit(msg) && !Rs.isUsageLimit("network error"));
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_lim','b_quiet','lim',0,0)");
+  assert.ok(Rs.armResume("th_lim", msg, failedAt));
+  assert.deepEqual(Rs.dueResumes(failedAt), []);
+  assert.deepEqual(Rs.dueResumes(Date.parse("2026-10-03T23:30:00Z")), [{ threadId: "th_lim", tries: 1 }]);
+  Rs.sentResume("th_lim", 1);
+  assert.deepEqual(Rs.dueResumes(Date.parse("2026-10-05T00:00:00Z")), [], "sent: not sent again while its run goes");
+  assert.ok(Rs.armResume("th_lim", msg, failedAt)); assert.ok(Rs.armResume("th_lim", msg, failedAt));
+  assert.equal(Rs.armResume("th_lim", msg, failedAt), null, "a fourth limit in a row waits for the driver");
+  assert.deepEqual(Rs.dueResumes(Date.parse("2026-10-05T00:00:00Z")), []);
+  assert.match(all("SELECT data FROM events WHERE thread_id='th_lim' AND kind='system'").map((e) => e.data).join(), /picks up again at 04:55 IST/);
+});

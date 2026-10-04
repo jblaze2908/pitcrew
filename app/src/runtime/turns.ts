@@ -18,6 +18,7 @@ import { memberLinked } from "../engramStore.js";
 import { setRollout } from "./scripts.js";
 import { taint, tainted } from "./taint.js";
 import { postLearned } from "./learned.js";
+import { isUsageLimit, armResume, clearResume } from "./resume.js";
 import type { Bot } from "../../shared/types.js";
 
 export const isRunning = (threadId: string) => active.has(threadId);
@@ -214,6 +215,7 @@ export async function finishTurn(threadId: string, status: string, error?: strin
   run("UPDATE turns SET status=?, error=?, ended_at=?, input_tokens=?, cached_tokens=?, output_tokens=?, cost_usd=?, cost_basis=? WHERE id=?",
     status, error || null, now(), u.input, u.cached, u.output, cost.usd, cost.basis, a.turnId);
   if (error) addEvent(threadId, a.turnId, "error", { text: error });
+  if (status === "failed" && isUsageLimit(error)) armResume(threadId, error!); else if (status === "completed") clearResume(threadId);
   // What changed on disk during this turn, however it was changed.
   if (a.snap) try {
     const ch = changes(b.id, a.snap, snapshot(b.id));

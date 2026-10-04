@@ -4,6 +4,7 @@ import type { ScheduleRow } from "../models.js";
 import { getThread, addEvent } from "./threads.js";
 import { sendMessage } from "./turns.js";
 import { IST } from "./util.js";
+import { dueResumes, sentResume } from "./resume.js";
 
 const DOW = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 export function nextRun(spec: string, from = now()) {
@@ -65,6 +66,11 @@ export function tickSchedules() {
   // Rides the schedule tick (30 s) but deletes at most hourly; the ts index keeps it a range scan.
   if (now() >= nextPrune) { nextPrune = now() + 3600000; pruneLabels(); }
   if (getSetting("paused") === "1") return;
+  for (const r of dueResumes()) {
+    if (!getThread(r.threadId)) continue;
+    sentResume(r.threadId, r.tries);
+    sendMessage(r.threadId, { text: "[Pitcrew] The usage limit has reset. Continue where you stopped; don't redo work that's already done.", mode: "queue", trigger: "resume" }).catch((e) => addEvent(r.threadId, null, "error", { text: e.message }));
+  }
   for (const s of all<ScheduleRow>("SELECT * FROM schedules WHERE enabled=1 AND next_run<=?", now())) {
     run("UPDATE schedules SET last_run=?, next_run=? WHERE id=?", now(), nextRun(s.spec), s.id);
     let threadId = s.thread_id && getThread(s.thread_id) ? s.thread_id : one<{ id: string }>("SELECT id FROM threads WHERE bot_id=? AND pinned=1 AND archived=0 LIMIT 1", s.bot_id)?.id;
