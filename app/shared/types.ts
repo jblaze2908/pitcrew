@@ -25,6 +25,8 @@ export interface Bot {
   engram_scope: EngramScope;
   /** Reads Engram's household facts (addresses, account last-4s, family); off unless you tick it. */
   engram_household: boolean;
+  /** The driver's prose rules for this member, one per line ("Never place orders on Blinkit"); jev reads them on every judged call. */
+  house_rules: string;
 }
 export type EngramScope = "personal" | "finance" | "health";
 export interface ThreadSummary { id: string; title: string; status: ThreadStatus; created_at: number; updated_at: number; pinned: number }

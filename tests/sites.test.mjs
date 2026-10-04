@@ -340,3 +340,39 @@ test("a thread whose tools changed restarts with a recap of the latest messages,
   assert.ok(!r.includes("now backfill everything") && !r.includes("noise"));
   assert.ok(T.recap("t_recap", null, "", 40).length < 400, "bounded");
 });
+
+test("jev reads the driver's own words and house rules: an explicit ask allows, a never-rule blocks even in YOLO", async () => {
+  const { gate, jevContext } = await import("../app/dist/src/runtime/gate.js");
+  const P = J.DEFAULT_POLICY, v = (effect, decision = "ask") => ({ decision, effect, reason: "r", by: "jev:t" });
+  assert.equal(J.applyContext(v("send"), 0.9, 0.1, P).decision, "allow");
+  assert.equal(J.applyContext(v("pay"), 0.99, 0, P).decision, "ask", "paying always needs the driver");
+  assert.equal(J.applyContext(v("signin"), 0.99, 0, P).decision, "ask");
+  assert.equal(J.applyContext(v("browse", "allow"), 0, 0.7, P).decision, "block");
+  const maybe = J.applyContext(v("browse", "allow"), 0, 0.4, P); assert.deepEqual([maybe.decision, maybe.forbidden], ["ask", true]);
+
+  thread("t_ctx");
+  run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('t_ctx',NULL,'user',?,0)", JSON.stringify({ text: "find flights" }));
+  run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('t_ctx',NULL,'agent',?,0)", JSON.stringify({ text: "I'll book the cheapest" }));
+  run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('t_ctx',NULL,'user',?,0)", JSON.stringify({ text: "submit the httpbin form" }));
+  assert.deepEqual(jevContext("t_ctx", "- Never place orders on Blinkit\n\n* Uploading to Canva is fine"), { driver_said: ["find flights", "submit the httpbin form"], house_rules: ["Never place orders on Blinkit", "Uploading to Canva is fine"] });
+
+  let sent = null;
+  const says = (answers) => async (_, init) => { sent = JSON.parse(JSON.parse(init.body).state); return { ok: true, json: async () => ({ model: "jev-test", answers }) }; };
+  const send = { effect: { choice: "send", confidence: 0.95, probabilities: { send: 0.95 } }, outside: { noul: 0.9 } };
+  const r = await withFetch(says({ ...send, authorized: { noul: 0.92 }, forbidden: { noul: 0.02 } }), () => J.jev({ kind: "shell", command: "python3 submit.py" }, { apiKey: "t", context: () => jevContext("t_ctx", "") }));
+  assert.deepEqual([r.decision, r.authorized], ["allow", true], "the policy floor yields to the driver's explicit ask");
+  assert.deepEqual(sent.driver_said, ["find flights", "submit the httpbin form"]); assert.ok(!JSON.stringify(sent).includes("cheapest"), "never the agent's prose");
+  let built = 0;
+  await J.jev({ kind: "shell", command: "ls /bot/work" }, { apiKey: "t", context: () => (built++, jevContext("t_ctx")) });
+  assert.equal(built, 0, "rule-decided calls build no context");
+
+  const c = { bot: { id: b.id } }, pit = { kind: "command", title: "Run", detail: {} }, sh = { kind: "shell", command: "python3 /bot/work/order.py" };
+  thread("t_yolo_rule"); run("UPDATE threads SET autonomy='yolo' WHERE id='t_yolo_rule'");
+  assert.equal(await withFetch(says({ ...send, authorized: { noul: 0 }, forbidden: { noul: 0.8 } }), () => gate(c, "t_yolo_rule", sh, pit)), false, "a never-rule holds in YOLO");
+  const maybeRun = withFetch(says({ ...send, authorized: { noul: 0 }, forbidden: { noul: 0.45 } }), async () => {
+    const g = gate(c, "t_yolo_rule", sh, pit);
+    for (let i = 0; i < 20 && !pending(); i++) await flush();
+    const ps = pending(); await R.decide(ps.id, "deny"); return [await g, !!ps];
+  });
+  assert.deepEqual(await maybeRun, [false, true], "a possible breach asks even in YOLO");
+});

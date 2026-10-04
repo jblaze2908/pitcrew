@@ -64,6 +64,7 @@ export function ProfileTab({ b }: { b: BotCard }) {
         <p className="small faint">Personality never changes permissions, caps or jev. Pit stops and money always use a plain voice.</p>
       </div>
       <Permissions b={b} />
+      <HouseRules b={b} />
       <div className="row formbar"><button className="pc-pill" onClick={save}>Save profile</button><span className="small faint">Permissions save as you change them.</span></div>
     </div>
   );
@@ -84,6 +85,22 @@ const EFFECTS: [string, string][] = [["read", "Look at files and data"], ["brows
   ["send", "Send messages, post, or submit forms"], ["exec_untrusted", "Run downloaded or unknown code"], ["delete", "Delete things outside its workspace"],
   ["share", "Send your private data somewhere new"], ["pay", "Spend money"]];
 const LOCKED = ["delete", "share", "pay"];
+
+// Prose rules jev reads on every call it judges. "Never" lines block even in YOLO; "fine to" lines pre-approve that action
+// (except paying and signing in). Saved as typed, one rule per line.
+function HouseRules({ b }: { b: BotCard }) {
+  const [text, setText] = useState(b.house_rules || "");
+  const [saved, setSaved] = useState(b.house_rules || "");
+  const save = async () => { await api.patch(`/api/bots/${b.id}`, { house_rules: text }); setSaved(text); toast("House rules saved"); };
+  return (
+    <div className="pc-card col">
+      <p className="pc-lab">House rules</p>
+      <textarea rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder={"Never place, change or cancel orders on Blinkit.\nUploading my own files from /bot/work/out to Canva is fine."} />
+      <div className="spread"><p className="small faint">One per line. jev checks them on every action it judges: a “never” rule stops the action even in YOLO; a “fine to” rule saves a pit stop (paying and signing in still ask).</p>
+        <button className="pc-pill s" disabled={text === saved} onClick={save}>Save</button></div>
+    </div>
+  );
+}
 
 function Permissions({ b }: { b: BotCard }) {
   const [policy, setPolicy] = useState<Record<string, Decision>>(b.policy);
