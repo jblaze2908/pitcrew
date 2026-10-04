@@ -37,7 +37,7 @@ export function openingText(threadId: string) {
 
 export async function nameFromConversation(threadId: string, { ask }: { ask?: PlanAsk } = {}) {
   const t = getThread(threadId);
-  if (!t || !t.title_auto) return null;
+  if (!t || !t.title_auto || t.pinned) return null; // a pinned thread is named after its member
   const text = openingText(threadId);
   if (!text) return null;
   const side = ask ? null : await openPlanSide().catch(() => null);
@@ -54,7 +54,7 @@ export async function nameFromConversation(threadId: string, { ask }: { ask?: Pl
 
 /** After a completed run: names a provisional thread once the driver's latest message is more than small talk. */
 export function nameAfterRun(t: ThreadRow) {
-  if (t.title_auto !== 1 || json<{ kind?: string }>(t.origin, {}).kind === "delegated") return;
+  if (t.title_auto !== 1 || t.pinned || json<{ kind?: string }>(t.origin, {}).kind === "delegated") return;
   if (one<{ n: number }>("SELECT COUNT(*) n FROM turns WHERE thread_id=? AND status='completed'", t.id)!.n > MAX_RUNS) return;
   const last = one<{ data: string }>("SELECT data FROM events WHERE thread_id=? AND kind='user' ORDER BY id DESC LIMIT 1", t.id);
   if (!last || isSmallTalk(json<{ text?: string }>(last.data, {}).text)) return;
@@ -64,7 +64,7 @@ export function nameAfterRun(t: ThreadRow) {
 /** Once per install: names the threads from before model naming, one after another on a single side server. */
 export async function backfillTitles() {
   if (getSetting("titles_backfilled")) return;
-  const ids = all<{ id: string; origin: string | null }>("SELECT id, origin FROM threads WHERE title_auto=1 AND archived=0 AND EXISTS (SELECT 1 FROM turns WHERE thread_id=threads.id AND status='completed') ORDER BY updated_at DESC LIMIT 200")
+  const ids = all<{ id: string; origin: string | null }>("SELECT id, origin FROM threads WHERE title_auto=1 AND pinned=0 AND archived=0 AND EXISTS (SELECT 1 FROM turns WHERE thread_id=threads.id AND status='completed') ORDER BY updated_at DESC LIMIT 200")
     .filter((t) => json<{ kind?: string }>(t.origin, {}).kind !== "delegated");
   const side = ids.length ? await openPlanSide().catch(() => null) : null;
   if (ids.length && !side) return; // tried again on the next boot, once the plan is connected

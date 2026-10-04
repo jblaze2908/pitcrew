@@ -899,6 +899,8 @@ test("threads are named by the plan model once they have a topic, never over a t
   run("UPDATE threads SET title='Mine', title_auto=0 WHERE id='th_name'");
   assert.equal(await Tt.nameFromConversation("th_name", { ask }), null);
   assert.equal(one("SELECT title FROM threads WHERE id='th_name'").title, "Mine", "a hand-set title stays");
+  run("UPDATE threads SET title='Quiet · pinned', title_auto=1, pinned=1 WHERE id='th_name'");
+  assert.equal(await Tt.nameFromConversation("th_name", { ask }), null, "a pinned thread keeps its member's name");
 });
 
 test("memory tiers: session notes ride the recap, agent memory is capped and private, global refuses task state", async () => {
