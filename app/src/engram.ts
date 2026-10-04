@@ -522,13 +522,14 @@ async function sendEpisode(b: Bot, threadId: string, turns: TurnRow[], from: num
   const published = all<{ id: string; title: string }>(`SELECT DISTINCT json_extract(data,'$.artifact.id') id, json_extract(data,'$.artifact.title') title FROM events
     WHERE thread_id=? AND kind='system' AND turn_id IN (${qs}) AND json_extract(data,'$.artifact.id') IS NOT NULL`, threadId, ...ids);
   for (const a of published.slice(0, 18)) outputs.push({ kind: "artifact", ref: a.id, label: clean(a.title || a.id, 200) });
+  // Engram keeps episodes up to 20,000 chars (e96a015); these caps stay under it, so outcomes arrive whole, not cut at 600.
   const asked = ev("user", "ASC"), reply = ev("agent", "DESC").text || "";
   const text = [`${b.name} · ${title}`,
-    asked.display || asked.text ? `Asked: ${clean(asked.display || asked.text || "", 300)}` : "",
+    asked.display || asked.text ? `Asked: ${clean(asked.display || asked.text || "", 2000)}` : "",
     `Ran: ${turns.length} ${turns.length === 1 ? "run" : "runs"}${steps.length ? ` · ${steps.map((s) => `${STEP[s.type] || s.type} ${s.n}`).join(", ")}` : ""}${files.length ? ` · ${files.length} ${files.length === 1 ? "file" : "files"} changed` : ""} · $${cost.toFixed(2)}`,
-    plan ? `Plan: ${clean(plan.goal, 200)} (${plan.status})${plan.answer ? `. Answer: ${clean(plan.answer, 400)}` : ""}` : "",
+    plan ? `Plan: ${clean(plan.goal, 200)} (${plan.status})${plan.answer ? `. Answer: ${clean(plan.answer, 4000)}` : ""}` : "",
     last.status !== "completed" ? `Last run ${last.status}.` : "",
-    reply ? `Ended with: ${clean(reply, 600)}` : ""].filter(Boolean).join("\n");
+    reply ? `Ended with: ${clean(reply, 12000)}` : ""].filter(Boolean).join("\n");
   await call("/link/episodes", { method: "POST", body: { pitcrew_id: b.id, text, at: last.ended_at, outputs } });
 }
 
