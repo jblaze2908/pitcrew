@@ -14,7 +14,7 @@ import { readJson, jsonBody, raw, text, trimmed, flag, field } from "../http/bod
 import { botCard, LEARNED, liveLearned } from "./views.js";
 import { ledgerOverview, tablePreview } from "../ledger.js";
 import { json } from "../db.js";
-import type { LearnedRow, PitstopRow } from "../models.js";
+import type { LearnedRow, PitstopRow, ScheduleRow } from "../models.js";
 
 const Memory = z.object({ text: trimmed(500) });
 const MemoryEdit = z.object({ text: text(500) });
@@ -38,7 +38,7 @@ export const crewRoutes = new Hono<Env>()
       catch (e: any) { memory = []; memoryError = e.message; }
     } else memory = all("SELECT * FROM memory WHERE bot_id=? AND forgotten_at IS NULL ORDER BY created_at DESC", id);
     return c.json({ bot: botCard(b, pending), memory, memoryIn, memoryError,
-      schedules: all("SELECT * FROM schedules WHERE bot_id=? ORDER BY created_at DESC", id), rules: all("SELECT * FROM rules WHERE bot_id=? AND revoked_at IS NULL ORDER BY created_at DESC", id), learned: liveLearned(all<LearnedRow>(`${LEARNED} WHERE l.bot_id=? ORDER BY l.updated_at DESC`, id)) });
+      schedules: all<ScheduleRow>("SELECT * FROM schedules WHERE bot_id=? ORDER BY created_at DESC", id).map((s) => ({ ...s, last: R.lastScheduledRun(s) })), rules: all("SELECT * FROM rules WHERE bot_id=? AND revoked_at IS NULL ORDER BY created_at DESC", id), learned: liveLearned(all<LearnedRow>(`${LEARNED} WHERE l.bot_id=? ORDER BY l.updated_at DESC`, id)) });
   })
   // The patch is normalised by updateBot itself (crew.ts), field by field.
   .patch("/api/bots/:id", signedIn, async (c) => { const patch = await readJson(c), b = updateBot(c.req.param("id"), patch); if ("private" in patch || "engram_scope" in patch || "engram_household" in patch) memberChanged(b); return c.json(b); })

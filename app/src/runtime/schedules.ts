@@ -1,5 +1,5 @@
 // Schedules: recurring prompts in Asia/Kolkata time, run by a 30 s tick.
-import { one, all, run, now, uid, audit, getSetting, pruneLabels } from "../db.js";
+import { one, all, run, now, uid, audit, getSetting, pruneLabels, json } from "../db.js";
 import type { ScheduleRow } from "../models.js";
 import { getThread, addEvent } from "./threads.js";
 import { sendMessage } from "./turns.js";
@@ -77,4 +77,15 @@ export function tickSchedules() {
     if (!threadId) { threadId = uid("th"); run("INSERT INTO threads(id,bot_id,title,pinned,created_at,updated_at) VALUES(?,?,?,?,?,?)", threadId, s.bot_id, "Scheduled work", 1, now(), now()); }
     sendMessage(threadId, { text: `[Scheduled: ${s.spec}] ${s.prompt}`, mode: "queue", trigger: "schedule" }).catch((e) => addEvent(threadId, null, "error", { text: e.message }));
   }
+}
+
+// A schedule's latest run: when, how it ended, and the first line of its reply (QUIET runs included). The run lands in
+// the schedule's thread, or the member's pinned thread (tickSchedules). Two indexed reads per schedule shown.
+export function lastScheduledRun(s: Pick<ScheduleRow, "bot_id" | "thread_id" | "last_run">) {
+  if (!s.last_run) return null;
+  const thread = s.thread_id || one<{ id: string }>("SELECT id FROM threads WHERE bot_id=? AND pinned=1 AND archived=0 LIMIT 1", s.bot_id)?.id;
+  const t = thread && one<{ id: string; status: string; started_at: number; error: string | null }>("SELECT id,status,started_at,error FROM turns WHERE thread_id=? AND trigger='schedule' AND started_at>=? ORDER BY started_at DESC LIMIT 1", thread, s.last_run - 120000);
+  if (!t) return { at: s.last_run, status: "queued or not started", summary: "" };
+  const reply = json<{ text?: string }>(one<{ data: string }>("SELECT data FROM events WHERE thread_id=? AND turn_id=? AND kind='agent' ORDER BY id DESC LIMIT 1", thread, t.id)?.data, {}).text || t.error || "";
+  return { at: t.started_at, status: t.status, summary: reply.split("\n")[0].slice(0, 140), threadId: thread };
 }

@@ -80,3 +80,27 @@ export function saveUpload(threadId: string, name: string, buf: Buffer) {
   chownSync(`${botDir(t.bot_id)}/work/${rel}`, 1500, 1500);
   return rel;
 }
+
+// ---------- reading a whole thread ----------
+// One thread as a member can read it back: the driver's and agent's messages in full, each run's tool calls folded to
+// one line per call (status and title), pit stops with their outcome, errors and notes. Paged by event id, about
+// 20 KB a page, so "review all my chats" can actually read them. Per call: one indexed range read of up to 400 events.
+export const READ_PAGE = 20000;
+export function readThread(threadId: string, after = 0) {
+  const t = getThread(threadId);
+  if (!t) return null;
+  const rows = all<{ id: number; kind: string; data: string; ts: number }>("SELECT id, kind, data, ts FROM events WHERE thread_id=? AND id>? ORDER BY id LIMIT 400", threadId, after);
+  const out: string[] = []; let size = 0, last = after;
+  for (const r of rows) {
+    const d = json<Record<string, any>>(r.data, {});
+    const line = r.kind === "user" ? `Driver${d.via && d.via !== "driver" ? ` (${d.via})` : ""}: ${d.text || ""}`
+      : r.kind === "agent" ? `Agent: ${d.text || ""}`
+      : r.kind === "tool" && d.type !== "scriptResult" && d.type !== "script" ? `  · ${d.status || "?"} · ${String(d.title || d.tool || d.type).slice(0, 160)}${d.error ? ` · ${String(d.error).slice(0, 160)}` : ""}`
+      : r.kind === "pitstop" ? `  · pit stop ${d.id}` : r.kind === "error" ? `Error: ${d.text}` : r.kind === "system" ? `Note: ${d.text}` : null;
+    if (line == null) { last = r.id; continue; }
+    if (size + line.length > READ_PAGE && out.length) break;
+    out.push(line); size += line.length; last = r.id;
+  }
+  const more = !!one("SELECT 1 FROM events WHERE thread_id=? AND id>?", threadId, last);
+  return { title: t.title, botId: t.bot_id, text: out.join("\n"), next: more ? last : null };
+}
