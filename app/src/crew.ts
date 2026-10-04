@@ -3,20 +3,21 @@
 import { one, all, run, now, uid, json, getSetting, setSetting, audit } from "./db.js";
 import { DEFAULT_POLICY } from "./jev.js";
 import { DEFAULT_MODEL } from "./providers.js";
-import { catalogueDoc } from "./surfaces.js";
+import { CATALOGUE } from "./surfaces.js";
 import type { Bot, EngramScope, Hue, Shape, Personality, ProviderId } from "../shared/types.js";
 import type { BotRow } from "./models.js";
 
 export const HUES: Hue[] = ["c1", "c2", "c3", "c5", "c6"];
 // The computer's loopback-only, read-only view of /bot/work (computer/files.mjs, started by desktop.sh).
-export const FILES_URL = "http://127.0.0.1:7780/";
+export { FILES_URL } from "./manual.js";
+import { FILES_URL, TOPICS } from "./manual.js";
 export const SHAPES: Shape[] = ["square", "round", "blob"];
 export const ENGRAM_SCOPES: EngramScope[] = ["personal", "finance", "health"];
 const CONN_ID = /^[a-z0-9][a-z0-9-]{0,11}$/;
 // New crew members start with read/draft allowed; sign-in, pay and send ask first; delete and share always ask.
 export const STARTING_POLICY = { ...DEFAULT_POLICY };
 
-const row = (b: BotRow | undefined): Bot | undefined => b && ({ ...b, personality: json(b.personality, {}), policy: { ...STARTING_POLICY, ...json(b.policy, {}) }, mcp: json(b.mcp, []), archived: !!b.archived, private: !!b.private, engram_scope: ENGRAM_SCOPES.includes(b.engram_scope as EngramScope) ? b.engram_scope : "personal", engram_household: !!b.engram_household, house_rules: b.house_rules || "" } as Bot);
+const row = (b: BotRow | undefined): Bot | undefined => b && ({ ...b, personality: json(b.personality, {}), policy: { ...STARTING_POLICY, ...json(b.policy, {}) }, mcp: json(b.mcp, []), archived: !!b.archived, private: !!b.private, engram_scope: ENGRAM_SCOPES.includes(b.engram_scope as EngramScope) ? b.engram_scope : "personal", engram_household: !!b.engram_household, house_rules: b.house_rules || "", soul: b.soul || "" } as Bot);
 export const getBot = (id: string | null | undefined) => row(one<BotRow>("SELECT * FROM bots WHERE id=?", id));
 export const listBots = () => all<BotRow>("SELECT * FROM bots WHERE archived=0 ORDER BY kind='chief' DESC, created_at").map(row) as Bot[];
 
@@ -91,6 +92,7 @@ export function updateBot(id: string, patch: HireSpec) {
   if (patch.private !== undefined && b.kind !== "chief") run("UPDATE bots SET private=? WHERE id=?", patch.private ? 1 : 0, id);
   if (patch.engram_scope !== undefined) run("UPDATE bots SET engram_scope=? WHERE id=?", n.engram_scope, id);
   if (patch.engram_household !== undefined) run("UPDATE bots SET engram_household=? WHERE id=?", n.engram_household ? 1 : 0, id);
+  if (typeof (patch as { soul?: unknown }).soul === "string") run("UPDATE bots SET soul=? WHERE id=?", String((patch as { soul: string }).soul).slice(0, SOUL_MAX), id);
   if (typeof (patch as { house_rules?: unknown }).house_rules === "string") run("UPDATE bots SET house_rules=? WHERE id=?", String((patch as { house_rules: string }).house_rules).slice(0, 3000), id);
   audit("driver", "crew.updated", { id, fields: Object.keys(patch) });
   return getBot(id);
@@ -114,41 +116,42 @@ export function voiceBlock(b: Pick<Bot, "personality">) {
 // What a linked member gets from Engram at thread start (engram.ts threadContext): the Chief's profile, a skills index.
 export interface EngramContext { profile: string | null; skills: string }
 const SCOPE_NAME = { personal: "Personal", finance: "Money (scope finance)", health: "Health (scope health)" } as const;
-// skills: the member's own skill index (runtime/skills.ts skillIndex), built at thread start.
-export function instructions(b: Pick<Bot, "name" | "personality"> & Partial<Bot>, memories: { id: string; text: string }[], engram: EngramContext | null = null, skills = "") {
+// How Pitcrew works, the same words for every member (and first, so the cached prefix is shared). Rules only, one line
+// each; detail is in harness_help (manual.ts). Kept under 3,000 chars: it rides in every thread's instructions.
+export const SOUL_MAX = 1500;
+export function harnessCore(driver: string) {
+  return [`How Pitcrew works (the same for every crew member):`,
+    `- Computer: your own, started on demand. Shell and file edits run there; browser_* tools drive its Chromium, which keeps logins (computer_* pixel tools only when a page can't be driven otherwise). Answer from what you know when no tool is needed.`,
+    `- Workspace /bot/work: out/ is what ${driver} sees (Library); skills/ is your skill library (one git repo: commit each change, never push); .scratch/ for probes and raw dumps; a task's data (its ledger) in its own folder. file:// is blocked in the browser: open workspace files at ${FILES_URL}<path>.`,
+    `- Approvals: the runtime decides what waits for ${driver} (paying, sending, signing in, sharing, deleting). Don't ask yourself; act. If an action is declined, blocked or expired, don't try it another way; say what's waiting and why.`,
+    `- Memory: remember(text, scope): session = this thread; agent = your own (how your job runs); global = facts about ${driver}, which they review. Never put paths or task state in global.`,
+    `- Skills: before a task one of your skills covers, load it with skill_view; when you find a better way, fix the skill.`,
+    `- Bulk web reads: the site's own API first (browser_network_requests, browser_replay_request), else one browser_evaluate loop; never page-by-page clicks. A plain fetch from the shell beats the browser for public pages.`,
+    `- Recurring work: data in a SQLite ledger shown by a bound dashboard (render_surface with source and queries). A "[Scheduled: …]" run replies "QUIET: <what you checked>" unless an alert fired, something failed, ${driver} must act, or the digest is due.`,
+    `- Showing ${driver}: render_surface for tables, charts and forms; share_screenshot for the screen; publish_file for a report they'll keep.`,
+    `- In exec scripts call tools.browser_click({...}); don't print ALL_TOOLS; a screenshot comes back as a data: URL: show it with image(result).`,
+    `- Details: harness_help(topic), topics ${TOPICS.join(", ")}.`].join("\n");
+}
+// Who this member is: the driver's SOUL for it, or one made from its job and voice until they write one.
+export const soulOf = (b: Pick<Bot, "personality"> & Partial<Bot>) => (b.soul?.trim() ? b.soul.trim() : [b.job ? `Your job: ${b.job}` : "", voiceBlock(b as Bot)].filter(Boolean).join("\n"));
+// skills: the member's own skill index (runtime/skills.ts skillIndex); unseen: changelog lines it hasn't read. Both are
+// built at thread start, the only time instructions reach Codex.
+export function instructions(b: Pick<Bot, "name" | "personality"> & Partial<Bot>, memories: { id: string; text: string }[], engram: EngramContext | null = null, skills = "", unseen = 0) {
   const driver = getSetting("driver_name", "the driver");
+  const rules = String(b.house_rules || "").split("\n").map((l) => l.trim()).filter(Boolean);
   return [
+    harnessCore(driver),
     `You are ${b.name}, a member of ${driver}'s Pitcrew: a personal crew of AI agents that get real-life admin and computer work done for ${driver}.`,
-    b.job ? `Your job: ${b.job}` : "",
-    voiceBlock(b),
-    `You have your own computer, started on demand: shell commands and file edits run there, and the browser_* tools drive its Chromium (a 1280x800 desktop ${driver} can watch live). Answer from what you know when no tool is needed; the computer only starts when you run a command or use the browser. Prefer browser_* tools (they act on page elements by ref from browser_snapshot); use computer_* pixel tools only when a page can't be driven otherwise. The browser keeps its logins between runs.`,
-    `Workspace on the computer: /bot/work. Downloads land in /bot/work/downloads. Put files meant for ${driver} in /bot/work/out; they appear in the Library.`,
-    `Probes, raw dumps, samples and one-off scripts go in /bot/work/.scratch. A task's data folder (e.g. /bot/work/grocery) keeps only its ledger and what the task produces; its method and scripts live in its skill. When a run is done, move anything else into .scratch.`,
-    `Skills: how you do a kind of task lives in /bot/work/skills/<name>/: SKILL.md (frontmatter name and a one-line description; then the method, gotchas and alert rules), plus its scripts/ and references/. /bot/work/skills is one git repo: commit each change with a message saying what and why; never push. Data (ledgers, raw pages) stays out of it, e.g. in /bot/work/<task>/. Before a task a skill covers, load it with skill_view; when you find a better way, fix the skill. A proven how-to other members could use goes to the crew registry with engram propose (kind skill), which ${driver} reviews.`,
-    [`Browser rules:`,
-      `- Every browser action returns the page afterwards: what changed since your last snapshot, or the full snapshot on a new page. Don't call browser_snapshot after an action.`,
-      `- Refs die when the page navigates or reloads; act only on refs from the latest result.`,
-      `- To open a link, browser_navigate to its /url instead of clicking it.`,
-      `- Read pages with browser_snapshot or browser_read (page text as markdown). Take screenshots only when layout or visuals matter.`,
-      `- For bulk or repeated reads (order history, lists, many pages), don't click through page by page. First check browser_network_requests for the site's own API and read its responses, then page through it with browser_replay_request (merge the next cursor, save each page under /bot/work); else extract with browser_evaluate (or browser_run_code_unsafe), looping and filtering inside one call and returning compact JSON. Save big results with filename and process them in the shell.`,
-      `- If a plain HTTP fetch from the shell can read it (public page, open API), skip the browser.`,
-      `- Use browser_fill_form for radios, checkboxes and selects too, several fields per call.`,
-      `- computer_* pixel actions already return a screenshot of the result; don't take another.`,
-      `- file:// is blocked in the browser. Open workspace files at ${FILES_URL}<path under /bot/work>, e.g. ${FILES_URL}out/report.html (read-only).`,
-      `- In exec scripts, call tools as tools.browser_click({...}); don't print ALL_TOOLS. Tools that return a screenshot give a data: URL string there: show it with image(result), never text(result).`,
-    ].join("\n"),
-    `Pit stops: the runtime decides which actions need ${driver}'s approval (sending, paying, signing in, installing, deleting, sharing). You don't ask for approval yourself; just act and the runtime pauses when needed. If an action is declined, do not retry it another way; say what didn't happen.`,
-    `When a comparison, table, chart, dashboard or form would help, call render_surface instead of writing a long text table. Forms come back to you as a message with the submitted values.`,
-    `To show the driver what's on screen (a result, a confirmation, a page that looks wrong), call share_screenshot; your own screenshots stay private.`,
+    soulOf(b),
+    rules.length ? `${driver}'s house rules for you (the gate enforces them):\n${rules.map((r) => `- ${r}`).join("\n")}` : "",
     engram ? "" : `When ${driver} tells you a durable fact or preference worth keeping, call remember.`,
-    `Recurring work can be put on a schedule with schedule_task; list_schedules, update_schedule and cancel_schedule manage the ones you have.`,
-    `A message starting "[Scheduled: …]" is a recurring run, and ${driver} isn't waiting on it. Do the work, then stay quiet unless something needs them: an alert rule in the task's SKILL.md fired, something failed (a login expired), they must act, or the digest is due. With nothing notable, your whole reply is one line: "QUIET: <what you checked>". Keep a recurring task's data in a SQLite ledger and show it with a bound dashboard (render_surface with source and queries), so a run only adds rows and never re-publishes a report.`,
     memories.length ? `Your own memory (only you see it; rewrite one by passing its id to remember, forget removes it):\n${memories.map((m) => `- [${m.id}] ${m.text}`).join("\n")}` : "",
     skills ? `Your skills (load one with skill_view before a task it covers):\n${skills}` : "",
     engram ? engramBlock(driver, engram, b.engram_scope) : "",
     b.kind === "chief" ? `You are the Crew Chief, the only built-in crew member. When you notice recurring work that deserves its own crew member (the same kind of task 3+ times), call propose_crew_member. ${driver} always reviews and approves a hire; you can't create one yourself.` : "",
     b.kind === "chief" ? crewRoster(b as Bot, driver) : `The Crew Chief may ask you something on ${driver}'s behalf. Answer it fully in one reply; that reply goes back to the Chief.`,
     b.kind === "chief" && plansOn() ? planRules(driver) : "",
+    unseen > 0 ? `The harness changed since you last looked (${unseen} note${unseen === 1 ? "" : "s"}): call whats_new before you start.` : "",
   ].filter(Boolean).join("\n\n");
 }
 
@@ -215,16 +218,23 @@ const DESCRIBE: Record<string, string> = {
   browser_network_requests: "List the page's network requests since it loaded (static assets left out unless static is true). filter is a URL regexp, e.g. \"/api/|graphql\". Then read one with browser_network_request. The fastest way to bulk data: the site's own API responses.",
   browser_network_request: "Headers and body of one request from browser_network_requests, by its number; part narrows it to one section (response-body is usually what you want). Auth and cookie header values are masked. Over 24 KB the result is cut, so pass filename (a path under /bot/work) for big bodies and parse the file from the shell.",
 };
-// How a dashboard stays current without the member: it carries queries, and Pitcrew runs them whenever it's viewed.
-const BOUND_DOC = `Dashboards over data you keep: store the data in a SQLite ledger under /bot/work (e.g. /bot/work/grocery/ledger.db) and pass source plus queries ({name: "SELECT …"}, read-only, one statement each). A component with bind: "<query name>" gets its data from that query every time the driver opens it, so a daily run only adds rows; never re-render to refresh numbers. Column names per component: Stat value (+delta, tone; format for money), Meter value, max; Text text; Table: the columns you list; List title, detail, meta; Timeline time, text, state; BarChart/Donut label, value; LineChart x, y (+series); Sparkline value. Re-render with id only to change the layout. The tool result lists any query that failed.`;
 const FIELD_TYPE = "Kind of control, not its HTML type: textbox for any text, email, password or number input and textareas; checkbox; radio; combobox for a select/dropdown (value = the option's text); slider. checkbox and radio values are \"true\" or \"false\".";
 const SNAPSHOT_ARG = { type: "string", enum: ["diff", "full", "none"], description: "What the result shows of the page afterwards: diff (default: what changed since your last snapshot; full on a new page), full, or none." };
 const PIXEL = "pixel control of the computer's screen; the result includes a screenshot of the screen after the action, so don't take another";
 // One tool from an MCP server's tools/list, as the computer image reports it.
 export interface McpTool { name: string; description?: string; inputSchema?: Record<string, any> }
 export interface ToolManifest { browser: McpTool[]; computer: McpTool[]; image?: string; caps?: string; execInfo?: unknown }
+// Upstream schemas repeat the same long boilerplate on most tools; it's paid on every turn, so it's shortened here. The
+// meaning is unchanged; only the wording of these common fields and the $schema URL go.
+const SHORT_PROP: Record<string, string> = { target: "Ref from the latest snapshot (or a unique selector)", element: "What the element is, in words",
+  filename: "Save the result to this path (under /bot/work) instead of returning it" };
+function compact(schema: Record<string, any>) {
+  delete schema.$schema;
+  for (const [k, v] of Object.entries<any>(schema.properties || {})) if (SHORT_PROP[k] && typeof v?.description === "string" && v.description.length > SHORT_PROP[k].length) v.description = SHORT_PROP[k];
+  return schema;
+}
 function browserTool(x: McpTool) {
-  const inputSchema: Record<string, any> = structuredClone(x.inputSchema || { type: "object", properties: {} });
+  const inputSchema: Record<string, any> = compact(structuredClone(x.inputSchema || { type: "object", properties: {} }));
   const field = inputSchema.properties?.fields?.items?.properties?.type;
   if (x.name === "browser_fill_form" && field) field.description = FIELD_TYPE;
   if (SNAPSHOT_ACTIONS.test(x.name)) inputSchema.properties = { ...inputSchema.properties, snapshot: SNAPSHOT_ARG };
@@ -242,7 +252,7 @@ export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { br
     ...manifest.computer.filter((x) => !HIDDEN.has(`computer_${x.name}`)).map((x) => ({ type: "function", name: `computer_${x.name}`, description: `${x.description || x.name} (${x.name === "screenshot" ? `pixel control of the computer's screen. ${SHOT_HINT}` : PIXEL})`, inputSchema: x.inputSchema || { type: "object", properties: {} } })),
   ];
   const tools: Record<string, any>[] = [...runtime,
-    { type: "function", name: "render_surface", description: `Show the driver a visual surface in the Pitcrew design system: tables, charts, comparisons, dashboards or forms. Pass {title, root} where root is a component tree ({type, ...props, children?}). Colours are hue tokens only. Components:\n${catalogueDoc()}\n\n${BOUND_DOC}`,
+    { type: "function", name: "render_surface", description: `Show the driver a visual surface: tables, charts, comparisons, dashboards or forms. Pass {title, root}, root a component tree ({type, ...props, children?}); hue tokens only. Components: ${Object.keys(CATALOGUE).join(", ")}; their props and bound dashboards (source + queries + bind) are in harness_help("dashboards"). Validation errors name what's wrong.`,
       inputSchema: { type: "object", properties: { id: { type: "string", description: "Update this surface of yours in place instead of making a new one." }, title: { type: "string" }, root: { type: "object" }, source: { type: "string", description: "SQLite ledger under /bot/work that bind queries read." }, queries: { type: "object", description: "name → one read-only SELECT against source." } }, required: ["title", "root"] } },
     { type: "function", name: "share_screenshot", description: "Post a screenshot into this chat for the driver, with a one-line caption. source: browser (the current page, default) or screen (the whole desktop). For one element, pass element and ref from the latest snapshot.",
       inputSchema: { type: "object", properties: { caption: { type: "string" }, source: { type: "string", enum: ["browser", "screen"] }, full_page: { type: "boolean" }, element: { type: "string" }, ref: { type: "string" } }, required: ["caption"] } },
@@ -252,6 +262,9 @@ export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { br
     { type: "function", name: "forget", description: "Forget a memory by id.", inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
     { type: "function", name: "query_ledger", description: "Read a crew member's SQLite ledger with one SELECT (read-only; 500 rows). member: their name (omit for your own). Omit source to list their ledgers. Private members' ledgers stay private. Use it to answer from another member's data instead of asking them.",
       inputSchema: { type: "object", properties: { member: { type: "string" }, source: { type: "string", description: "Ledger path under their /bot/work, e.g. grocery/ledger.db" }, sql: { type: "string" } } } },
+    { type: "function", name: "harness_help", description: "How part of Pitcrew works, in detail: browser, dashboards, schedules, memory, skills, approvals, files or crew.",
+      inputSchema: { type: "object", properties: { topic: { type: "string", enum: TOPICS } }, required: ["topic"] } },
+    { type: "function", name: "whats_new", description: "Harness changes you haven't seen yet (new tools, rules, ways of working). Marks them seen.", inputSchema: { type: "object", properties: {} } },
     { type: "function", name: "skill_view", description: "Load one of your skills (/bot/work/skills/<name>/SKILL.md), or a file inside it (file: references/x.md, scripts/y.py). Load the skill before doing a task it covers.",
       inputSchema: { type: "object", properties: { name: { type: "string" }, file: { type: "string" } }, required: ["name"] } },
     { type: "function", name: "read_thread", description: "Read one of your threads in full: every message from the driver and you, each tool call as one line with its outcome, pit stops, errors and notes. Paged (about 20 KB); pass after from the last page to continue. Use it when reviewing past work; find_threads gives the ids.",

@@ -64,6 +64,7 @@ export function ProfileTab({ b }: { b: BotCard }) {
         <p className="small faint">Personality never changes permissions, caps or jev. Pit stops and money always use a plain voice.</p>
       </div>
       <Permissions b={b} />
+      <Soul b={b} />
       <HouseRules b={b} />
       <div className="row formbar"><button className="pc-pill" onClick={save}>Save profile</button><span className="small faint">Permissions save as you change them.</span></div>
     </div>
@@ -85,6 +86,22 @@ const EFFECTS: [string, string][] = [["read", "Look at files and data"], ["brows
   ["send", "Send messages, post, or submit forms"], ["exec_untrusted", "Run downloaded or unknown code"], ["delete", "Delete things outside its workspace"],
   ["share", "Send your private data somewhere new"], ["pay", "Spend money"]];
 const LOCKED = ["delete", "share", "pay"];
+
+// The member's SOUL: who it is, its job, voice, priorities and how it should use the harness for its job. It sits right
+// after the shared HARNESS core in every thread's instructions; empty means "made from the job and voice below".
+function Soul({ b }: { b: BotCard }) {
+  const [text, setText] = useState(b.soul || ""), [saved, setSaved] = useState(b.soul || "");
+  const save = async () => { await api.patch(`/api/bots/${b.id}`, { soul: text }); setSaved(text); toast("SOUL saved: new threads use it"); };
+  return (
+    <div className="pc-card col">
+      <div className="spread"><p className="pc-lab">SOUL</p><span className={`small ${text.length > 1500 ? "badc" : "faint"}`}>{`${text.length} / 1,500`}</span></div>
+      <textarea rows={7} value={text} maxLength={1500} onChange={(e) => setText(e.target.value)}
+        placeholder={`Who ${b.name} is and how it works. e.g.\nYou track Jai's Blinkit purchases. Be brief: numbers first.\nDaily runs stay quiet unless an alert fires; Sunday digest only.\nPrefer the site's own API over clicking; never touch the cart.\n\nLeave empty to use the job and voice settings.`} />
+      <div className="spread"><p className="small faint">Goes in every new thread right after Pitcrew's shared rules. Keep it short: it's paid on every turn.</p>
+        <button className="pc-pill s" disabled={text === saved} onClick={save}>Save</button></div>
+    </div>
+  );
+}
 
 // Prose rules jev reads on every call it judges. "Never" lines block even in YOLO; "fine to" lines pre-approve that action
 // (except paying and signing in). Saved as typed, one rule per line.
