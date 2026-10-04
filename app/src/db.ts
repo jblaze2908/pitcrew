@@ -101,6 +101,9 @@ CREATE TABLE IF NOT EXISTS turn_memories (
 db.exec(`CREATE TABLE IF NOT EXISTS script_trust (bot_id TEXT NOT NULL, sha TEXT NOT NULL, path TEXT NOT NULL, by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY(bot_id, sha))`);
 // Loads of a member's own skills through skill_view (runtime/skills.ts): usage and staleness.
 db.exec(`CREATE TABLE IF NOT EXISTS skill_usage (bot_id TEXT NOT NULL, name TEXT NOT NULL, uses INTEGER NOT NULL, last_used INTEGER NOT NULL, PRIMARY KEY(bot_id, name))`);
+// Harness ideas the crew files with suggest_improvement (runtime/retro.ts), for the driver to accept or dismiss.
+db.exec(`CREATE TABLE IF NOT EXISTS improvements (id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, thread_id TEXT, area TEXT NOT NULL, title TEXT NOT NULL, norm TEXT NOT NULL,
+  evidence TEXT NOT NULL, proposal TEXT NOT NULL, status TEXT NOT NULL, votes INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`);
 db.exec(`CREATE TABLE IF NOT EXISTS queued (
   id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, text TEXT NOT NULL, attachments TEXT NOT NULL DEFAULT '[]',
   trigger TEXT NOT NULL, display TEXT, created_at INTEGER NOT NULL);
