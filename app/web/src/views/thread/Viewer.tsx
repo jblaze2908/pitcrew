@@ -28,7 +28,7 @@ export function Viewer({ I, start, compare, onClose, onEdit, onMore, onKeep }: {
   const vlab = (im: Img) => `v${I.chain(im.id).length}`;
   return (
     <div className="vw" role="dialog" aria-label={`Image ${imgName(cur.path)}`} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <header className="vw-top">
+      <div className="vw-top">
         <div className="vw-title">{known && <b>{`v${ver}`}</b>}<span className="faint">{list.length > 1 ? `${at + 1} of ${list.length}` : imgName(cur.path)}</span></div>
         {fam.length > 1 && <div className="vw-fam" aria-label="Versions">{fam.map((v) => (
           <button key={v.id} className={`${v.id === cur.id ? "on" : ""}${I.kept.has(v.id) ? " kept" : ""}`} title={vlab(v)} onClick={() => show(v)}><img src={imgSrc(v)} alt="" /><span>{vlab(v)}</span></button>))}</div>}
@@ -37,7 +37,7 @@ export function Viewer({ I, start, compare, onClose, onEdit, onMore, onKeep }: {
           <a className="pc-pill s o" href={imgFile(cur)} download>Download</a>
           <button className="pc-pill s o" title="Close (Esc)" onClick={onClose}>Close</button>
         </div>
-      </header>
+      </div>
       <div className="vw-stage" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
         {at > 0 && <button className="vw-nav l" title="Previous (←)" onClick={() => show(list[at - 1])}>‹</button>}
         {cmp && parent
@@ -51,7 +51,7 @@ export function Viewer({ I, start, compare, onClose, onEdit, onMore, onKeep }: {
           : <img key={cur.id} className="vw-img" src={imgSrc(cur)} alt={cur.caption || imgName(cur.path)} />}
         {at < list.length - 1 && <button className="vw-nav r" title="Next (→)" onClick={() => show(list[at + 1])}>›</button>}
       </div>
-      <footer className="vw-foot">
+      <div className="vw-foot">
         <div className="vw-info">
           {cur.caption && <button className={`vw-prompt${full ? " full" : ""}`} title={full ? "Show less" : "Show the whole prompt"} onClick={() => setFull((v) => !v)}>{cur.caption}</button>}
           {imgMeta(cur) && <span className="small faint">{imgMeta(cur)}</span>}
@@ -64,7 +64,7 @@ export function Viewer({ I, start, compare, onClose, onEdit, onMore, onKeep }: {
           </div>}
           <p className="vw-keys">{`${list.length > 1 ? "← → images · " : ""}${parent ? "C compare · " : ""}Esc close`}</p>
         </div>
-      </footer>
+      </div>
     </div>
   );
 }
