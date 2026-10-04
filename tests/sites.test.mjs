@@ -318,3 +318,25 @@ test("a pending command or tool pit stop names what 'allow similar' would cover"
   assert.equal(row("site", { pattern: "x" }).similar, null);
   assert.equal(row("mcp", { pattern: "browser:click:shop.example:button" }, "approved").similar, null);
 });
+
+test("secret-material blocks name secret files, not the word credentials or process.env", () => {
+  const v = (cmd) => J.ruleVerdict({ kind: "shell", command: cmd });
+  for (const cmd of ["cat ~/.aws/credentials", "cat .env", "source ./.env.local", "cat /bot/work/.env", "cp ~/.git-credentials /tmp", "cat key/credentials.json", "cat ~/.ssh/id_rsa"])
+    assert.equal(v(cmd)?.decision, "block", cmd);
+  for (const cmd of ["cat > /bot/work/SKILL.md <<'MD'\nNever log payment credentials.\nMD", "node -e 'console.log(process.env.HOME)'", "grep -r credentials /bot/work/notes.md"])
+    assert.notEqual(v(cmd)?.decision, "block", cmd);
+});
+
+test("a thread whose tools changed restarts with a recap of the latest messages, not the one starting the turn", async () => {
+  const T = await import("../app/dist/src/runtime/turns.js");
+  assert.equal(T.toolsSig([{ name: "b" }, { name: "a" }]), T.toolsSig([{ name: "a" }, { name: "b" }]));
+  assert.notEqual(T.toolsSig([{ name: "a" }]), T.toolsSig([{ name: "a" }, { name: "browser_evaluate" }]));
+  thread("t_recap");
+  const ev = (kind, text) => run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('t_recap',NULL,?,?,0)", kind, JSON.stringify({ text }));
+  ev("user", "track my blinkit orders"); ev("agent", "Tracking daily at 23:30."); ev("system", "noise"); ev("user", "now backfill everything");
+  const r = T.recap("t_recap", "Earlier carry.", "now backfill everything");
+  assert.match(r, /^Earlier carry\.\n\nThis thread continues/);
+  assert.ok(r.indexOf("Driver: track my blinkit orders") < r.indexOf("You: Tracking daily at 23:30."));
+  assert.ok(!r.includes("now backfill everything") && !r.includes("noise"));
+  assert.ok(T.recap("t_recap", null, "", 40).length < 400, "bounded");
+});

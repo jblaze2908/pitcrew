@@ -30,7 +30,9 @@ const DANGER: [RegExp, Decision, string, string][] = [
   [/\brm\s+-[a-z]*r[a-z]*f?\b(?!.*\/poc\/work)/, "ask", "delete", "recursive delete outside the workspace"],
   [/\bgit\s+push\b/, "ask", "send", "pushes to a remote"],
   [/\b(sudo|su\s|chmod\s+777|chown\s)/, "block", "exec_untrusted", "privilege change"],
-  [/(~|\$HOME|\/root|\/home\/\w+)\/\.(ssh|aws|gnupg|config\/gcloud)|\.env\b|id_rsa|credentials/, "block", "share", "touches secret material"],
+  // Secret files by name: a dotenv file (not process.env), key files, credential stores. Not the bare word
+  // "credentials", which blocked a skill note saying "never log payment credentials" (2026-10-04).
+  [/(~|\$HOME|\/root|\/home\/\w+)\/\.(ssh|aws|gnupg|config\/gcloud)|(?<![\w$])\.env(\.[\w-]+)?\b|id_rsa|\.git-credentials|\bcredentials\.json\b|\.aws\/credentials|application_default_credentials/, "block", "share", "touches secret material"],
   [/\b(npm|pnpm|yarn|pip|pip3|apt|apt-get|brew|cargo)\s+(i|install|add)\b/, "ask", "install", "installs software"],
 ];
 

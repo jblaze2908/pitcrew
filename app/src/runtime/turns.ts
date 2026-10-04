@@ -1,5 +1,6 @@
 // Turns on a member's brain: sending a message, starting and finishing a run, steering, interrupting, compacting.
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { one, all, run, now, uid, json, getSetting } from "../db.js";
 import { getBot, instructions, dynamicTools, engramBlock } from "../crew.js";
 import { botDir, toolManifest } from "../computer.js";
@@ -70,6 +71,22 @@ export function blockedReason(b: Bot) {
   if (!providerReady(b.provider)) return `${b.name} uses ${b.provider === "openai" ? "the ChatGPT plan" : b.provider}, which isn't connected. Add it in Settings → Providers.`;
   return null;
 }
+// A tool set's identity: its names, sorted. Descriptions can change without a restart; a new or removed tool can't.
+export const toolsSig = (tools: { name?: string }[]) => createHash("sha1").update(tools.map((x) => x.name).sort().join("\n")).digest("hex").slice(0, 12);
+// What a fresh Codex thread is told about the one it replaces: the latest user and agent messages, newest kept whole
+// first, about 8,000 chars in all. One indexed query of at most 40 rows.
+export function recap(threadId: string, carry: string | null = null, current = "", max = 8000) {
+  const rows = all<{ kind: string; data: string }>("SELECT kind, data FROM events WHERE thread_id=? AND kind IN ('user','agent') ORDER BY id DESC LIMIT 40", threadId);
+  // The message starting this turn goes in as the turn's own input, not the recap.
+  if (rows[0]?.kind === "user" && json(rows[0].data, {}).text === current) rows.shift();
+  const lines: string[] = []; let size = 0;
+  for (const r of rows) {
+    const line = `${r.kind === "user" ? "Driver" : "You"}: ${String(json(r.data, {}).text || "").trim().slice(0, 1500)}`;
+    if (size + line.length > max) break;
+    lines.unshift(line); size += line.length;
+  }
+  return [carry, `This thread continues an earlier conversation. Your tools changed since it started, so it was restarted. Files in /bot/work are as you left them. The latest messages, oldest first:\n\n${lines.join("\n\n")}`].filter(Boolean).join("\n\n");
+}
 export async function startTurn(threadId: string, text: string, attachments: string[], trigger: string) {
   const t = getThread(threadId)!, b = getBot(t.bot_id)!;
   const why = blockedReason(b);
@@ -85,6 +102,16 @@ export async function startTurn(threadId: string, text: string, attachments: str
     if (!c.up) await ensureMemberToken(b);
     await c.ensure();
     let codexId = t.codex_id;
+    const tools = dynamicTools(b, await toolManifest(), { engram: memberLinked(b) }), sig = toolsSig(tools);
+    // Dynamic tools are fixed at thread/start: resume and fork keep the old set (codex 0.156.1; their params have no
+    // dynamicTools). When the set changed since this Codex thread started, start a new one and carry a recap over.
+    if (codexId && t.tools_sig !== sig) {
+      const old = codexId;
+      await c.unload(old).catch(() => {}); byCodex.delete(old);
+      codexId = null;
+      run("UPDATE threads SET codex_id=NULL, carry=? WHERE id=?", recap(threadId, t.carry, text), threadId);
+      addEvent(threadId, null, "system", { text: `${b.name}'s tools changed since this thread started, so ${b.name} picks it up fresh with a recap of the conversation.` });
+    }
     const refreshNow = refreshing.delete(threadId) && !!codexId;
     // Engram context only where instructions are sent (start/resume) or on /refresh, so a normal turn makes no Engram
     // call. A new thread or a /refresh always syncs: one GET per thread start, not per turn.
@@ -97,9 +124,9 @@ export async function startTurn(threadId: string, text: string, attachments: str
     const common = { model: b.model, modelProvider: b.provider, cwd: "/bot/work", developerInstructions: instructions(b, mems ?? [], egCtx) };
     let refreshed: string | null = null;
     if (!codexId) {
-      const st = await c.request("thread/start", { ...common, sandbox: "danger-full-access", approvalPolicy: "untrusted", environments: ENVS, dynamicTools: dynamicTools(b, await toolManifest(), { engram: memberLinked(b) }) }, 120000);
+      const st = await c.request("thread/start", { ...common, sandbox: "danger-full-access", approvalPolicy: "untrusted", environments: ENVS, dynamicTools: tools }, 120000);
       codexId = st.thread.id as string;
-      run("UPDATE threads SET codex_id=? WHERE id=?", codexId, threadId);
+      run("UPDATE threads SET codex_id=?, tools_sig=? WHERE id=?", codexId, sig, threadId);
       c.loaded.add(codexId);
       setRollout(b.id, codexId, st.thread.path);
       await c.mcpReady(codexId);
