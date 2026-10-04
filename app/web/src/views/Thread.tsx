@@ -69,6 +69,7 @@ function LiveThread({ d }: { d: ThreadView }) {
   const [surfaces, setSurfaces] = useState<Record<string, SurfaceRow>>(() => Object.fromEntries(d.surfaces.map((s) => [s.id, s])));
   const [running, setRunning] = useState(d.thread.running);
   const [title, setTitle] = useState(d.thread.title);
+  const [autonomy, setAutonomy] = useState(d.thread.autonomy || "ask");
   const [ctx, setCtx] = useState({ tokens: d.thread.ctx_tokens, window: d.thread.ctx_window });
   const [activity, setActivity] = useState("On track");
   const [streaming, setStreaming] = useState<{ itemId: string; text: string } | null>(null);
@@ -159,7 +160,7 @@ function LiveThread({ d }: { d: ThreadView }) {
   return (
     <div className="threadpage">
       <section className="convo">
-        <header><Face b={b} size="sm" /><Title id={id} title={title} onRenamed={setTitle} />{origin ? <OriginChip origin={origin} threadId={id} b={b} /> : <span className="pc-chip">{b.name}</span>}</header>
+        <header><Face b={b} size="sm" /><Title id={id} title={title} onRenamed={setTitle} />{origin ? <OriginChip origin={origin} threadId={id} b={b} /> : <span className="pc-chip">{b.name}</span>}<Autonomy id={id} value={autonomy} onChange={setAutonomy} /></header>
         <div ref={stream} className="stream">
           {items.map((it) => "steps" in it
             ? <Steps key={it.key} events={it.steps} results={scriptResults} closeSignal={closeSteps} initialOpen={it.key === openOnLoad.current || liveIds.current.has(it.steps[0].id)} />
@@ -172,6 +173,25 @@ function LiveThread({ d }: { d: ThreadView }) {
       <Panel id={id} b={b} ctx={ctx} lease={lease} onHandedBack={() => setLease(false)} />
     </div>
   );
+}
+
+// How much this thread runs without pit stops (server: runtime/autonomy.ts). YOLO is drawn in the bad tone so it's
+// never on by accident or forgotten.
+const AUTONOMY = [
+  ["ask", "Ask me", "Pit stops whenever jev isn't sure"],
+  ["handsfree", "Hands-free", "Stops only for paying, signing in, sending, sharing, deleting, and look-alike or non-https sites"],
+  ["yolo", "YOLO", "No pit stops, paying and sending included. Only hard blocks and blocked sites stop it"],
+] as const;
+function Autonomy({ id, value, onChange }: { id: string; value: string; onChange: (a: string) => void }) {
+  const set = async (a: string) => {
+    if (a === value) return;
+    await api.patch(`/api/threads/${id}`, { autonomy: a });
+    onChange(a);
+    toast(AUTONOMY.find(([k]) => k === a)![1]);
+  };
+  return <div className="autonomy" role="group" aria-label="Pit stops for this thread">
+    {AUTONOMY.map(([k, label, tip]) => <button key={k} title={tip} aria-pressed={value === k} className={`pc-pill s ${value === k ? (k === "yolo" ? "yolo" : "sig") : "o"}`} onClick={() => set(k)}>{label}</button>)}
+  </div>;
 }
 
 function Title({ id, title, onRenamed }: { id: string; title: string; onRenamed: (t: string) => void }) {

@@ -7,7 +7,9 @@ import * as R from "../runtime/index.js";
 import { routeMessage, SURE, namedMembers, type Candidate } from "../router.js";
 import { getBot, listBots } from "../crew.js";
 import { signedIn, type Env } from "../http/guard.js";
-import { readBody, jsonBody, raw, text, trimmed, flag, truthy, given, field } from "../http/body.js";
+import { readBody, jsonBody, raw, text, trimmed, flag, truthy, given, field, pick } from "../http/body.js";
+import { AUTONOMY, type Autonomy } from "../runtime/autonomy.js";
+import { addEvent } from "../runtime/threads.js";
 import { threadView } from "./views.js";
 import type { Ask, Origin, PlanStatus, RoutePick } from "../../shared/types.js";
 import type { SurfaceRow, ThreadRow } from "../models.js";
@@ -15,7 +17,12 @@ import type { SurfaceRow, ThreadRow } from "../models.js";
 const NewThread = z.object({ botId: raw, title: text(120, "New thread") });
 const AskBody = z.object({ text: trimmed(20000), botId: raw, dry: raw, crew: raw });
 const Reroute = z.object({ botId: raw });
-const ThreadEdit = z.object({ title: truthy((v) => String(v).slice(0, 120)), archived: given((v) => (v ? 1 : 0)) });
+const AUTONOMY_NOTE: Record<Autonomy, string> = {
+  ask: "Pit stops back to normal: jev asks you whenever it isn't sure.",
+  handsfree: "Hands-free: this thread only stops for paying, signing in, sending, sharing, deleting, and sites that look like another or aren't https.",
+  yolo: "YOLO: this thread runs without pit stops, paying and sending included. Only jev's hard blocks and blocked sites still stop it.",
+};
+const ThreadEdit = z.object({ title: truthy((v) => String(v).slice(0, 120)), archived: given((v) => (v ? 1 : 0)), autonomy: pick(AUTONOMY, undefined) });
 const Message = z.object({ text: raw, attachments: field((v): string[] => (Array.isArray(v) ? v.filter((a) => /^uploads\/[\w.-]+$/.test(a)) : [])), mode: raw });
 const SurfaceAction = z.object({ action: raw, values: field((v): Record<string, unknown> => (v && typeof v === "object" ? v : {})) });
 const Save = z.object({ saved: flag });
@@ -80,6 +87,11 @@ export const threadRoutes = new Hono<Env>()
     const id = c.req.param("id"), b = await jsonBody(c, ThreadEdit);
     if (b.title !== undefined) run("UPDATE threads SET title=? WHERE id=?", b.title, id);
     if (b.archived !== undefined) run("UPDATE threads SET archived=? WHERE id=?", b.archived, id);
+    if (b.autonomy !== undefined && R.getThread(id) && R.getThread(id)!.autonomy !== b.autonomy) {
+      run("UPDATE threads SET autonomy=? WHERE id=?", b.autonomy, id);
+      audit("driver", "thread.autonomy", { id, autonomy: b.autonomy });
+      addEvent(id, null, "system", { text: AUTONOMY_NOTE[b.autonomy], ...(b.autonomy === "yolo" ? { tone: "bad" } : {}) });
+    }
     return c.json({ ok: true });
   })
   .post("/api/threads/:id/messages", signedIn, async (c) => { const b = await jsonBody(c, Message); return c.json(await R.sendMessage(c.req.param("id"), { text: b.text, attachments: b.attachments, mode: b.mode as string })); })

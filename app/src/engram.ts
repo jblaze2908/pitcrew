@@ -255,18 +255,23 @@ function openProposal(x: z.output<typeof ProposalZ>, agents: Map<string, string>
 export async function mirrorInbox() {
   const inbox = shape(InboxZ, await call("/link/inbox"), "inbox");
   const agents = new Map(all<{ bot_id: string; agent_id: string }>("SELECT bot_id, agent_id FROM engram_members").map((r) => [r.agent_id, r.bot_id]));
-  const present = new Set<string>(); let opened = 0, closed = 0;
+  const present = new Set<string>(), auto: string[] = []; let opened = 0, closed = 0;
   for (const raw of inbox.proposals as any[]) {
     if (typeof raw?.id === "string" && (raw.status === undefined || raw.status === "open")) present.add(raw.id);
     const p = ProposalZ.safeParse(raw);
-    if (p.success && p.data.scope !== "private" && (!p.data.status || p.data.status === "open") && openProposal(p.data, agents)) opened++;
+    if (p.success && p.data.scope !== "private" && (!p.data.status || p.data.status === "open") && openProposal(p.data, agents)) { opened++; if (savesItself(p.data)) auto.push(`eg_${p.data.id}`); }
   }
+  // Plain new memories save without a pit stop (30 days to 2026-10-04: 26 of 30 Engram pit stops were answered in Engram
+  // or never). Sequential: one Engram call each, only for proposals that opened on this pass.
+  for (const id of auto) await decideProposal(id, "accept", { auto: true }).catch(() => {});
   for (const ps of all<{ id: string; detail: string }>("SELECT id, detail FROM pitstops WHERE kind='engram' AND status='pending'"))
     if (!present.has(json(ps.detail, {}).proposal?.id)) { closePit(ps.id, GONE); closed++; }
   return { open: present.size, opened, closed };
 }
 
-export async function decideProposal(id: string, decision: EngramDecision) {
+// A new fact: no conflict with a held memory, not held for review, not a share, tool call or skill. Those still ask.
+const savesItself = (x: z.output<typeof ProposalZ>) => x.kind === "memory" && !x.replaces && !x.held;
+export async function decideProposal(id: string, decision: EngramDecision, { auto = false } = {}) {
   const ps = one<PitstopRow>("SELECT * FROM pitstops WHERE id=? AND kind='engram'", id);
   if (!ps) throw httpErr(404, "No such pit stop");
   if (ps.status !== "pending") return pitView(ps);
@@ -276,14 +281,14 @@ export async function decideProposal(id: string, decision: EngramDecision) {
   catch (e: any) { if (e.upstream === 404 || e.upstream === 409) { closePit(id, GONE); return pitView(one<PitstopRow>("SELECT * FROM pitstops WHERE id=?", id)!); } throw e; }
   const shared = decision === "accept" ? DecidedShareZ.safeParse(res) : null;
   const publicUrl = shared?.success ? shared.data.public_url : null;
-  const note = publicUrl ? "Anyone with the link can open it" : decision === "accept" ? "Accepted" : decision === "keep" ? "Kept current" : "Rejected";
+  const note = publicUrl ? "Anyone with the link can open it" : decision === "accept" ? (auto ? "Saved automatically" : "Accepted") : decision === "keep" ? "Kept current" : "Rejected";
   const detail = publicUrl ? JSON.stringify({ ...json(ps.detail, {}), public_url: publicUrl }) : ps.detail;
   run("UPDATE pitstops SET status=?, scope='once', note=?, detail=?, decided_at=? WHERE id=? AND status='pending'", decision === "accept" ? "approved" : "denied", note, detail, now(), id);
   // The member that asked learns the link in its thread, so it can hand it on.
   const th = shared?.success && /^pitcrew:thread:(th_[\w-]{1,40})$/.exec(shared.data.source?.ref || "")?.[1];
   if (publicUrl && th && one("SELECT 1 FROM threads WHERE id=?", th))
     addEvent(th, null, "system", { text: `Anyone with the link can now open “${clean(ps.title.replace(/^Make public: /, ""), 200)}”: ${publicUrl}` });
-  audit("driver", `engram.${decision}`, { id, title: ps.title });
+  audit(auto ? "system" : "driver", `engram.${decision}`, { id, title: ps.title, ...(auto ? { auto: true } : {}) });
   emitPit(id);
   return pitView(one<PitstopRow>("SELECT * FROM pitstops WHERE id=?", id)!);
 }

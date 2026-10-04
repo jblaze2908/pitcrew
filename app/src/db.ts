@@ -107,7 +107,8 @@ for (const sql of ["ALTER TABLE turns ADD COLUMN changes TEXT", "ALTER TABLE jev
   "ALTER TABLE plans ADD COLUMN live INTEGER", "ALTER TABLE plans ADD COLUMN swept INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE plans ADD COLUMN limits TEXT", "ALTER TABLE plans ADD COLUMN log TEXT", "ALTER TABLE plans ADD COLUMN sweep TEXT",
   "ALTER TABLE bots ADD COLUMN engram_scope TEXT NOT NULL DEFAULT 'personal'", "ALTER TABLE engram_members ADD COLUMN scope TEXT",
-  "ALTER TABLE bots ADD COLUMN engram_household INTEGER NOT NULL DEFAULT 0", "ALTER TABLE engram_members ADD COLUMN household INTEGER NOT NULL DEFAULT 0"]) { try { db.exec(sql); } catch {} }
+  "ALTER TABLE bots ADD COLUMN engram_household INTEGER NOT NULL DEFAULT 0", "ALTER TABLE engram_members ADD COLUMN household INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE threads ADD COLUMN autonomy TEXT NOT NULL DEFAULT 'ask'"]) { try { db.exec(sql); } catch {} }
 
 // A row as SQLite returns it; callers name the shape they expect (models.ts).
 export type Row = Record<string, any>;

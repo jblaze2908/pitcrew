@@ -13,11 +13,12 @@ import { addEvent } from "./threads.js";
 import { pitStop } from "./pitstops.js";
 import { readTabs } from "./pageText.js";
 import { hostOf } from "./util.js";
+import type { Autonomy } from "./autonomy.js";
 
 const refusals = new Map<string, string>(); // thread id → why the last browser action was refused, for the agent's tool result
 const siteAsks = new Map<string, Promise<string>>(); // bot|thread|domain → pending pit stop
 export const takeRefusal = (threadId: string) => { const r = refusals.get(threadId); refusals.delete(threadId); return r; };
-export async function siteStep(b: Bot, threadId: string, call: Call): Promise<Pick<SiteVerdict, "policy" | "full" | "site" | "checkout"> | null> {
+export async function siteStep(b: Bot, threadId: string, call: Call, auto: Autonomy = "ask"): Promise<Pick<SiteVerdict, "policy" | "full" | "site" | "checkout"> | null> {
   if (call.kind !== "mcp" || !["browser", "computer"].includes(call.server!)) return { policy: b.policy };
   const a = call.arguments || {};
   const navigating = call.tool === "browser_navigate" || (call.tool === "browser_tabs" && a.action === "new" && !!a.url);
@@ -26,6 +27,8 @@ export async function siteStep(b: Bot, threadId: string, call: Call): Promise<Pi
   const url = navigating ? a.url : a.page_url;
   let sv = siteVerdict(b, threadId, url, opts);
   if (sv.action === "go" || (observing && sv.action === "ask")) return sv;
+  // An undecided site opens without asking under YOLO, and under hands-free when it's https and looks like no other site.
+  if (sv.action === "ask" && (auto === "yolo" || (auto === "handsfree" && !sv.warn && sv.site?.https))) return { policy: b.policy, site: sv.site, checkout: sv.checkout, full: false };
   if (sv.action === "ask") {
     const key = `${b.id}|${threadId}|${sv.site!.domain}`;
     if (!siteAsks.has(key)) siteAsks.set(key, pitStop({ botId: b.id, threadId, kind: "site", effect: sv.warn ? "ask" : "browse", title: sv.title!, detail: sv.detail! }).finally(() => siteAsks.delete(key)));
