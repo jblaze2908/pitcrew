@@ -43,11 +43,12 @@ function layout(events: ThreadEvent[], ctx: EventCtx): Item[] {
       else { group = { turn: e.turn_id, steps: [e] }; items.push({ key: `g${e.id}`, steps: group.steps }); }
       continue;
     }
-    if ((e.kind === "plan" || e.kind === "delegation") && drawn.has(e.data.id)) continue;
+    // A surface updated in place (render_surface with its id) draws where it first appeared, with its newest spec.
+    if ((e.kind === "plan" || e.kind === "delegation" || e.kind === "surface") && drawn.has(e.data.id)) continue;
     const el = renderEvent(e, e.kind === "agent" && lastAgent ? { ...ctx, cont: true } : ctx);
     if (el == null) continue;
     lastAgent = e.kind === "agent";
-    if (e.kind === "plan" || e.kind === "delegation") drawn.add(e.data.id);
+    if (e.kind === "plan" || e.kind === "delegation" || e.kind === "surface") drawn.add(e.data.id);
     group = null;
     items.push({ key: `e${e.id}`, el });
   }
@@ -230,7 +231,7 @@ function ThreadSurface({ s }: { s: SurfaceRow }) {
   const [saved, setSaved] = useState(!!s.saved);
   const toggle = async () => { const next = !saved; setSaved(next); await api.post(`/api/surfaces/${s.id}/save`, { saved: next }); };
   return (
-    <Surface s={s} lockOnAction extra={<button className="small faint" onClick={toggle}>{saved ? "Saved to Library" : "Keep in Library"}</button>}
+    <Surface s={s} lockOnAction extra={<button className="small faint" onClick={toggle}>{s.data ? (saved ? "On the Wall" : "Pin to Wall") : saved ? "Saved to Library" : "Keep in Library"}</button>}
       onAction={async (action, values) => { await api.post(`/api/surfaces/${s.id}/action`, { action, values }); toast("Sent to the crew"); }} />
   );
 }

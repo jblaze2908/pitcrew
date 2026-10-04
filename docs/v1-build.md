@@ -61,6 +61,12 @@ Jai's direction: not every task needs a computer. Anything that needs a runtime 
     - **Hands-free:** stops only for pay, sign-in, send, share, delete, a jev failure, or a look-alike or non-https site.
     - **YOLO:** no pit stops. jev's hard blocks, the member's `block` policy and refused sites still stop it.
   - Waived verdicts stay in `jev_labels` (source `standing`) for audit.
+- **Bound dashboards** (`ledger.ts`, 2026-10-04): a surface can name a SQLite ledger under the member's `/bot/work` and carry `queries`; components with `bind` are filled from them each time the surface is viewed.
+  - Daily runs only add rows; no model runs per view.
+  - Each query is one read-only `SELECT`/`WITH`. The file is realpath-confined and opened read-only with extensions off.
+  - Queries run in a worker with a 3 s deadline, a 500-row cap and a 64 MB heap. Results are cached per ledger version (mtime + size of the db and its WAL).
+  - `render_surface` takes `id` to update in place.
+  - Kept dashboards show on the Wall with "Data as of" and Refresh.
 - **Pointer:** a content-script extension draws the crew member's creature cursor (hue + name tag) from real input events, with click ripples and a typing indicator; it persists across page loads.
 - **Files view:** workspace snapshots at turn start and end (re-hash only changed files; contents deduped in root-only `/srv/pitcrew/data/shadow/<id>`), per-run changes however they were made, Myers line diff in the browser (unified / split), file browser that works with the computer off.
 - Live view scales to fit; Chrome's "Restore pages?" bubble and the Chrome for Testing infobar are suppressed.
