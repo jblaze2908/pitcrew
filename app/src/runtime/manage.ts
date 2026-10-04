@@ -1,8 +1,8 @@
-// The Crew Chief as crew manager: it reads how every member is set up and doing, proposes SOUL changes (the driver
-// approves), and tidies the crew's suggestions. It never changes another member directly. Private members show their
+// The Crew Chief as crew manager: it reads how every member is set up and doing, proposes SOUL changes and retirements
+// (the driver approves), and tidies the crew's suggestions. It never changes another member directly. Private members show their
 // setup only: their memory, runs and threads stay with the driver. Per call: a few indexed reads per member.
 import { one, all, run, now, json, audit } from "../db.js";
-import { getBot, listBots, soulOf, SOUL_MAX, updateBot } from "../crew.js";
+import { getBot, listBots, soulOf, SOUL_MAX, updateBot, retireBot } from "../crew.js";
 import { listSkills } from "./skills.js";
 
 export function crewOverview(memberName?: string) {
@@ -39,6 +39,18 @@ export function soulProposal(memberName: string, soul: string, why: string) {
 }
 export function applySoul(detail: { member?: string; soul?: string }) {
   if (detail.member && typeof detail.soul === "string" && getBot(detail.member)) { updateBot(detail.member, { soul: detail.soul } as any); audit("driver", "soul.applied", { botId: detail.member }); }
+}
+
+// A retirement for the driver to approve (pit stop kind "retire"); approving retires the member (pitstops.ts).
+export function retireProposal(memberName: string, why: string) {
+  const b = listBots().find((x) => x.kind !== "chief" && (x.name.toLowerCase() === memberName.toLowerCase() || x.id === memberName));
+  if (!b) return { error: `No crew member called "${memberName}".` };
+  if (!why.trim()) return { error: "Say why: the evidence the member is no longer needed." };
+  const schedules = one<{ n: number }>("SELECT COUNT(*) n FROM schedules WHERE bot_id=? AND enabled=1", b.id)!.n;
+  return { bot: b, detail: { member: b.id, memberName: b.name, job: b.job || "", schedules, why: why.trim().slice(0, 600) } };
+}
+export function applyRetire(detail: { member?: string }) {
+  if (detail.member) retireBot(detail.member, "driver");
 }
 
 // Folds one open suggestion into another (its evidence and votes move over) or adds evidence; accepting and dismissing

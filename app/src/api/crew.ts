@@ -4,7 +4,7 @@ import { z } from "zod";
 import { all, run, now, uid, audit } from "../db.js";
 import { httpErr } from "../auth.js";
 import * as R from "../runtime/index.js";
-import { getBot, updateBot, normaliseSpec, createBot } from "../crew.js";
+import { getBot, updateBot, normaliseSpec, createBot, retireBot } from "../crew.js";
 import { listProjects, openProject } from "../code.js";
 import { memberChanged, listMemories, remember, forget } from "../engram.js";
 import { memberLinked } from "../engramStore.js";
@@ -45,7 +45,7 @@ export const crewRoutes = new Hono<Env>()
   .patch("/api/bots/:id", signedIn, async (c) => { const patch = await readJson(c), b = updateBot(c.req.param("id"), patch); if ("private" in patch || "engram_scope" in patch || "engram_household" in patch) memberChanged(b); return c.json(b); })
   .post("/api/bots/:id/archive", signedIn, (c) => {
     const id = c.req.param("id"), b = getBot(id); if (!b || b.kind === "chief") throw httpErr(400, "The Crew Chief can't be retired");
-    run("UPDATE bots SET archived=1 WHERE id=?", id); run("UPDATE schedules SET enabled=0 WHERE bot_id=?", id); audit("driver", "crew.retired", { id }); return c.json({ ok: true });
+    retireBot(id, "driver"); return c.json({ ok: true });
   })
   // Manual hire: the driver filled the form and pressed Hire on the review screen; that is the HITL step.
   .post("/api/hire", signedIn, async (c) => { const s = normaliseSpec(await readJson(c)); const bot = createBot(s); if (s.schedule?.spec && s.schedule.prompt) R.addSchedule(bot.id, null, s.schedule.spec, s.schedule.prompt); memberChanged(bot); return c.json(bot); })
