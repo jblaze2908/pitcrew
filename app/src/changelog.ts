@@ -11,4 +11,5 @@ export const CHANGELOG: { date: string; note: string }[] = [
   { date: "2026-10-04", note: "A blocked action says jev's reason; an expired pit stop means the driver didn't answer, not a refusal. Repeated blocks escalate to the driver." },
   { date: "2026-10-04", note: "harness_help(topic) explains any part of the harness; whats_new lists changes like this one." },
   { date: "2026-10-04", note: "Retros: after a run that stood out (or weekly for scheduled work) you get a \"[Retro]\" with Pitcrew's measurements. Fix your skill or memory; file what only Pitcrew can fix with suggest_improvement." },
+  { date: "2026-10-04", note: "The Crew Chief manages the crew: crew_overview, propose_soul (the driver approves) and triage_suggestion. A SOUL is the driver's description of who a member is and how it works." },
 ];

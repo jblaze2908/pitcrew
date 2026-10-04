@@ -12,6 +12,7 @@ import { viewSkill } from "./skills.js";
 import { harnessHelp, TOPICS } from "../manual.js";
 import { CHANGELOG } from "../changelog.js";
 import { suggest } from "./retro.js";
+import { crewOverview, soulProposal, triageSuggestion, openSuggestions } from "./manage.js";
 import { computer } from "./machines.js";
 import { pitStop } from "./pitstops.js";
 import { addSchedule, listSchedules, updateSchedule, deleteSchedule, lastScheduledRun } from "./schedules.js";
@@ -168,6 +169,23 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
       if ("error" in r) return say(`Query failed: ${r.error}`, false);
       const body = JSON.stringify(r.rows);
       return say(`${r.rows.length} row${r.rows.length === 1 ? "" : "s"}${r.truncated ? " (cut at 500)" : ""} from ${owner.name}'s ${a.source}:\n${body.length > 24000 ? `${body.slice(0, 24000)}…` : body}`);
+    }
+    case "crew_overview": {
+      if (b.kind !== "chief") return say("Only the Crew Chief manages the crew.", false);
+      const o = crewOverview(a.member ? String(a.member) : undefined);
+      const ideas = openSuggestions();
+      return o ? say(`${o}${ideas.length ? `\n\n## Open suggestions\n${ideas.map((i) => `- ${i.id} · ${i.title} (${i.area}, ${i.votes}×, from ${getBot(i.bot_id)?.name || i.bot_id})`).join("\n")}` : ""}`) : say(`No crew member called "${a.member}".`, false);
+    }
+    case "propose_soul": {
+      if (b.kind !== "chief") return say("Only the Crew Chief manages the crew.", false);
+      const pr = soulProposal(String(a.member || ""), String(a.soul || ""), String(a.why || ""));
+      if ("error" in pr) return say(pr.error!, false);
+      const decision = await pitStop({ botId: b.id, threadId, kind: "soul", effect: "soul", title: `New SOUL for ${pr.bot!.name}`, detail: pr.detail! });
+      return say(decision === "approved" ? `${pr.bot!.name}'s SOUL is updated; its new threads use it.` : decision === "expired" ? `${getSetting("driver_name", "the driver")} didn't answer; the SOUL is unchanged and the proposal expired.` : `${getSetting("driver_name", "the driver")} kept the current SOUL.`, decision === "approved");
+    }
+    case "triage_suggestion": {
+      if (b.kind !== "chief") return say("Only the Crew Chief manages the crew.", false);
+      return say(triageSuggestion(String(a.id || ""), { mergeInto: a.merge_into ? String(a.merge_into) : null, note: String(a.note || "") }));
     }
     case "suggest_improvement": {
       const s = { area: String(a.area || "other"), title: String(a.title || "").trim(), evidence: String(a.evidence || "").trim(), proposal: String(a.proposal || "").trim() };

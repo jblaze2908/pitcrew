@@ -982,3 +982,39 @@ test("a run that stands out is measured and gets a retro; suggestions deduplicat
   assert.deepEqual([one("SELECT votes FROM improvements WHERE id=?", a.id).votes, /tu_next/.test(one("SELECT evidence FROM improvements WHERE id=?", a.id).evidence)], [2, true]);
   assert.ok(Rt.weeklyDue("th_retro"));
 });
+
+test("the Chief manages the crew: overview (private members show setup only), SOUL proposals the driver approves, suggestion merges", async () => {
+  const M = await import("../app/dist/src/runtime/manage.js");
+  const Tl = await import("../app/dist/src/runtime/tools.js");
+  const Rt = await import("../app/dist/src/runtime/retro.js");
+  const { getBot } = await import("../app/dist/src/crew.js");
+  run("INSERT INTO bots(id,name,kind,job,created_at) VALUES('chief_m','Chief M','chief','',0),('mgr_a','Shopper','specialist','Tracks groceries',0)");
+  run("INSERT INTO bots(id,name,kind,job,private,created_at) VALUES('mgr_p','Diary','specialist','Private notes',1,0)");
+  run("INSERT INTO memory(id,bot_id,text,source,created_at,updated_at) VALUES('me_mgr','mgr_a','replay 403s','t',0,0),('me_priv','mgr_p','secret diary','t',0,0)");
+  const all_ = M.crewOverview();
+  assert.match(all_, /## Shopper: Tracks groceries\nSOUL \(default, from job and voice\): Your job: Tracks groceries/);
+  assert.match(all_, /Agent memory: 1 notes, 11 \/ 3000 chars/);
+  assert.match(all_, /## Diary \(private\)/); assert.ok(!/secret diary/.test(all_));
+  const priv = M.crewOverview("Diary"); assert.ok(!/Agent memory|Last runs/.test(priv), "a private member shows its setup only");
+  assert.equal(M.crewOverview("Nobody"), null);
+
+  assert.match(M.soulProposal("Shopper", "x".repeat(1600), "too long").error, /at most 1500/);
+  assert.match(M.soulProposal("Ghost", "hi", "").error, /No crew member/);
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_mgr','chief_m','m',0,0)");
+  const c = { bot: { id: "chief_m" }, mems: new Map() };
+  const prop = Tl.dynamicTool(c, "th_mgr", { tool: "propose_soul", threadId: "cx_m", arguments: { member: "Shopper", soul: "You track Blinkit. Numbers first. Quiet unless an alert fires.", why: "3 retros flagged long replies" } });
+  let ps; for (let i = 0; i < 50 && !(ps = one("SELECT * FROM pitstops WHERE kind='soul' AND status='pending'")); i++) await new Promise((r) => setTimeout(r, 5));
+  assert.equal(ps.title, "New SOUL for Shopper"); assert.equal(JSON.parse(ps.detail).before, "");
+  await R.decide(ps.id, "approve");
+  assert.match((await prop).contentItems[0].text, /SOUL is updated/);
+  assert.equal(getBot("mgr_a").soul, "You track Blinkit. Numbers first. Quiet unless an alert fires.");
+  const notChief = await Tl.dynamicTool({ bot: { id: "mgr_a" }, mems: new Map() }, "th_mgr", { tool: "propose_soul", threadId: "cx_m", arguments: { member: "Diary", soul: "x", why: "y" } });
+  assert.equal(notChief.success, false);
+
+  const x = Rt.suggest("mgr_a", null, { area: "tool", title: "Pace replays", evidence: "429s", proposal: "" });
+  const y = Rt.suggest("mgr_p", null, { area: "tool", title: "Throttle bulk reads per host", evidence: "more 429s", proposal: "" });
+  assert.equal(M.triageSuggestion(y.id, { mergeInto: x.id }), `Merged into ${x.id}.`);
+  assert.deepEqual([one("SELECT status FROM improvements WHERE id=?", y.id).status, one("SELECT votes FROM improvements WHERE id=?", x.id).votes], ["merged", 2]);
+  assert.match(one("SELECT evidence FROM improvements WHERE id=?", x.id).evidence, /merged “Throttle bulk reads per host”: more 429s/);
+  assert.equal(M.triageSuggestion(x.id, { note: "seen on Grocery too" }), "Note added.");
+});

@@ -43,7 +43,8 @@ export function PitCard({ p: given, onDone }: { p: PitStop; onDone?: (r: PitStop
     : p.kind === "file" ? <pre>{(d.paths || []).join("\n")}</pre>
     : p.kind === "hire" ? <HireSummary s={d.spec || {}} />
     : p.kind === "site" ? <SiteSummary d={d} />
-    : p.kind === "engram" && d.proposal ? <ProposalSummary x={d.proposal} /> : null;
+    : p.kind === "engram" && d.proposal ? <ProposalSummary x={d.proposal} />
+    : p.kind === "soul" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><pre>{d.soul}</pre>{d.before && <details><summary className="small faint">Current SOUL</summary><pre>{d.before}</pre></details>}</div> : null;
 
   const outcome = `${p.kind === "engram" && p.note ? p.note : p.status} ${ago(p.decided_at)}`;
   // Decided: one line that opens to the details, so a thread's history doesn't keep full cards around.
@@ -71,6 +72,7 @@ export function PitCard({ p: given, onDone }: { p: PitStop; onDone?: (r: PitStop
     {btn("Allow site fully", () => decide("approve", "full"))}
     {btn("Block site", () => decide("deny", "block"))}
     {openLink("Open thread")}</div></>;
+  else if (p.kind === "soul") actions = <div className="acts">{btn("Use this SOUL", () => decide("approve", "once"), true)}{btn("Keep current", () => decide("deny"))}{openLink("Open thread")}</div>;
   else if (p.kind === "plan") actions = <div className="acts">
     {btn(p.effect === "browse" ? "Allow for this plan" : "Allow", () => decide("approve", "once"), true)}
     {btn(p.effect === "browse" ? "Use what they know" : "Finish with what it has", () => decide("deny"))}
