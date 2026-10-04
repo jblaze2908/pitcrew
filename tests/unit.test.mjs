@@ -923,3 +923,26 @@ test("memory tiers: session notes ride the recap, agent memory is capped and pri
   const f = await Tl.dynamicTool(c, "th_mem", { tool: "forget", threadId: "cx_mem", arguments: { id } });
   assert.match(text(f), /^Forgotten/); assert.ok(one("SELECT forgotten_at FROM memory WHERE id=?", id).forgotten_at);
 });
+
+test("a member's skills are indexed from their frontmatter, loaded with skill_view, and their loads counted", async () => {
+  const K = await import("../app/dist/src/runtime/skills.js");
+  const { instructions } = await import("../app/dist/src/crew.js");
+  const dir = `${root}/bots/b_skill/work/skills`;
+  mkdirSync(`${dir}/blinkit-tracker/scripts`, { recursive: true }); mkdirSync(`${dir}/.git`, { recursive: true }); mkdirSync(`${dir}/no-md`, { recursive: true });
+  writeFileSync(`${dir}/blinkit-tracker/SKILL.md`, "---\nname: blinkit-tracker\ndescription: Track Blinkit orders daily into the grocery ledger, quiet unless an alert fires\n---\n\n# Method\nUse the browser session.");
+  writeFileSync(`${dir}/blinkit-tracker/scripts/update.py`, "print(1)");
+  writeFileSync(`${root}/bots/b_skill/secret.txt`, "no");
+  assert.deepEqual(K.frontmatter("# Pacing bulk reads\nkeep it slow", "pacing"), { name: "pacing", description: "Pacing bulk reads" });
+  const list = K.listSkills("b_skill");
+  assert.deepEqual(list.map((s) => [s.name, s.uses, s.stale]), [["blinkit-tracker", 0, false]], "folders without SKILL.md and .git aren't skills");
+  const idx = K.skillIndex(list);
+  assert.equal(idx, "- blinkit-tracker: Track Blinkit orders daily into the grocery ledger, quiet unless an alert fires");
+  assert.match(instructions({ id: "b_skill", name: "S", personality: {} }, [], null, idx), /Your skills \(load one with skill_view[^\n]*\n- blinkit-tracker: Track Blinkit/);
+  const v = K.viewSkill("b_skill", "blinkit-tracker");
+  assert.match(v.text, /# Method/); assert.deepEqual(v.files, ["scripts", "scripts/update.py"]);
+  assert.equal(K.viewSkill("b_skill", "blinkit-tracker", "scripts/update.py").text, "print(1)");
+  assert.equal(K.viewSkill("b_skill", "blinkit-tracker", "../../secret.txt"), null);
+  assert.equal(K.viewSkill("b_skill", "../x"), null);
+  assert.equal(K.listSkills("b_skill")[0].uses, 1, "SKILL.md loads count; files inside don't");
+  assert.deepEqual(K.listSkills("b_none"), []);
+});

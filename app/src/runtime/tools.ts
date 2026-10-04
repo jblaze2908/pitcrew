@@ -8,6 +8,7 @@ import { imageFrom, saveShot, type ToolResult } from "../shots.js";
 import type { Brain } from "../computer.js";
 import { active } from "./state.js";
 import { addEvent, findThreads, threadLink, readThread, addThreadNote, NOTES_MAX } from "./threads.js";
+import { viewSkill } from "./skills.js";
 import { computer } from "./machines.js";
 import { pitStop } from "./pitstops.js";
 import { addSchedule, listSchedules, updateSchedule, deleteSchedule, lastScheduledRun } from "./schedules.js";
@@ -164,6 +165,11 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
       if ("error" in r) return say(`Query failed: ${r.error}`, false);
       const body = JSON.stringify(r.rows);
       return say(`${r.rows.length} row${r.rows.length === 1 ? "" : "s"}${r.truncated ? " (cut at 500)" : ""} from ${owner.name}'s ${a.source}:\n${body.length > 24000 ? `${body.slice(0, 24000)}…` : body}`);
+    }
+    case "skill_view": {
+      const s = viewSkill(b.id, String(a.name || ""), a.file ? String(a.file) : "SKILL.md");
+      if (!s) return say(`No skill "${a.name}"${a.file ? ` with ${a.file}` : ""} in /bot/work/skills.`, false);
+      return say(`${s.text}${s.files.length ? `\n\nFiles in this skill: ${s.files.join(", ")}` : ""}`);
     }
     case "read_thread": {
       const id = /th_[\w-]{4,40}/.exec(String(a.thread || ""))?.[0];

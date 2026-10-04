@@ -114,7 +114,8 @@ export function voiceBlock(b: Pick<Bot, "personality">) {
 // What a linked member gets from Engram at thread start (engram.ts threadContext): the Chief's profile, a skills index.
 export interface EngramContext { profile: string | null; skills: string }
 const SCOPE_NAME = { personal: "Personal", finance: "Money (scope finance)", health: "Health (scope health)" } as const;
-export function instructions(b: Pick<Bot, "name" | "personality"> & Partial<Bot>, memories: { id: string; text: string }[], engram: EngramContext | null = null) {
+// skills: the member's own skill index (runtime/skills.ts skillIndex), built at thread start.
+export function instructions(b: Pick<Bot, "name" | "personality"> & Partial<Bot>, memories: { id: string; text: string }[], engram: EngramContext | null = null, skills = "") {
   const driver = getSetting("driver_name", "the driver");
   return [
     `You are ${b.name}, a member of ${driver}'s Pitcrew: a personal crew of AI agents that get real-life admin and computer work done for ${driver}.`,
@@ -122,8 +123,8 @@ export function instructions(b: Pick<Bot, "name" | "personality"> & Partial<Bot>
     voiceBlock(b),
     `You have your own computer, started on demand: shell commands and file edits run there, and the browser_* tools drive its Chromium (a 1280x800 desktop ${driver} can watch live). Answer from what you know when no tool is needed; the computer only starts when you run a command or use the browser. Prefer browser_* tools (they act on page elements by ref from browser_snapshot); use computer_* pixel tools only when a page can't be driven otherwise. The browser keeps its logins between runs.`,
     `Workspace on the computer: /bot/work. Downloads land in /bot/work/downloads. Put files meant for ${driver} in /bot/work/out; they appear in the Library.`,
-    `Probes, raw dumps, samples and one-off scripts go in /bot/work/.scratch. A task folder keeps only what a schedule reruns (its script, SKILL.md and its ledger) and what the task produces; when a run is done, move anything else into .scratch.`,
-    `A recurring task's folder (e.g. /bot/work/grocery) is a git repo: git init it once, with a .gitignore for data (*.db, *.db-*, .scratch, raw dumps). Commit whenever you change its code, SKILL.md or alert rules: one commit per change, message saying what and why. Never push. ${driver} reads that history under Projects; the ledger is the data, not the repo.`,
+    `Probes, raw dumps, samples and one-off scripts go in /bot/work/.scratch. A task's data folder (e.g. /bot/work/grocery) keeps only its ledger and what the task produces; its method and scripts live in its skill. When a run is done, move anything else into .scratch.`,
+    `Skills: how you do a kind of task lives in /bot/work/skills/<name>/: SKILL.md (frontmatter name and a one-line description; then the method, gotchas and alert rules), plus its scripts/ and references/. /bot/work/skills is one git repo: commit each change with a message saying what and why; never push. Data (ledgers, raw pages) stays out of it, e.g. in /bot/work/<task>/. Before a task a skill covers, load it with skill_view; when you find a better way, fix the skill. A proven how-to other members could use goes to the crew registry with engram propose (kind skill), which ${driver} reviews.`,
     [`Browser rules:`,
       `- Every browser action returns the page afterwards: what changed since your last snapshot, or the full snapshot on a new page. Don't call browser_snapshot after an action.`,
       `- Refs die when the page navigates or reloads; act only on refs from the latest result.`,
@@ -143,6 +144,7 @@ export function instructions(b: Pick<Bot, "name" | "personality"> & Partial<Bot>
     `Recurring work can be put on a schedule with schedule_task; list_schedules, update_schedule and cancel_schedule manage the ones you have.`,
     `A message starting "[Scheduled: …]" is a recurring run, and ${driver} isn't waiting on it. Do the work, then stay quiet unless something needs them: an alert rule in the task's SKILL.md fired, something failed (a login expired), they must act, or the digest is due. With nothing notable, your whole reply is one line: "QUIET: <what you checked>". Keep a recurring task's data in a SQLite ledger and show it with a bound dashboard (render_surface with source and queries), so a run only adds rows and never re-publishes a report.`,
     memories.length ? `Your own memory (only you see it; rewrite one by passing its id to remember, forget removes it):\n${memories.map((m) => `- [${m.id}] ${m.text}`).join("\n")}` : "",
+    skills ? `Your skills (load one with skill_view before a task it covers):\n${skills}` : "",
     engram ? engramBlock(driver, engram, b.engram_scope) : "",
     b.kind === "chief" ? `You are the Crew Chief, the only built-in crew member. When you notice recurring work that deserves its own crew member (the same kind of task 3+ times), call propose_crew_member. ${driver} always reviews and approves a hire; you can't create one yourself.` : "",
     b.kind === "chief" ? crewRoster(b as Bot, driver) : `The Crew Chief may ask you something on ${driver}'s behalf. Answer it fully in one reply; that reply goes back to the Chief.`,
@@ -250,6 +252,8 @@ export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { br
     { type: "function", name: "forget", description: "Forget a memory by id.", inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
     { type: "function", name: "query_ledger", description: "Read a crew member's SQLite ledger with one SELECT (read-only; 500 rows). member: their name (omit for your own). Omit source to list their ledgers. Private members' ledgers stay private. Use it to answer from another member's data instead of asking them.",
       inputSchema: { type: "object", properties: { member: { type: "string" }, source: { type: "string", description: "Ledger path under their /bot/work, e.g. grocery/ledger.db" }, sql: { type: "string" } } } },
+    { type: "function", name: "skill_view", description: "Load one of your skills (/bot/work/skills/<name>/SKILL.md), or a file inside it (file: references/x.md, scripts/y.py). Load the skill before doing a task it covers.",
+      inputSchema: { type: "object", properties: { name: { type: "string" }, file: { type: "string" } }, required: ["name"] } },
     { type: "function", name: "read_thread", description: "Read one of your threads in full: every message from the driver and you, each tool call as one line with its outcome, pit stops, errors and notes. Paged (about 20 KB); pass after from the last page to continue. Use it when reviewing past work; find_threads gives the ids.",
       inputSchema: { type: "object", properties: { thread: { type: "string", description: "Thread id or link" }, after: { type: "integer" } }, required: ["thread"] } },
     { type: "function", name: "find_threads", description: "Search your own past threads (titles and transcripts) when the driver asks to find, reopen or resume an earlier conversation. Returns matching threads, best first, with links. Words, names and phrases from that conversation make good queries.",

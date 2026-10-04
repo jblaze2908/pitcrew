@@ -9,11 +9,12 @@ import { useFetch } from "../../lib/useFetch";
 
 interface Table { name: string; rows: number | null; columns: string[] }
 interface Ledger { path: string; size: number; asOf: number | null; tables: Table[]; error?: string }
+interface Skill { name: string; description: string; size: number; uses: number; last_used: number | null; stale: boolean }
 interface Board { id: string; title: string; saved: number; thread_id: string; created_at: number; source: string; queries: string[] }
 type Preview = { columns: string[]; rows: Record<string, unknown>[] } | { error: string };
 
 export function DataTab({ b }: { b: BotCard }) {
-  const { data, reload } = useFetch(() => api.get<{ ledgers: Ledger[]; dashboards: Board[] }>(`/api/bots/${b.id}/data`), [b.id]);
+  const { data, reload } = useFetch(() => api.get<{ ledgers: Ledger[]; dashboards: Board[]; skills: Skill[] }>(`/api/bots/${b.id}/data`), [b.id]);
   if (!data) return null;
   return (
     <div className="col">
@@ -21,6 +22,14 @@ export function DataTab({ b }: { b: BotCard }) {
         <p className="pc-lab">{`Ledgers · ${data.ledgers.length}`}</p>
         {data.ledgers.length ? data.ledgers.map((l) => <LedgerCard key={l.path} b={b} l={l} />)
           : <div className="pc-card tight"><p className="empty">{`${b.name} keeps no ledgers yet. A recurring task stores its data in a SQLite file under /bot/work.`}</p></div>}
+      </section>
+      <section className="col">
+        <p className="pc-lab">{`Skills · ${data.skills.length}`}</p>
+        {data.skills.length ? <div className="pc-card tight"><table className="tbl"><tbody>{data.skills.map((k) => (
+          <tr key={k.name}><td className="pc-m">{k.name}</td><td className="small muted">{k.description}</td>
+            <td className="num small faint">{k.uses ? `${k.uses} load${k.uses === 1 ? "" : "s"} · last ${ago(k.last_used)}` : "never loaded"}{k.stale ? " · stale" : ""}</td></tr>))}</tbody></table>
+          <p className="small faint">{`In /bot/work/skills, a git repo: history under Files → Projects.`}</p></div>
+          : <div className="pc-card tight"><p className="empty">{`No skills yet. ${b.name} writes them in /bot/work/skills as it learns how a task runs.`}</p></div>}
       </section>
       <section className="col">
         <p className="pc-lab">{`Dashboards · ${data.dashboards.length}`}</p>
