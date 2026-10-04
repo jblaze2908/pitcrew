@@ -63,8 +63,8 @@ function ensureBrainDir(b: { id: string }) {
   const uid = brainUid(b.id), d = brainDir(b.id);
   migrateCodexHome(b.id, uid);
   mkdirSync(`${ROOT}/brains/_usage`, { recursive: true }); chownSync(`${ROOT}/brains/_usage`, CREW_UID, CREW_UID); chmodSync(`${ROOT}/brains/_usage`, 0o700);
-  for (const x of ["", "/home"]) { mkdirSync(d + x, { recursive: true }); chownSync(d + x, uid, CREW_UID); }
-  chmodSync(d, 0o700);
+  for (const x of ["", "/home", "/generated_images"]) { mkdirSync(d + x, { recursive: true }); chownSync(d + x, uid, CREW_UID); }
+  chmodSync(d, 0o700); chmodSync(`${d}/generated_images`, 0o750);
   return uid;
 }
 
@@ -78,8 +78,9 @@ export function brainConfig(b: Bot, servers: McpServer[] = brainMcp(b)) {
     // computer tools itself, behind jev.
     // Built-ins Pitcrew never serves: goal tools, request_user_input (answered "unhandled") and the skills catalogue.
     // ~7 KB less per model request (measured 2026-10-01, codex 0.156.1, keys checked with --strict-config).
+    // image_generation stays on: Codex offers image_gen only on ChatGPT auth, billed to the plan (notify.ts saves results).
     `[features]`, ...["apps", "plugins", "remote_plugin", "plugin_sharing", "recommended_plugins", "tool_suggest", "skill_mcp_dependency_install",
-      "browser_use", "browser_use_external", "browser_use_full_cdp_access", "computer_use", "in_app_browser", "image_generation", "multi_agent", "realtime_conversation", "goals"].map((f) => `${f} = false`),
+      "browser_use", "browser_use_external", "browser_use_full_cdp_access", "computer_use", "in_app_browser", "multi_agent", "realtime_conversation", "goals"].map((f) => `${f} = false`),
     `tool_call_mcp_elicitation = true`, ``,
     `[skills]`, `include_instructions = false`, ``, `[tools.experimental_request_user_input]`, `enabled = false`, ``,
     // Model traffic goes through the brain's loopback proxy: Anthropic prompt caching + billed-cost tap.
@@ -305,13 +306,15 @@ export class Computer {
   async #start() {
     await makeRoom(this);
     const b = this.bot, id = b.id, net = `pc-net-${id}`;
-    ensureDirs(id);
+    ensureDirs(id); ensureBrainDir(b);
     if (!(await docker(["network", "inspect", net])).ok) await docker(["network", "create", "--label", "pitcrew=computer", net]);
     await docker(["rm", "-f", this.name]);
     const r = await docker(["run", "-d", "--rm", "--name", this.name, "--hostname", id.slice(0, 20).replace(/[^a-z0-9-]/gi, "-"), "--label", "pitcrew=computer",
       "--cpus", "1.5", "--memory", "2g", "--pids-limit", "768", "--shm-size", "512m",
       "--read-only", "--tmpfs", "/tmp:size=768m,mode=1777", "--tmpfs", `/home/crew:size=128m,uid=${CREW_UID},gid=${CREW_UID},mode=700`,
       "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--network", net, "-v", `${botDir(id)}:/bot`, ...policyMount(id),
+      // Codex's image_gen saves in the brain and points the agent at that path; this makes the path real on the computer.
+      "-v", `${brainDir(id)}/generated_images:/brains/${id}/generated_images:ro`,
       "-e", `PITCREW_HUE=${HEX[b.hue] || HEX.c1}`, "-e", `PITCREW_NAME=${b.name.replace(/[^\w .'-]/g, "")}`,
       // Task folders are git repos (see crew.ts); commits carry the member as author, with no git config needed.
       ...gitIdentity(b), IMAGE]);

@@ -96,6 +96,7 @@ export function readThread(threadId: string, after = 0) {
     const line = r.kind === "user" ? `Driver${d.via && d.via !== "driver" ? ` (${d.via})` : ""}: ${d.text || ""}`
       : r.kind === "agent" ? `Agent: ${d.text || ""}`
       : r.kind === "tool" && d.type !== "scriptResult" && d.type !== "script" ? `  · ${d.status || "?"} · ${String(d.title || d.tool || d.type).slice(0, 160)}${d.error ? ` · ${String(d.error).slice(0, 160)}` : ""}`
+      : r.kind === "image" ? `  · image · ${(d.paths || []).map((p: string) => `/bot/work/${p}`).join(", ")} · ${String(d.caption || "").slice(0, 160)}`
       : r.kind === "pitstop" ? `  · pit stop ${d.id}` : r.kind === "error" ? `Error: ${d.text}` : r.kind === "system" ? `Note: ${d.text}` : null;
     if (line == null) { last = r.id; continue; }
     if (size + line.length > READ_PAGE && out.length) break;

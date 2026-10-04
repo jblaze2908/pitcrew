@@ -11,6 +11,7 @@ import { short, summariseArgs, debugArgs } from "./util.js";
 import { connName } from "../engram.js";
 import { scanScripts } from "./scripts.js";
 import { engramUntrusted, taint } from "./taint.js";
+import { saveImage } from "../images.js";
 
 // A Codex thread item (commandExecution, mcpToolCall, fileChange, …) as the app-server sends it.
 type Item = Record<string, any>;
@@ -21,6 +22,7 @@ function toolTitle(it: Item) {
     case "dynamicToolCall": return `${it.tool}`;
     case "fileChange": return `Edited ${(it.changes || []).map((c) => c.path).join(", ").slice(0, 200)}`;
     case "webSearch": return `Searched “${short(it.query, 120)}”`;
+    case "imageGeneration": return "Image generation";
     default: return it.type;
   }
 }
@@ -43,7 +45,7 @@ export function onNotify(c: Brain, method: string, p: Record<string, any>) {
       // A Code Mode script's nested call: show the script (from the rollout) before its calls.
       if (typeof it.id === "string" && it.id.startsWith("exec-")) scanScripts(threadId, a?.turnId, c.bot.id, p.threadId);
       // Browser and pixel tools announce themselves from their own handler, with the grounded element.
-      if (["commandExecution", "mcpToolCall", "fileChange", "webSearch"].includes(it.type) || (it.type === "dynamicToolCall" && !/^(browser|computer)_/.test(it.tool)))
+      if (["commandExecution", "mcpToolCall", "fileChange", "webSearch", "imageGeneration"].includes(it.type) || (it.type === "dynamicToolCall" && !/^(browser|computer)_/.test(it.tool)))
         bus.emit("activity", { threadId, botId: c.bot.id, text: toolTitle(it) });
       break;
     }
@@ -60,6 +62,7 @@ export function onNotify(c: Brain, method: string, p: Record<string, any>) {
         addEvent(threadId, a?.turnId, "system", { text: "Engram returned untrusted content. For the next 10 minutes, sending, paying, signing in, sharing and deleting ask you first." });
       else if (it.type === "fileChange") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: it.status });
       else if (it.type === "webSearch") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: "completed" });
+      else if (it.type === "imageGeneration") codexImage(c.bot.id, threadId, a?.turnId, it);
       else if (it.type === "contextCompaction") addEvent(threadId, a?.turnId, "system", { text: "Thread compacted." });
       break;
     }
@@ -75,4 +78,18 @@ export function onNotify(c: Brain, method: string, p: Record<string, any>) {
     case "error": if (!p.willRetry) addEvent(threadId, a?.turnId, "error", { text: short(p.error?.message || "Model error", 500) }); break;
     case "thread/compacted": addEvent(threadId, null, "system", { text: "Thread compacted." }); break;
   }
+}
+
+// Codex's image_gen (ChatGPT plan): the PNG comes base64 in the item; a copy goes to out/images for the Library and the thread.
+function codexImage(botId: string, threadId: string, turnId: string | undefined, it: Item) {
+  if (it.status !== "completed" || typeof it.result !== "string" || !it.result) {
+    const limit = it.failure?.type === "usageLimitExceeded";
+    return addEvent(threadId, turnId, "tool", { type: it.type, title: toolTitle(it), status: "failed",
+      error: limit ? `The ChatGPT plan's image limit is used up${it.failure.resetsAt ? ` until ${new Date(it.failure.resetsAt * 1000).toISOString().slice(0, 16)} UTC` : ""}.` : "Image generation failed." });
+  }
+  const caption = short(String(it.revisedPrompt || "Image"), 300);
+  try {
+    const path = saveImage(botId, Buffer.from(it.result, "base64"), "png", caption);
+    addEvent(threadId, turnId, "image", { botId, paths: [path], caption, model: "gpt-image-2 · ChatGPT plan", cost: null });
+  } catch (e: any) { addEvent(threadId, turnId, "error", { text: `The image was made but couldn't be saved: ${short(e.message, 200)}` }); }
 }

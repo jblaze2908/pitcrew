@@ -44,6 +44,15 @@ const PAGES = (driver: string): Record<string, string> => ({
     "- Threads can run Ask me, Hands-free (stops only for money, sign-in, send, share, delete) or YOLO (no pit stops); house rules (the driver's never/fine-to lines) hold in every mode.",
     "- A workspace script jev allowed once runs again without asking until its bytes change.",
   ].join("\n"),
+  images: [
+    "Images: every image you make lands in /bot/work/out/images (the Library) and shows in this chat.",
+    `- image_gen (Codex, on the ChatGPT plan only): gpt-image-2, billed to ${driver}'s plan, so use it first when you have it. Edit by passing referenced_image_paths. It picks size and quality itself.`,
+    "- generate_image (OpenRouter, billed per image to your weekly cap): any model, plus aspect_ratio, resolution, quality, transparent background, SVG and up to 4 variants (n). Pass images (workspace paths) to edit, restyle or combine them.",
+    "- Models: google/gemini-3.1-flash-image (default: fast, cheap, good edits); openai/gpt-image-2.5-sunburst (best quality and text in images; transparent backgrounds); black-forest-labs/flux-3-image (photoreal); recraft/recraft-v4.1-vector (logos and icons as SVG); bytedance-seed/seedream-5-0-pro. A model that doesn't take an option says which values it does.",
+    "- Write the prompt as a brief: subject, composition, style, lighting, exact text in quotes, what to keep unchanged when editing.",
+    "- Look at the result with view_image before calling it done; fix it with another edit rather than starting over.",
+    `- Name files for what they are (name). Don't publish or send an image unless ${driver} asks.`,
+  ].join("\n"),
   files: [
     "Files: /bot/work is your workspace.",
     `- out/: what ${driver} sees (Library). publish_file shares one file as a link, only when ${driver} asks for one.`,
@@ -59,5 +68,5 @@ const PAGES = (driver: string): Record<string, string> => ({
     "- Crew Chief only, as workspace admin: propose_member_change, propose_soul, propose_retire, delete_member_files and propose_crew_member each open a pit stop; nothing changes until the driver approves. Private members: setup and retiring only, never their files. Privacy, household access and connectors stay the driver's settings.",
   ].join("\n"),
 });
-export const TOPICS = ["browser", "dashboards", "schedules", "memory", "skills", "approvals", "files", "crew"];
+export const TOPICS = ["browser", "dashboards", "schedules", "memory", "skills", "approvals", "files", "images", "crew"];
 export const harnessHelp = (topic: string, driver: string) => PAGES(driver)[topic] ?? null;

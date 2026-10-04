@@ -77,7 +77,7 @@ export interface Thread {
   autonomy: string;
 }
 
-export type EventKind = "user" | "agent" | "tool" | "system" | "error" | "shot" | "changes" | "pitstop" | "surface" | "delegation" | "plan" | "learned";
+export type EventKind = "user" | "agent" | "tool" | "system" | "error" | "shot" | "image" | "changes" | "pitstop" | "surface" | "delegation" | "plan" | "learned";
 export interface ThreadEvent<D = Record<string, any>> { id: number; thread_id: string; turn_id: string | null; kind: EventKind; data: D; ts: number }
 
 /** A message waiting for the thread's run to end; it enters the transcript only when it goes to the member. via: the trigger. */
