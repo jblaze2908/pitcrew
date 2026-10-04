@@ -99,6 +99,8 @@ CREATE TABLE IF NOT EXISTS turn_memories (
 // Messages waiting for a thread's run to end (runtime/queue.ts); in the store so a restart doesn't drop them.
 // Workspace scripts jev allowed or the driver approved, by content hash: the same bytes run again without asking.
 db.exec(`CREATE TABLE IF NOT EXISTS script_trust (bot_id TEXT NOT NULL, sha TEXT NOT NULL, path TEXT NOT NULL, by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY(bot_id, sha))`);
+// Loads of a member's own skills through skill_view (runtime/skills.ts): usage and staleness.
+db.exec(`CREATE TABLE IF NOT EXISTS skill_usage (bot_id TEXT NOT NULL, name TEXT NOT NULL, uses INTEGER NOT NULL, last_used INTEGER NOT NULL, PRIMARY KEY(bot_id, name))`);
 db.exec(`CREATE TABLE IF NOT EXISTS queued (
   id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, text TEXT NOT NULL, attachments TEXT NOT NULL DEFAULT '[]',
   trigger TEXT NOT NULL, display TEXT, created_at INTEGER NOT NULL);

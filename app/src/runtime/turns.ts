@@ -20,6 +20,7 @@ import { taint, tainted } from "./taint.js";
 import { postLearned } from "./learned.js";
 import { isUsageLimit, armResume, clearResume } from "./resume.js";
 import { nameFromConversation } from "./titles.js";
+import { listSkills, skillIndex } from "./skills.js";
 import type { Bot } from "../../shared/types.js";
 
 export const isRunning = (threadId: string) => active.has(threadId);
@@ -124,7 +125,7 @@ export async function startTurn(threadId: string, text: string, attachments: str
     // The member's own memory (agent tier, capped; tools.ts AGENT_MEMORY_MAX). Facts about the driver come from Engram's
     // profile and search; the member's Engram memories aren't listed, so the prompt doesn't grow with them.
     const mems = all<{ id: string; text: string }>("SELECT id,text FROM memory WHERE bot_id=? AND forgotten_at IS NULL ORDER BY created_at LIMIT 80", b.id);
-    const common = { model: b.model, modelProvider: b.provider, cwd: "/bot/work", developerInstructions: instructions(b, mems ?? [], egCtx) };
+    const common = { model: b.model, modelProvider: b.provider, cwd: "/bot/work", developerInstructions: instructions(b, mems ?? [], egCtx, skillIndex(listSkills(b.id))) };
     let refreshed: string | null = null;
     if (!codexId) {
       const st = await c.request("thread/start", { ...common, sandbox: "danger-full-access", approvalPolicy: "untrusted", environments: ENVS, dynamicTools: tools }, 120000);

@@ -13,6 +13,7 @@ import { signedIn, type Env } from "../http/guard.js";
 import { readJson, jsonBody, raw, text, trimmed, flag, field, pick } from "../http/body.js";
 import { botCard, LEARNED, liveLearned } from "./views.js";
 import { ledgerOverview, tablePreview } from "../ledger.js";
+import { listSkills } from "../runtime/skills.js";
 import { json } from "../db.js";
 import type { LearnedRow, PitstopRow, ScheduleRow } from "../models.js";
 
@@ -55,7 +56,7 @@ export const crewRoutes = new Hono<Env>()
     const id = c.req.param("id"); member(id);
     const dashboards = all<{ id: string; title: string; saved: number; thread_id: string; created_at: number; spec: string }>("SELECT id,title,saved,thread_id,created_at,spec FROM surfaces WHERE bot_id=? AND json_extract(spec,'$.source') IS NOT NULL ORDER BY created_at DESC", id)
       .map(({ spec, ...s }) => { const x = json<{ source?: string; queries?: Record<string, string> }>(spec, {}); return { ...s, source: x.source || "", queries: Object.keys(x.queries || {}) }; });
-    return c.json({ ledgers: await ledgerOverview(id), dashboards });
+    return c.json({ ledgers: await ledgerOverview(id), dashboards, skills: listSkills(id) });
   })
   .get("/api/bots/:id/data/table", signedIn, async (c) => { const id = c.req.param("id"); member(id); return c.json(await tablePreview(id, c.req.query("source") || "", c.req.query("table") || "")); })
   .get("/api/bots/:id/threads", signedIn, (c) => { const id = c.req.param("id"); member(id); return c.json(R.findThreads(id, c.req.query("q") || "", { limit: 30 })); })
