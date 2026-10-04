@@ -431,12 +431,13 @@ svg text{fill:var(--ink-3);font:10px var(--font-data)}
 @keyframes paint-pop{0%{transform:scale(.3)}70%{transform:scale(1.15)}100%{transform:scale(1)}}
 .img-wrap{position:relative}
 /* images in a thread (Events.tsx Images): 440px, actions on hover, older versions shrink; click opens the viewer */
+.img-card{min-width:0;max-width:100%}
 .img-wrap{position:relative;width:fit-content;max-width:100%}
 .shot-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:min(460px,100%)}
 .img-tile{position:relative;width:fit-content;max-width:100%}
 .shot-grid .img-tile{width:auto}
 .img-open{display:block;padding:0;border:0;background:none;cursor:zoom-in;line-height:0;max-width:100%}
-.img-card .img-open img{display:block;max-width:min(440px,100%);max-height:440px;width:auto;height:auto;border:1px solid var(--line);border-radius:12px}
+.img-card .img-open img{display:block;max-width:min(440px,calc(100vw - 100px));max-height:440px;width:auto;height:auto;border:1px solid var(--line);border-radius:12px}
 .img-card .shot-grid .img-open img{max-width:100%;width:100%;aspect-ratio:1;object-fit:cover}
 .img-card.old .img-open img{max-width:150px;max-height:150px;opacity:.8}
 .img-tile.kept .img-open img{box-shadow:0 0 0 2px var(--in)}
@@ -452,7 +453,7 @@ svg text{fill:var(--ink-3);font:10px var(--font-data)}
 .img-card.old figcaption{flex-direction:row}
 .img-line{display:flex;flex-wrap:wrap;gap:0 6px}.img-line>*+*:before{content:"· ";color:var(--ink-3)}
 .img-ver{font:500 12px/1.4 var(--font-data);color:var(--ink)}
-.img-prompt{display:flex;gap:8px;padding:0;border:0;background:none;color:var(--ink-2);font:inherit;text-align:left;cursor:pointer;min-width:0}
+.img-prompt{display:flex;gap:8px;max-width:100%;padding:0;border:0;background:none;color:var(--ink-2);font:inherit;text-align:left;cursor:pointer;min-width:0}
 .img-prompt span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .img-prompt u{flex:none;color:var(--ink-2)}
 .img-prompt.full span{white-space:normal}
@@ -481,7 +482,7 @@ svg text{fill:var(--ink-3);font:10px var(--font-data)}
 .vw-fam button.on{background:var(--surface-3);color:var(--ink)}
 .vw-fam button.kept img{box-shadow:0 0 0 2px var(--in)}
 .vw-tools{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
-.vw-stage{position:relative;display:grid;place-items:center;padding:24px 88px;min-height:0}
+.vw-stage{position:relative;display:flex;align-items:center;justify-content:center;padding:24px 88px;min-height:0;overflow:hidden}
 .vw-img{display:block;max-width:100%;max-height:100%;border-radius:12px;object-fit:contain}
 .vw-cmp{position:relative;line-height:0;max-width:100%;max-height:100%;user-select:none}
 .vw-cmp img{display:block;max-width:100%;max-height:calc(100vh - 230px);border-radius:12px}
