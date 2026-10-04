@@ -59,10 +59,16 @@ const WRITES_ANYWAY = /^find\b.*\s-(exec|execdir|ok|okdir|delete|fprint\w*|fls)\
 // Command substitution, heredocs and process substitution hide a second command from the split below.
 const HIDDEN = /\$\(|`|<<|<\(|>\(/;
 const WS_WRITE = /^(mkdir|cp|mv|touch)\s/;
+// Local git in a task folder: making a repo, staging, committing and reading history. Nothing that talks to a remote,
+// runs a hook-path or config change, or rewrites history: those go to jev.
+const GIT_LOCAL = /^git(?:\s+-C\s+(\S+))?\s+(init|add|commit|status|log|diff|show|mv|rm|restore)\b/;
 // No $, quotes, ~ or braces: an expansion could step outside /bot/work after this check.
 const inWorkspace = (p: string) => /^\/bot\/work\/[\w.\/*@%,+:=-]*$/.test(p) && !p.split("/").includes("..");
 // Flags with values (--target-directory=/etc, -t/etc) could name a path outside the workspace, so only bare short flags pass.
-const wsWrite = (p: string) => WS_WRITE.test(p) && p.split(/\s+/).slice(1).every((t) => /^-[a-zA-Z]+$/.test(t) || inWorkspace(t));
+const wsWrite = (p: string) => (WS_WRITE.test(p) && p.split(/\s+/).slice(1).every((t) => /^-[a-zA-Z]+$/.test(t) || inWorkspace(t))) || gitLocal(p);
+// cd into the workspace: later parts then run there (a git without -C included).
+const cdIn = (p: string) => { const m = /^cd\s+(\S+)$/.exec(p); return !!m && inWorkspace(m[1]); };
+const gitLocal = (p: string) => { const m = GIT_LOCAL.exec(p); return !!m && (!m[1] || inWorkspace(m[1])) && !/\s--?(exec|upload-pack|receive-pack|git-dir|work-tree)\b|\s-c\s|core\.hooksPath/.test(p); };
 
 // Labels that look like credentials or payment data: typing into these is signin/pay, never a draft.
 const SECRET_KINDS: [string, RegExp][] = [
@@ -104,7 +110,7 @@ export function ruleVerdict(call: Call, policy: Policy = DEFAULT_POLICY): Verdic
     if (HIDDEN.test(cmd)) return null;
     const parts = cmd.split(/\s*(?:&&|\|\||;|\||&|\n)\s*/);
     const redirects = cmd.match(/>+\s*[^\s;&|]*/g) || [];
-    if (!parts.every((p) => (READ_ONLY.test(p) && !WRITES_ANYWAY.test(p)) || wsWrite(p))) return null;
+    if (!parts.every((p) => (READ_ONLY.test(p) && !WRITES_ANYWAY.test(p)) || wsWrite(p) || cdIn(p))) return null;
     if (!redirects.length && !parts.some(wsWrite)) return ok("read", "read-only commands");
     if (redirects.every((r) => inWorkspace(r.replace(/^>+\s*/, "")))) return ok("write_workspace", "writes only inside /bot/work");
     return null;

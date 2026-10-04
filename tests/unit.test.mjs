@@ -830,11 +830,11 @@ test("the driver sees each member's ledgers, tables, row counts and newest rows;
   assert.equal((await L.ledgerOverview("b_view"))[0].tables.find((t) => t.name === "orders").rows, 60, "still there");
 });
 
-test("files moved into .scratch read as tidied, not deleted", async () => {
-  const { scratchNames } = await import("../app/dist/src/snapshot.js");
-  mkdirSync(`${root}/bots/b_tidy/work/.scratch/grocery-archive/details`, { recursive: true });
-  writeFileSync(`${root}/bots/b_tidy/work/.scratch/grocery-archive/bulk_probe.mjs`, "x");
-  writeFileSync(`${root}/bots/b_tidy/work/.scratch/grocery-archive/details/order_1.yml`, "x");
-  assert.deepEqual([...scratchNames("b_tidy")].sort(), ["bulk_probe.mjs", "order_1.yml"]);
-  assert.equal(scratchNames("b_none").size, 0);
+test("local git in a task folder is a workspace write; remotes, hooks and other dirs still go to jev", async () => {
+  const J = await import("../app/dist/src/jev.js");
+  const v = (cmd) => J.ruleVerdict({ kind: "shell", command: `/bin/sh -lc '${cmd}'`, cwd: "/bot/work" })?.decision ?? "jev";
+  for (const cmd of ["git init grocery", "git -C /bot/work/grocery add update.py SKILL.md", "git -C /bot/work/grocery commit -m \"Pace detail reads to avoid 429\"",
+    "cd /bot/work/grocery && git status && git log --oneline -5", "git -C /bot/work/grocery diff HEAD~1"]) assert.equal(v(cmd), "allow", cmd);
+  for (const cmd of ["git push origin main", "git -C /etc init", "git -c core.hooksPath=/tmp commit -m x", "git remote add o https://x.example/r.git", "git config core.hooksPath /tmp", "git --git-dir=/other commit -m x", "cd /etc && git init", "cd /bot/work/../.. && git status"])
+    assert.notEqual(v(cmd), "allow", cmd);
 });

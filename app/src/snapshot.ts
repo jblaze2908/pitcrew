@@ -2,7 +2,7 @@
 // Runs twice per turn (start, end). Cost: one lstat per file; files are re-hashed only when size or mtime moved, using
 // the bot's previous manifest. Bounded at MAX_FILES; text contents ≤ MAX_TEXT are kept, deduped by hash, in a
 // root-only shadow dir outside the bot's mount, so a crew member can't see or rewrite its own history.
-import { lstatSync, readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, type Dirent } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { botDir, ROOT } from "./computer.js";
 
@@ -83,16 +83,3 @@ export function objectText(id: string, hash: string) {
   try { return readFileSync(`${shadow(id)}/objects/${hash}`, "utf8"); } catch { return null; }
 }
 
-// Names of files in the member's .scratch (bounded walk: 5,000 files), so a run that tidied working files away reads as
-// "tidied", not as hundreds of deletions. Only walked when a run deleted something.
-export function scratchNames(id: string) {
-  const names = new Set<string>(), root = `${botDir(id)}/work/.scratch`;
-  const walk = (dir: string, depth: number) => {
-    if (depth > 6 || names.size >= 5000) return;
-    let ents: Dirent[] = [];
-    try { ents = readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const e of ents) { if (e.isDirectory()) walk(`${dir}/${e.name}`, depth + 1); else names.add(e.name); }
-  };
-  walk(root, 0);
-  return names;
-}

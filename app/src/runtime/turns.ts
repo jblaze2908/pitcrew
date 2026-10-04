@@ -5,7 +5,7 @@ import { one, all, run, now, uid, json, getSetting } from "../db.js";
 import { getBot, instructions, dynamicTools, engramBlock } from "../crew.js";
 import { botDir, toolManifest } from "../computer.js";
 import { providerReady, estimateCost } from "../providers.js";
-import { snapshot, changes, scratchNames } from "../snapshot.js";
+import { snapshot, changes } from "../snapshot.js";
 import { bus } from "./bus.js";
 import { active, byCodex, turnWaiters, wakeFor, type TurnEnd } from "./state.js";
 import { enqueue, peekQueued, takeQueued, requeue, queuedThreads } from "./queue.js";
@@ -219,15 +219,9 @@ export async function finishTurn(threadId: string, status: string, error?: strin
   // What changed on disk during this turn, however it was changed.
   if (a.snap) try {
     const ch = changes(b.id, a.snap, snapshot(b.id));
-    if (ch.length) {
-      run("UPDATE turns SET changes=? WHERE id=?", JSON.stringify(ch), a.turnId);
-      // Deletions whose file now sits in .scratch were moved there, not lost: the card counts them as tidied, and lists
-      // only what the driver might care about. The full list stays on the turn for Review changes.
-      const scratch = ch.some((c) => c.status === "deleted") ? scratchNames(b.id) : null;
-      const tidied = scratch ? ch.filter((c) => c.status === "deleted" && scratch.has(c.path.split("/").pop()!)) : [];
-      const shown = ch.filter((c) => !tidied.includes(c));
-      addEvent(threadId, a.turnId, "changes", { turnId: a.turnId, botId: b.id, count: shown.length, tidied: tidied.length, files: shown.slice(0, 12).map((c) => ({ path: c.path, status: c.status, lines: c.lines })) });
-    }
+    // Kept on the turn for Crew → Files; not drawn in the thread, where there's nothing to do with it. What matters is
+    // committed in the task's git repo, and deliverables land in /bot/work/out (Library).
+    if (ch.length) run("UPDATE turns SET changes=? WHERE id=?", JSON.stringify(ch), a.turnId);
   } catch {}
   postLearned(threadId, a.turnId, b.id);
   // A delegated thread's answer carries what it read, so untrusted content also taints the thread that asked.
