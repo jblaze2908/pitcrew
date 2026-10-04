@@ -3,7 +3,7 @@
 // browser_read is ours: a gated browser_snapshot turned into text. Page JS and Playwright code run like any other tool:
 // gated per call (gate.ts never lets a fully allowed site skip jev for them), with secrets masked and size capped.
 import { getBot } from "../crew.js";
-import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { chownSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { PW_SETTLE_MS, botDir, type Brain, type Rpc } from "../computer.js";
 import type { ToolResult } from "../shots.js";
@@ -128,17 +128,29 @@ async function replayRequest(br: Brain, threadId: string, p: ToolCall): Promise<
   if (typeof a.save === "string" && a.save) {
     const file = workFile(b.id, a.save);
     if (!file) return say(`${head}\nsave must be a path under /bot/work; nothing was saved.`, false);
-    writeFileSync(file, res.text);
+    writeAsBot(b.id, file, res.text);
     return say(`${head}\nSaved ${(res.text.length / 1024).toFixed(0)} KB to ${a.save}.`);
   }
   return say(`${head}\n${res.text.length > REPLAY_MAX ? `${res.text.slice(0, REPLAY_MAX)}\n…\nTruncated at ${REPLAY_MAX / 1000} KB of ${(res.text.length / 1000).toFixed(0)} KB: pass save (a path under /bot/work) for the whole body.` : res.text}`);
 }
-// A /bot/work path as its host file, with its folder made, or null when it would leave the work dir.
+// A /bot/work path as its host file, with its folder made, or null when it would leave the work dir. Folders it makes
+// belong to the work dir's owner (the bot's uid), never root: the control plane runs as root, the bot doesn't.
 export function workFile(botId: string, path: string) {
   const rel = path.replace(/^\/bot\/work\//, "");
   if (!rel || rel.startsWith("/") || rel.split("/").includes("..")) return null;
   const root = `${botDir(botId)}/work`, f = `${root}/${rel}`;
-  try { mkdirSync(dirname(f), { recursive: true }); return realpathSync(dirname(f)).startsWith(realpathSync(root)) ? f : null; } catch { return null; }
+  try {
+    const made = mkdirSync(dirname(f), { recursive: true });
+    if (!realpathSync(dirname(f)).startsWith(realpathSync(root))) return null;
+    if (made) { const o = statSync(root); for (let d = dirname(f); d.length >= made.length; d = dirname(d)) chownSync(d, o.uid, o.gid); }
+    return f;
+  } catch { return null; }
+}
+// Writes a file the bot must be able to change afterwards: owned like its work dir.
+export function writeAsBot(botId: string, file: string, data: string) {
+  writeFileSync(file, data);
+  const o = statSync(`${botDir(botId)}/work`);
+  try { chownSync(file, o.uid, o.gid); } catch {}
 }
 
 // Codex hands a dynamic tool's result to an exec script (nested call ids "exec-…") as ONE string, its text and image
