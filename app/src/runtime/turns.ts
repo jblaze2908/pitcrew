@@ -94,7 +94,7 @@ export async function startTurn(threadId: string, text: string, attachments: str
   const warm = warmPlan(threadId);
   if (warm) computer(b).prewarm(warm.desktop);
   const turnId = uid("tu");
-  active.set(threadId, { turnId, codexTurnId: null, base: null, total: null, last: null, usageFrom: logSize(b.id) });
+  active.set(threadId, { turnId, codexTurnId: null, base: null, total: null, last: null, usageFrom: logSize(b.id), ...(trigger === "schedule" ? { quietFrom: t.updated_at } : {}) });
   run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,provider,model,started_at) VALUES(?,?,?,?,?,?,?,?)", turnId, threadId, b.id, "starting", trigger, b.provider, b.model, now());
   setThreadStatus(threadId, "running");
   try {
@@ -227,6 +227,9 @@ export async function finishTurn(threadId: string, status: string, error?: strin
   const from = tainted(threadId) && t.origin ? json<{ fromThread?: string }>(t.origin, {}).fromThread : null;
   if (from && taint(from)) addEvent(from, null, "system", { text: `${b.name}'s answer came from a thread with untrusted content. For the next 10 minutes, sending, paying, signing in, sharing and deleting ask you first.` });
   setThreadStatus(threadId, "idle");
+  // A scheduled run with nothing notable ends "QUIET: …": the thread keeps its place instead of jumping to the top, and
+  // the web app folds the run to one line. Anything else is news and surfaces as usual.
+  if (a.quietFrom != null && status === "completed" && isQuiet(lastAgentText(threadId, a.turnId))) run("UPDATE threads SET updated_at=? WHERE id=?", a.quietFrom, threadId);
   bus.emit("turn", { threadId, turnId: a.turnId, status, cost: cost.usd, botId: b.id });
   if (wakeFor.has(threadId)) { const p = activePlan(threadId); if (p) { planLog(p.id, `Looked after ${wakeFor.get(threadId)}: no change`); emitPlan(planRow(p.id)!); } wakeFor.delete(threadId); }
   for (const w of turnWaiters.get(threadId)?.splice(0) || []) w({ turnId: a.turnId, status, cost: cost.usd });
@@ -296,4 +299,5 @@ export async function compact(threadId: string) {
 
 // The next run to finish on a thread, for whoever asked it something (delegation, plans).
 export const nextTurn = (threadId: string) => new Promise<TurnEnd>((resolve) => (turnWaiters.get(threadId) || turnWaiters.set(threadId, []).get(threadId)!).push(resolve));
+export const isQuiet = (text: string) => /^\s*QUIET\b/.test(text);
 export const lastAgentText = (threadId: string, turnId: string): string => json(one<{ data: string }>("SELECT data FROM events WHERE thread_id=? AND turn_id=? AND kind='agent' ORDER BY id DESC LIMIT 1", threadId, turnId)?.data, {}).text || "";
