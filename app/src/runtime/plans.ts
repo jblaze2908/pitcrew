@@ -5,7 +5,8 @@ import { one, run, now, uid, json, audit, getSetting } from "../db.js";
 import { getBot } from "../crew.js";
 import type { ToolResult } from "../shots.js";
 import type { Bot, Handoff } from "../../shared/types.js";
-import { active, queues, wakeFor } from "./state.js";
+import { active, wakeFor } from "./state.js";
+import { lastQueued, extendQueued } from "./queue.js";
 import { getThread, addEvent } from "./threads.js";
 import { sendMessage, interrupt, blockedReason, nextTurn, lastAgentText } from "./turns.js";
 import { pitStop } from "./pitstops.js";
@@ -34,8 +35,8 @@ function wakeChief(p: Plan, text: string, display: string, key: string | null = 
     return;
   }
   if (key) wakeFor.set(p.thread_id, key);
-  const q = queues.get(p.thread_id), last = q?.at(-1);
-  if (active.has(p.thread_id) && last?.trigger === "plan") { last.text += `\n\n${text}`; return; }
+  const last = lastQueued(p.thread_id);
+  if (active.has(p.thread_id) && last?.via === "plan") { extendQueued(p.thread_id, last.id, `\n\n${text}`); return; }
   sendMessage(p.thread_id, { text, trigger: "plan", mode: "queue", display }).catch((e) => addEvent(p.thread_id, null, "error", { text: e.message }));
 }
 function dispatchPlan(planId: string) {

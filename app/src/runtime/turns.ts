@@ -6,7 +6,8 @@ import { botDir, toolManifest } from "../computer.js";
 import { providerReady, estimateCost } from "../providers.js";
 import { snapshot, changes } from "../snapshot.js";
 import { bus } from "./bus.js";
-import { active, byCodex, queues, turnWaiters, wakeFor, type TurnEnd } from "./state.js";
+import { active, byCodex, turnWaiters, wakeFor, type TurnEnd } from "./state.js";
+import { enqueue, peekQueued, takeQueued, requeue, queuedThreads } from "./queue.js";
 import { getThread, addEvent, setThreadStatus, nameThread } from "./threads.js";
 import { brain, computer } from "./machines.js";
 import { weekSpend, logSize, billedUsage } from "./spend.js";
@@ -28,13 +29,16 @@ export async function sendMessage(threadId: string, { text: given, attachments =
   if (!text.trim() && !attachments.length) throw Object.assign(new Error("Say something"), { status: 400 });
   if (trigger === "driver" && text.trim() === "/refresh" && !attachments.length) return refresh(threadId);
   nameThread(t, text, attachments);
-  addEvent(threadId, null, "user", { text, attachments, via: trigger, ...(display ? { display } : {}) });
   const a = active.get(threadId);
+  // A queued message stays out of the transcript until it actually goes to the member (startQueued).
+  if (a && mode === "queue") return { queued: true, id: enqueue(threadId, { text, attachments, trigger, display }) };
+  const said = () => addEvent(threadId, null, "user", { text, attachments, via: trigger, ...(display ? { display } : {}) });
   if (a) {
-    if (mode === "queue") { (queues.get(threadId) || queues.set(threadId, []).get(threadId)!).push({ text, attachments, trigger }); addEvent(threadId, null, "system", { text: "Queued for after this run." }); return { queued: true }; }
     await brain(getBot(t.bot_id)!).request("turn/steer", { threadId: t.codex_id, expectedTurnId: a.codexTurnId, input: toInput(t.bot_id, text, attachments) });
+    said();
     return { steered: true };
   }
+  said();
   startTurn(threadId, text, attachments, trigger).catch((e) => {
     if (e.silent) return;
     addEvent(threadId, null, "error", { text: e.message });
@@ -199,8 +203,39 @@ export async function finishTurn(threadId: string, status: string, error?: strin
   bus.emit("turn", { threadId, turnId: a.turnId, status, cost: cost.usd, botId: b.id });
   if (wakeFor.has(threadId)) { const p = activePlan(threadId); if (p) { planLog(p.id, `Looked after ${wakeFor.get(threadId)}: no change`); emitPlan(planRow(p.id)!); } wakeFor.delete(threadId); }
   for (const w of turnWaiters.get(threadId)?.splice(0) || []) w({ turnId: a.turnId, status, cost: cost.usd });
-  const next = queues.get(threadId)?.shift();
-  if (next) startTurn(threadId, next.text, next.attachments, next.trigger).catch((e) => { if (!e.silent) addEvent(threadId, null, "error", { text: e.message }); });
+  // After a failure the queue waits for the driver: a broken brain or provider would otherwise fail every queued item in turn.
+  if (status !== "failed") startQueued(threadId);
+}
+
+/** Starts the thread's oldest queued message if nothing runs there. A blocked member (kill switch, cap, provider) leaves it
+ * at the head of the queue, so nothing is dropped; quiet skips the error line (boot and resume would repeat it per thread). */
+export function startQueued(threadId: string, quiet = false) {
+  if (active.has(threadId)) return false;
+  const t = getThread(threadId), b = t && getBot(t.bot_id), q = b && peekQueued(threadId);
+  if (!q) return false;
+  const why = blockedReason(b);
+  if (why) { if (!quiet) addEvent(threadId, null, "error", { text: `${why} Your queued message is still waiting.` }); return false; }
+  takeQueued(threadId, q.id);
+  addEvent(threadId, null, "user", { text: q.text, attachments: q.attachments, via: q.via, ...(q.display ? { display: q.display } : {}) });
+  startTurn(threadId, q.text, q.attachments, q.via).catch((e) => { if (!e.silent) { addEvent(threadId, null, "error", { text: e.message }); setThreadStatus(threadId, "idle"); } });
+  return true;
+}
+/** Threads with queued messages and no run, e.g. after a restart or a kill-switch resume. */
+export const idleQueued = () => queuedThreads().filter((id) => !active.has(id));
+export const startQueues = (quiet = true) => idleQueued().map((id) => startQueued(id, quiet)).filter(Boolean).length;
+
+/** The driver's "Send now": steers it into the running turn, or starts it. A failed delivery puts it back in place. */
+export async function sendQueuedNow(threadId: string, id: string) {
+  const t = getThread(threadId), q = peekQueued(threadId, id);
+  if (!t || !q) throw Object.assign(new Error("No such queued message"), { status: 404 });
+  if (!active.has(threadId)) { const why = blockedReason(getBot(t.bot_id)!); if (why) throw Object.assign(new Error(why), { status: 409 }); }
+  takeQueued(threadId, id);
+  try { return await sendMessage(threadId, { text: q.text, attachments: q.attachments, mode: "auto", trigger: q.via, display: q.display }); }
+  catch (e) { requeue(threadId, q); throw e; }
+}
+export function removeQueued(threadId: string, id: string) {
+  if (!takeQueued(threadId, id)) throw Object.assign(new Error("No such queued message"), { status: 404 });
+  return { ok: true };
 }
 
 export async function interrupt(threadId: string) {

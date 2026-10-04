@@ -5,7 +5,7 @@ import { startShotSweeper } from "../shots.js";
 import { bus } from "./bus.js";
 import { active } from "./state.js";
 import { getThread, addEvent, UNTITLED, titleFrom, isSmallTalk } from "./threads.js";
-import { interrupt, sendMessage } from "./turns.js";
+import { interrupt, sendMessage, startQueues } from "./turns.js";
 import { decide } from "./pitstops.js";
 import { tickSchedules } from "./schedules.js";
 
@@ -20,7 +20,7 @@ export async function killSwitch() {
   bus.emit("paused", { paused: true });
   return { inFlight };
 }
-export function resumeCrew() { setSetting("paused", "0"); audit("driver", "crew.resumed"); bus.emit("paused", { paused: false }); }
+export function resumeCrew() { setSetting("paused", "0"); audit("driver", "crew.resumed"); bus.emit("paused", { paused: false }); startQueues(); }
 
 /** Returns the turns this restart cut off; the caller resumes them once reapOrphans has restarted the brains. */
 export function bootRuntime() {

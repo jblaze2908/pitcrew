@@ -48,6 +48,7 @@ const cut = R.bootRuntime();
 await reapOrphans();
 // Only now: reapOrphans restarts the brain container, which kills any brain a resume had already started (exit 137).
 R.resumeCut(cut);
+R.startQueues(); // after resumeCut, so a resumed thread keeps its queue until that run ends
 await reapCode();
 startCodeSweeper();
 startEngram();

@@ -64,6 +64,7 @@ function LiveThread({ d }: { d: ThreadView }) {
   const fromName = (origin?.kind === "delegated" && bot(origin.fromBot)?.name) || "Another member";
 
   const [events, setEvents] = useState(d.events);
+  const [queued, setQueued] = useState(d.queued);
   const [pits, setPits] = useState<Record<string, PitStop>>(() => Object.fromEntries(d.pitstops.map((p) => [p.id, p])));
   const [surfaces, setSurfaces] = useState<Record<string, SurfaceRow>>(() => Object.fromEntries(d.surfaces.map((s) => [s.id, s])));
   const [running, setRunning] = useState(d.thread.running);
@@ -111,6 +112,7 @@ function LiveThread({ d }: { d: ThreadView }) {
       }
       case "activity": setActivity(e.data.text); return;
       case "context": setCtx({ tokens: e.data.tokens, window: e.data.window }); return;
+      case "queue": setQueued(e.data.queued); return;
       case "turn":
         setRunning(false); buffer.current = null; setStreaming(null); setCloseSteps((n) => n + 1);
         return;
@@ -165,7 +167,7 @@ function LiveThread({ d }: { d: ThreadView }) {
           {streaming && <div className={`msg bot${endsWithAgent(events) ? " cont" : ""}`}>{endsWithAgent(events) ? <span /> : <Face b={b} size="sm" mood="working" />}<div className="md">{streaming.text}</div></div>}
           <div className={`live ${running ? "" : "hidden"}`}><Loader /><span>{activity}</span></div>
         </div>
-        <Composer threadId={id} name={b.name} running={running} />
+        <Composer threadId={id} name={b.name} running={running} queued={queued} fromName={fromName} />
       </section>
       <Panel id={id} b={b} ctx={ctx} lease={lease} onHandedBack={() => setLease(false)} />
     </div>

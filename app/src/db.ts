@@ -96,6 +96,11 @@ CREATE TABLE IF NOT EXISTS thread_taint (thread_id TEXT PRIMARY KEY, at INTEGER 
 CREATE TABLE IF NOT EXISTS turn_memories (
   turn_id TEXT NOT NULL, memory_id TEXT NOT NULL, thread_id TEXT NOT NULL, bot_id TEXT NOT NULL, text TEXT NOT NULL,
   state TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (turn_id, memory_id))`);
+// Messages waiting for a thread's run to end (runtime/queue.ts); in the store so a restart doesn't drop them.
+db.exec(`CREATE TABLE IF NOT EXISTS queued (
+  id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, text TEXT NOT NULL, attachments TEXT NOT NULL DEFAULT '[]',
+  trigger TEXT NOT NULL, display TEXT, created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS queued_thread ON queued(thread_id, created_at)`);
 // Columns added after v1 shipped; ALTER fails harmlessly once they exist.
 for (const sql of ["ALTER TABLE turns ADD COLUMN changes TEXT", "ALTER TABLE jev_labels ADD COLUMN shadow TEXT",
   "ALTER TABLE threads ADD COLUMN origin TEXT", "ALTER TABLE bots ADD COLUMN private INTEGER NOT NULL DEFAULT 0",

@@ -49,7 +49,7 @@ export function threadView(id: string): ThreadView {
   const surfIds = events.filter((e) => e.kind === "surface").map((e) => e.data.id);
   const pits = pitIds.length ? all<PitstopRow>(`SELECT * FROM pitstops WHERE id IN (${pitIds.map(() => "?").join(",")})`, ...pitIds).map(pitRow) as PitStop[] : [];
   const surfaces = surfIds.length ? all<Pick<SurfaceRow, "id" | "title" | "spec" | "saved">>(`SELECT id,title,spec,saved FROM surfaces WHERE id IN (${surfIds.map(() => "?").join(",")})`, ...surfIds).map((s) => ({ ...s, spec: json(s.spec) })) : [];
-  return { thread: { ...t, running: R.isRunning(id) }, bot: getBot(t.bot_id)!, events, pitstops: pits, surfaces };
+  return { thread: { ...t, running: R.isRunning(id) }, bot: getBot(t.bot_id)!, events, pitstops: pits, surfaces, queued: R.listQueued(id) };
 }
 export function telemetry() {
   const ws = R.weekStart();
