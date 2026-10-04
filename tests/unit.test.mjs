@@ -727,6 +727,8 @@ test("bound dashboards: one read-only SELECT per query, confined to the member's
 test("a scheduled run that ends QUIET keeps the thread's place; one with news moves it to the top", async () => {
   const { active } = await import("../app/dist/src/runtime/state.js");
   const T = await import("../app/dist/src/runtime/turns.js");
+  const { setSetting } = await import("../app/dist/src/db.js");
+  setSetting("retros", "0"); // a weekly retro would start a turn here; retros have their own test
   run("INSERT INTO bots(id,name,provider,created_at) VALUES('b_quiet','Quiet','openai',0)");
   for (const [th, reply] of [["th_quiet", "QUIET: checked orders since 23:30, none new"], ["th_news", "3 new orders today, ₹1,240. Milk spend is up 40% this week."]]) {
     run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES(?,?,?,0,1000)", th, "b_quiet", th);
@@ -945,4 +947,38 @@ test("a member's skills are indexed from their frontmatter, loaded with skill_vi
   assert.equal(K.viewSkill("b_skill", "../x"), null);
   assert.equal(K.listSkills("b_skill")[0].uses, 1, "SKILL.md loads count; files inside don't");
   assert.deepEqual(K.listSkills("b_none"), []);
+});
+
+test("a run that stands out is measured and gets a retro; suggestions deduplicate by title", async () => {
+  const Rt = await import("../app/dist/src/runtime/retro.js");
+  const { active } = await import("../app/dist/src/runtime/state.js");
+  const T = await import("../app/dist/src/runtime/turns.js");
+  run("INSERT INTO bots(id,name,provider,created_at) VALUES('b_retro','Retro','openai',0)");
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_retro','b_retro','r',0,0)");
+  for (let i = 0; i < 4; i++) run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,started_at,ended_at,input_tokens) VALUES(?,?,?,?,?,?,?,?)", `tu_r${i}`, "th_retro", "b_retro", "completed", "driver", i * 1000, i * 1000 + 60000, 100000);
+  run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,provider,model,started_at,ended_at,input_tokens,cached_tokens,output_tokens) VALUES('tu_big','th_retro','b_retro','completed','driver','openai','m',10000,250000,500000,450000,9000)");
+  const ev = (data) => run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('th_retro','tu_big','tool',?,0)", JSON.stringify(data));
+  for (let i = 0; i < 25; i++) ev({ type: "browser", tool: "browser_snapshot", status: "completed" });
+  ev({ type: "browser", tool: "browser_network_request", status: "completed", output: "HTTP 429 Too Many Requests" });
+  ev({ type: "commandExecution", status: "failed" }); ev({ type: "script", status: "inProgress" });
+  const rep = Rt.runReport("tu_big");
+  assert.deepEqual([rep.input, rep.tools.browser_snapshot, rep.failed, rep.limits, rep.baseline.runs, rep.baseline.input], [500000, 25, 1, 1, 4, 100000]);
+  assert.equal(Rt.retroReason(rep), "it used 5.0× the usual input tokens");
+  assert.equal(Rt.retroReason({ ...rep, input: 100000, limits: 0, repeated: [] }), null);
+  assert.match(Rt.reportText(rep), /500k input tokens \(90% cached\)[\s\S]*Usual for this thread \(median of 4\): 100k input/);
+
+  const { setSetting } = await import("../app/dist/src/db.js");
+  setSetting("retros", "1");
+  const zero = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
+  active.set("th_retro", { turnId: "tu_big", codexTurnId: null, base: zero, total: { inputTokens: 500000, cachedInputTokens: 450000, outputTokens: 9000 }, last: null, usageFrom: 0 });
+  await T.finishTurn("th_retro", "completed");
+  const q = one("SELECT * FROM queued WHERE thread_id='th_retro'");
+  assert.equal(q.trigger, "retro"); assert.match(q.text, /^\[Retro\] Your last run stood out \(it used 5\.0× the usual input tokens\)/);
+  assert.match(q.display, /^Retro · /);
+
+  const a = Rt.suggest("b_retro", "th_retro", { area: "tool", title: "Add a pacing option to replay", evidence: "three 429s on tu_big", proposal: "rate limit per host" });
+  const b2 = Rt.suggest("b_retro", null, { area: "tool", title: "add a pacing option to replay!", evidence: "again on tu_next", proposal: "" });
+  assert.equal(b2.id, a.id); assert.equal(b2.repeat, true);
+  assert.deepEqual([one("SELECT votes FROM improvements WHERE id=?", a.id).votes, /tu_next/.test(one("SELECT evidence FROM improvements WHERE id=?", a.id).evidence)], [2, true]);
+  assert.ok(Rt.weeklyDue("th_retro"));
 });

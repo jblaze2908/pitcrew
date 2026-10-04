@@ -14,6 +14,7 @@ import { api } from "../lib/api";
 import { hourNow, plural, usd } from "../lib/format";
 import { connected, useStore } from "../lib/store";
 
+interface Idea { id: string; bot_name: string; area: string; title: string; evidence: string; proposal: string; votes: number }
 export function Wall() {
   const { S, setS } = useStore();
   const [asksVersion, setAsksVersion] = useState(0);
@@ -24,6 +25,9 @@ export function Wall() {
   const n = pits.length;
   // Kept dashboards bound to a ledger: always current, since they read the ledger on view (server/ledger.ts).
   const boards = useFetch(() => api.get<KeptSurface[]>("/api/surfaces?bound=1", { quiet: true }), []);
+  // Harness suggestions the crew filed after retros (runtime/retro.ts): accept the ones worth building, dismiss the rest.
+  const ideas = useFetch(() => api.get<Idea[]>("/api/improvements", { quiet: true }), []);
+  const decideIdea = async (id: string, status: string) => { await api.post(`/api/improvements/${id}`, { status }); toast(status === "accepted" ? "Accepted" : "Dismissed"); ideas.reload(); };
   return (
     <div className="page">
       <div className="spread"><h1 className="pc-hello">{`${greet}, ${S.driverName}. `}{n ? <em>{`${plural(n, "pit stop")} need${n > 1 ? "" : "s"} you.`}</em> : "All quiet."}</h1></div>
@@ -56,6 +60,16 @@ export function Wall() {
           <div className="grid2">{boards.data.slice(0, 4).map((s) => <Surface key={s.id} s={s} extra={<a className="small faint" href={`#/t/${s.thread_id}`} style={{ marginLeft: "auto" }}>{s.bot_name}</a>}
             onAction={async (action, values) => { await api.post(`/api/surfaces/${s.id}/action`, { action, values }); toast("Sent to the crew"); }} />)}</div>
         </section>)}
+      {!!ideas.data?.length && (
+        <details className="col">
+          <summary className="pc-lab">{`Crew suggestions · ${ideas.data.length}`}</summary>
+          <div className="col">{ideas.data.slice(0, 8).map((i) => (
+            <div key={i.id} className="pc-card col" style={{ gap: 6 }}>
+              <div className="spread"><b>{i.title}</b><span className="small faint">{`${i.bot_name} · ${i.area}${i.votes > 1 ? ` · ${i.votes}×` : ""}`}</span></div>
+              <p className="small">{i.proposal}</p><p className="small muted">{i.evidence.slice(0, 400)}</p>
+              <div className="acts"><button className="pc-pill sig s" onClick={() => decideIdea(i.id, "accepted")}>Accept</button><button className="pc-pill o s" onClick={() => decideIdea(i.id, "dismissed")}>Dismiss</button></div>
+            </div>))}</div>
+        </details>)}
       {S.engram.linked && <DigestCard />}
       <div className="grid3">
         <div className="pc-card col"><p className="pc-lab">Today</p><span className="big num">{usd(S.today.usd)}</span><p className="small muted">{`${plural(S.today.runs, "run")} · billed cost where the provider reports it`}</p></div>

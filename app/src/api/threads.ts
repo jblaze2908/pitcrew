@@ -133,6 +133,13 @@ export const threadRoutes = new Hono<Env>()
     return c.json(await R.sendMessage(s.thread_id, { text, mode: "auto", trigger: "surface", display }));
   })
   .post("/api/surfaces/:id/save", signedIn, async (c) => { const b = await jsonBody(c, Save); run("UPDATE surfaces SET saved=? WHERE id=?", b.saved ? 1 : 0, c.req.param("id")); return c.json({ ok: true }); })
+  // The crew's harness suggestions (runtime/retro.ts): open ones for the Wall; the driver accepts or dismisses each.
+  .get("/api/improvements", signedIn, (c) => c.json(all("SELECT i.*, b.name bot_name FROM improvements i JOIN bots b ON b.id=i.bot_id WHERE i.status=? ORDER BY i.votes DESC, i.updated_at DESC LIMIT 50", c.req.query("status") || "open")))
+  .post("/api/improvements/:id", signedIn, async (c) => {
+    const b = await jsonBody(c, z.object({ status: pick(["accepted", "dismissed", "open"] as const, "open") }));
+    run("UPDATE improvements SET status=?, updated_at=? WHERE id=?", b.status, now(), c.req.param("id")); audit("driver", `improvement.${b.status}`, { id: c.req.param("id") });
+    return c.json({ ok: true });
+  })
   // Kept surfaces (Library); ?bound=1 only the dashboards bound to a ledger (the Wall).
   .get("/api/surfaces", signedIn, async (c) => c.json(await Promise.all(all<SurfaceRow & { bot_name: string; hue: string }>(`SELECT s.id,s.title,s.spec,s.thread_id,s.bot_id,s.created_at,b.name bot_name,b.hue FROM surfaces s JOIN bots b ON b.id=s.bot_id WHERE s.saved=1${c.req.query("bound") ? " AND json_extract(s.spec,'$.source') IS NOT NULL" : ""} ORDER BY s.created_at DESC`).map((s) => resolveSurface({ ...s, spec: json(s.spec) })))))
   // One surface as the driver sees it now: a bound dashboard's refresh.

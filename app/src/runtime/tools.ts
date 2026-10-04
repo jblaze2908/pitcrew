@@ -11,6 +11,7 @@ import { addEvent, findThreads, threadLink, readThread, addThreadNote, NOTES_MAX
 import { viewSkill } from "./skills.js";
 import { harnessHelp, TOPICS } from "../manual.js";
 import { CHANGELOG } from "../changelog.js";
+import { suggest } from "./retro.js";
 import { computer } from "./machines.js";
 import { pitStop } from "./pitstops.js";
 import { addSchedule, listSchedules, updateSchedule, deleteSchedule, lastScheduledRun } from "./schedules.js";
@@ -167,6 +168,12 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
       if ("error" in r) return say(`Query failed: ${r.error}`, false);
       const body = JSON.stringify(r.rows);
       return say(`${r.rows.length} row${r.rows.length === 1 ? "" : "s"}${r.truncated ? " (cut at 500)" : ""} from ${owner.name}'s ${a.source}:\n${body.length > 24000 ? `${body.slice(0, 24000)}…` : body}`);
+    }
+    case "suggest_improvement": {
+      const s = { area: String(a.area || "other"), title: String(a.title || "").trim(), evidence: String(a.evidence || "").trim(), proposal: String(a.proposal || "").trim() };
+      if (!s.title || !s.evidence) return say("A suggestion needs a title and the evidence (runs, numbers, what happened).", false);
+      const r = suggest(b.id, threadId, s);
+      return say(r.repeat ? "Already suggested; your evidence was added to it." : `Filed as ${r.id} for ${getSetting("driver_name", "the driver")} to review.`);
     }
     case "harness_help": {
       const page = harnessHelp(String(a.topic || ""), getSetting("driver_name", "the driver"));

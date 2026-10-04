@@ -22,6 +22,7 @@ import { isUsageLimit, armResume, clearResume } from "./resume.js";
 import { nameFromConversation } from "./titles.js";
 import { listSkills, skillIndex } from "./skills.js";
 import { CHANGELOG } from "../changelog.js";
+import { runReport, retroReason, retroPrompt, weeklyDue } from "./retro.js";
 import type { Bot } from "../../shared/types.js";
 
 export const isRunning = (threadId: string) => active.has(threadId);
@@ -99,7 +100,7 @@ export async function startTurn(threadId: string, text: string, attachments: str
   const warm = warmPlan(threadId);
   if (warm) computer(b).prewarm(warm.desktop);
   const turnId = uid("tu");
-  active.set(threadId, { turnId, codexTurnId: null, base: null, total: null, last: null, usageFrom: logSize(b.id), ...(trigger === "schedule" ? { quietFrom: t.updated_at } : {}) });
+  active.set(threadId, { turnId, codexTurnId: null, base: null, total: null, last: null, usageFrom: logSize(b.id), ...(trigger === "schedule" || trigger === "retro" ? { quietFrom: t.updated_at } : {}) });
   run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,provider,model,started_at) VALUES(?,?,?,?,?,?,?,?)", turnId, threadId, b.id, "starting", trigger, b.provider, b.model, now());
   setThreadStatus(threadId, "running");
   try {
@@ -239,6 +240,13 @@ export async function finishTurn(threadId: string, status: string, error?: strin
   // the web app folds the run to one line. Anything else is news and surfaces as usual.
   if (a.quietFrom != null && status === "completed" && isQuiet(lastAgentText(threadId, a.turnId))) run("UPDATE threads SET updated_at=? WHERE id=?", a.quietFrom, threadId);
   bus.emit("turn", { threadId, turnId: a.turnId, status, cost: cost.usd, botId: b.id });
+  // A run that stood out, or a scheduled thread's weekly check, queues a retro (retro.ts). Retros never trigger retros,
+  // and a usage-limit failure waits for the resume instead.
+  const trig = one<{ trigger: string }>("SELECT trigger FROM turns WHERE id=?", a.turnId)?.trigger;
+  if (trig !== "retro" && !(status === "failed" && isUsageLimit(error)) && getSetting("retros", "1") === "1") {
+    const rep = runReport(a.turnId), why = rep && (retroReason(rep) || (trig === "schedule" && weeklyDue(threadId) ? "weekly check" : null));
+    if (rep && why) enqueue(threadId, { text: retroPrompt(rep, why), attachments: [], trigger: "retro", display: `Retro · ${why}` });
+  }
   if (wakeFor.has(threadId)) { const p = activePlan(threadId); if (p) { planLog(p.id, `Looked after ${wakeFor.get(threadId)}: no change`); emitPlan(planRow(p.id)!); } wakeFor.delete(threadId); }
   for (const w of turnWaiters.get(threadId)?.splice(0) || []) w({ turnId: a.turnId, status, cost: cost.usd });
   // After a failure the queue waits for the driver: a broken brain or provider would otherwise fail every queued item in turn.
