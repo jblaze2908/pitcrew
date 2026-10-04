@@ -33,7 +33,7 @@ export const fileRoutes = new Hono<Env>()
     if (!out.image && st.size <= 1 << 20) { const buf = readFileSync(w.full); if (!buf.subarray(0, 8000).includes(0)) out.text = buf.toString("utf8"); }
     return c.json(out);
   })
-  .get("/api/bots/:id/changes", signedIn, (c) => c.json(all<{ id: string; thread_id: string; started_at: number; changes: string; thread_title: string }>("SELECT t.id, t.thread_id, t.started_at, t.changes, th.title thread_title FROM turns t JOIN threads th ON th.id=t.thread_id WHERE t.bot_id=? AND t.changes IS NOT NULL ORDER BY t.started_at DESC LIMIT 40", c.req.param("id")).map((r) => ({ ...r, changes: json<Change[]>(r.changes, []) }))))
+  .get("/api/bots/:id/changes", signedIn, (c) => c.json(all<{ id: string; thread_id: string; started_at: number; changes: string; thread_title: string; cost_usd: number | null }>("SELECT t.id, t.thread_id, t.started_at, t.changes, t.cost_usd, th.title thread_title FROM turns t JOIN threads th ON th.id=t.thread_id WHERE t.bot_id=? AND t.changes IS NOT NULL ORDER BY t.started_at DESC LIMIT 40", c.req.param("id")).map((r) => ({ ...r, changes: json<Change[]>(r.changes, []) }))))
   .get("/api/turns/:id/diff", signedIn, (c) => {
     const t = one<{ bot_id: string; changes: string | null }>("SELECT bot_id, changes FROM turns WHERE id=?", c.req.param("id")); if (!t) throw httpErr(404, "No such run");
     const path = c.req.query("path") ?? null;

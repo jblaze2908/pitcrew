@@ -228,18 +228,57 @@ export class Brain {
 
 // One-shot Codex app-server under its own CODEX_HOME that asks OpenAI for the plan's usage, so it counts use from anywhere
 // on the account, not only Pitcrew's runs, and Codex refreshes the token itself. Per call: one docker exec + one backend read.
+async function planServer(id: string, onNotify?: Handlers["onNotify"]) {
+  const uid = ensureBrainDir({ id }); linkChatgpt(id);
+  const proc = spawn("docker", ["exec", "-i", "--user", `${uid}:${CREW_UID}`, "-w", `/brains/${id}`, "-e", `CODEX_HOME=/brains/${id}`, "-e", `HOME=/brains/${id}/home`, BRAIN, CODEX_BIN, "app-server"], { stdio: ["pipe", "pipe", "pipe"] });
+  const rpc = new Rpc(proc, { name: id, onNotify, onExit: () => reclaimChatgpt(id) });
+  await rpc.request("initialize", { clientInfo: { name: "pitcrew", title: "Pitcrew", version: "1.1" }, capabilities: { experimentalApi: true, requestAttestation: false } }, 15000);
+  rpc.notify("initialized", {});
+  return { rpc, close: () => { proc.stdin.end(); setTimeout(() => proc.kill(), 5000).unref(); } };  // EOF lets Codex exit after saving a refreshed token
+}
+
 const LIMITS = { id: "_limits" };
 export async function readPlanLimits() {
   if (!existsSync(chatgptAuthPath())) return null;
-  const uid = ensureBrainDir(LIMITS); linkChatgpt(LIMITS.id);
-  const proc = spawn("docker", ["exec", "-i", "--user", `${uid}:${CREW_UID}`, "-w", `/brains/${LIMITS.id}`, "-e", `CODEX_HOME=/brains/${LIMITS.id}`, "-e", `HOME=/brains/${LIMITS.id}/home`, BRAIN, CODEX_BIN, "app-server"], { stdio: ["pipe", "pipe", "pipe"] });
-  const rpc = new Rpc(proc, { name: "limits", onExit: () => reclaimChatgpt(LIMITS.id) });
+  const s = await planServer(LIMITS.id);
   try {
-    await rpc.request("initialize", { clientInfo: { name: "pitcrew", title: "Pitcrew", version: "1.1" }, capabilities: { experimentalApi: true, requestAttestation: false } }, 15000);
-    rpc.notify("initialized", {});
-    const r = await rpc.request("account/rateLimits/read", { excludeResetCreditDetails: true }, 15000);
+    const r = await s.rpc.request("account/rateLimits/read", { excludeResetCreditDetails: true }, 15000);
     return r.rateLimitsByLimitId?.codex ?? r.rateLimits;
-  } finally { proc.stdin.end(); setTimeout(() => proc.kill(), 5000).unref(); }  // EOF lets Codex exit after saving a refreshed token
+  } finally { s.close(); }
+}
+
+// Small text jobs (thread titles) on the ChatGPT plan: a bare Codex home with every tool off, ephemeral threads, our own
+// system prompt. Measured 2026-10-04 on gpt-6-luna: ~3.9k input tokens and ~4 s per ask, billed to the plan, not a key.
+const SIDE = { id: "_side" };
+const SIDE_OFF = ["apps", "plugins", "remote_plugin", "plugin_sharing", "recommended_plugins", "tool_suggest", "skill_mcp_dependency_install", "skill_search",
+  "browser_use", "browser_use_external", "browser_use_full_cdp_access", "computer_use", "in_app_browser", "in_app_chat", "image_generation", "multi_agent",
+  "realtime_conversation", "goals", "shell_tool", "unified_exec", "shell_snapshot", "view_image", "sleep_tool", "code_mode_host", "workspace_dependencies", "hooks", "worktrees"];
+export type PlanAsk = (instructions: string, text: string, opts?: { model?: string; timeoutMs?: number }) => Promise<string>;
+/** Opens one side server for a batch of asks; close() when done. Null when the ChatGPT plan isn't connected. */
+export async function openPlanSide(): Promise<{ ask: PlanAsk; close: () => void } | null> {
+  if (!existsSync(chatgptAuthPath())) return null;
+  const p = `${brainDir(SIDE.id)}/config.toml`, uid = ensureBrainDir(SIDE);
+  writeFileSync(p, [`web_search = "disabled"`, ``, `[features]`, ...SIDE_OFF.map((f) => `${f} = false`), ``, `[skills]`, `include_instructions = false`, ``].join("\n"));
+  chownSync(p, uid, CREW_UID);
+  const turns = new Map<string, { text: string; done: (r: { text: string; error?: string }) => void }>();
+  const s = await planServer(SIDE.id, (m, q) => {
+    const t = turns.get(q.threadId); if (!t) return;
+    if (m === "item/completed" && q.item?.type === "agentMessage") t.text = q.item.text || "";
+    else if (m === "turn/completed") t.done({ text: t.text, error: q.turn?.status === "completed" ? undefined : q.turn?.error?.message || q.turn?.status });
+  });
+  const ask: PlanAsk = async (instructions, text, { model = "gpt-6-luna", timeoutMs = 60000 } = {}) => {
+    const st = await s.rpc.request("thread/start", { ephemeral: true, model, modelProvider: "openai", baseInstructions: instructions, sandbox: "read-only", approvalPolicy: "never", cwd: `/brains/${SIDE.id}/home` }, 30000);
+    const id = st.thread.id;
+    const out = new Promise<{ text: string; error?: string }>((done) => turns.set(id, { text: "", done }));
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await s.rpc.request("turn/start", { threadId: id, effort: "low", input: [{ type: "text", text, text_elements: [] }] }, 30000);
+      const r = await Promise.race([out, new Promise<never>((_, no) => { timer = setTimeout(() => no(new Error("plan ask timed out")), timeoutMs); })]);
+      if (r.error) throw new Error(r.error);
+      return r.text;
+    } finally { clearTimeout(timer); turns.delete(id); }
+  };
+  return { ask, close: s.close };
 }
 
 // ---------- computer (machine) ----------

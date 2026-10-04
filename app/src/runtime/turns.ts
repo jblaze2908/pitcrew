@@ -19,7 +19,7 @@ import { setRollout } from "./scripts.js";
 import { taint, tainted } from "./taint.js";
 import { postLearned } from "./learned.js";
 import { isUsageLimit, armResume, clearResume } from "./resume.js";
-import { nameFromConversation } from "./titles.js";
+import { nameAfterRun } from "./titles.js";
 import { listSkills, skillIndex } from "./skills.js";
 import { CHANGELOG } from "../changelog.js";
 import { runReport, retroReason, retroPrompt, weeklyDue } from "./retro.js";
@@ -221,9 +221,8 @@ export async function finishTurn(threadId: string, status: string, error?: strin
     status, error || null, now(), u.input, u.cached, u.output, cost.usd, cost.basis, a.turnId);
   if (error) addEvent(threadId, a.turnId, "error", { text: error });
   if (status === "failed" && isUsageLimit(error)) armResume(threadId, error!); else if (status === "completed") clearResume(threadId);
-  // First completed run of a thread the driver hasn't named: title it from the conversation (titles.ts), off the hot path.
-  if (status === "completed" && t.title_auto && json<{ kind?: string }>(t.origin, {}).kind !== "delegated" && one<{ n: number }>("SELECT COUNT(*) n FROM turns WHERE thread_id=? AND status='completed'", threadId)!.n === 1)
-    nameFromConversation(threadId).catch(() => {});
+  // A thread still on its provisional title gets named from the conversation (titles.ts), off the hot path.
+  if (status === "completed") nameAfterRun(t);
   // What changed on disk during this turn, however it was changed.
   if (a.snap) try {
     const ch = changes(b.id, a.snap, snapshot(b.id));

@@ -186,7 +186,7 @@ test("two approvals in a row teach a pattern; a denial resets it; consequential 
 });
 
 test("greetings don't name a thread; labels drop snapshot attributes", () => {
-  for (const t of ["hi", "Hello!", "hey there?", "good morning", "thanks", "ok"]) assert.equal(R.isSmallTalk(t), t !== "hey there?", t);
+  for (const t of ["hi", "Hello!", "hey there?", "good morning", "thanks", "ok", "Heyo", "Hey, whats up", "hi, how are you?"]) assert.equal(R.isSmallTalk(t), true, t);
   assert.equal(R.isSmallTalk("hi, pay my BESCOM bill"), false);
   assert.equal(R.tidyElement('button "Submit" [cursor=pointer]:'), 'button "Submit"');
   assert.equal(R.tidyElement('link "Docs" [active] [cursor=pointer]'), 'link "Docs"');
@@ -878,21 +878,26 @@ test("a schedule shows its last run: when, how it ended, and the first line of t
   assert.deepEqual(S.lastScheduledRun({ bot_id: "b_sch2", thread_id: null, last_run: 4990 }), { at: 5000, status: "completed", summary: "QUIET: checked 1 page, no new orders", threadId: "th_sch_last" });
 });
 
-test("threads are titled from the conversation after their first run, never over a title set by hand", async () => {
+test("threads are named by the plan model once they have a topic, never over a title set by hand", async () => {
   const Tt = await import("../app/dist/src/runtime/titles.js");
   assert.equal(Tt.cleanTitle('"Blinkit order backfill."'), "Blinkit order backfill");
   assert.equal(Tt.cleanTitle("Title: Goa trip in December"), "Goa trip in December");
+  assert.equal(Tt.cleanTitle("NONE"), null);
   assert.equal(Tt.cleanTitle("Here is a long explanation of what this thread is about and why it matters a lot"), null);
-  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_name','b_quiet','I want you to ask each agent for feedbacks…',0,0)");
-  run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('th_name',NULL,'user',?,0)", JSON.stringify({ text: "I want you to ask each agent for feedbacks based on all chats" }));
-  run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('th_name',NULL,'agent',?,0)", JSON.stringify({ text: "Here's the feedback grouped by agent" }));
-  let sent = null;
-  const fetcher = async (_, init) => { sent = JSON.parse(init.body); return { json: async () => ({ choices: [{ message: { content: "Crew feedback on the harness" } }] }) }; };
-  assert.equal(await Tt.nameFromConversation("th_name", { fetcher }), "Crew feedback on the harness");
-  assert.equal(one("SELECT title FROM threads WHERE id='th_name'").title, "Crew feedback on the harness");
-  assert.match(sent.messages[1].content, /^Driver: I want you to ask each agent/);
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_name','b_quiet','New thread',0,0)");
+  const say = (kind, text) => run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('th_name',NULL,?,?,0)", kind, JSON.stringify({ text }));
+  say("user", "Heyo"); say("agent", "Hey! What do you need?");
+  let asked = null;
+  const ask = async (_, text) => { asked = text; return text.includes("Swiggy") ? "Swiggy order history export" : "NONE"; };
+  assert.equal(await Tt.nameFromConversation("th_name", { ask }), null, "greetings alone are not sent");
+  assert.equal(asked, null);
+  say("user", "how are you doing?"); say("agent", "Good, ready.");
+  say("user", "pull my Swiggy orders since January into a CSV"); say("agent", "Pulled 63 orders into out/swiggy.csv");
+  assert.equal(await Tt.nameFromConversation("th_name", { ask }), "Swiggy order history export");
+  assert.equal(asked, "Driver: pull my Swiggy orders since January into a CSV\n\nAgent: Pulled 63 orders into out/swiggy.csv", "small talk and its replies are dropped");
+  assert.deepEqual({ ...one("SELECT title, title_auto FROM threads WHERE id='th_name'") }, { title: "Swiggy order history export", title_auto: 2 });
   run("UPDATE threads SET title='Mine', title_auto=0 WHERE id='th_name'");
-  assert.equal(await Tt.nameFromConversation("th_name", { fetcher }), null);
+  assert.equal(await Tt.nameFromConversation("th_name", { ask }), null);
   assert.equal(one("SELECT title FROM threads WHERE id='th_name'").title, "Mine", "a hand-set title stays");
 });
 
