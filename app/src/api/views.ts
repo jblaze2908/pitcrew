@@ -52,7 +52,7 @@ export async function threadView(id: string): Promise<ThreadView> {
   // Bound dashboards run their queries here (cached per ledger version; ledger.ts), once per thread load.
   const surfaces = surfIds.length ? await Promise.all(all<Pick<SurfaceRow, "id" | "title" | "spec" | "saved" | "bot_id">>(`SELECT id,title,spec,saved,bot_id FROM surfaces WHERE id IN (${surfIds.map(() => "?").join(",")})`, ...surfIds)
     .map(({ bot_id, ...s }) => resolveSurface({ ...s, spec: json(s.spec) }, bot_id))) : [];
-  return { thread: { ...t, running: R.isRunning(id) }, bot: getBot(t.bot_id)!, events, pitstops: pits, surfaces, queued: R.listQueued(id) };
+  return { thread: { ...t, running: R.isRunning(id) }, bot: getBot(t.bot_id)!, events, pitstops: pits, surfaces, queued: R.listQueued(id), painting: R.paintings(id) };
 }
 export function telemetry() {
   const ws = R.weekStart();

@@ -13,6 +13,8 @@ const { dynamicTool } = await import("../app/dist/src/runtime/tools.js");
 const { onNotify } = await import("../app/dist/src/runtime/notify.js");
 const { active, byCodex } = await import("../app/dist/src/runtime/state.js");
 const { run, all, one, now } = await import("../app/dist/src/db.js");
+const { paintings } = await import("../app/dist/src/runtime/painting.js");
+let during = null;
 
 const PNG = Buffer.from("89504e470d0a1a0a0000000d4948445200000001000000010806000000", "hex");
 const MODELS = { data: [
@@ -23,7 +25,7 @@ const MODELS = { data: [
 const sent = [];
 globalThis.fetch = async (url, init = {}) => {
   if (String(url).endsWith("/images/models")) return new Response(JSON.stringify(MODELS));
-  const body = JSON.parse(init.body); sent.push({ url: String(url), auth: init.headers.Authorization, body });
+  const body = JSON.parse(init.body); sent.push({ url: String(url), auth: init.headers.Authorization, body }); during = paintings("th_img");
   if (body.prompt === "refuse") return new Response(JSON.stringify({ error: { message: "content policy" } }), { status: 400 });
   return new Response(JSON.stringify({ data: Array.from({ length: body.n || 1 }, () => ({ b64_json: PNG.toString("base64"), media_type: "image/png" })), usage: { cost: 0.04 } }));
 };
@@ -80,10 +82,18 @@ test("the tool posts the images to the thread and bills the turn", async () => {
   assert.deepEqual(ev.paths, ["out/images/lighthouse.png"]);
   assert.equal(ev.cost, 0.04);
   assert.equal(active.get(th).extraUsd, 0.04);
+  assert.equal(during.length, 1, "the thread shows a wait while the image is made");
+  assert.deepEqual(during[0].palette.slice(0, 1), ["#ff6fab"], "a brief with no colour words paints in crew hues");
+  assert.equal(ev.paintingId, during[0].id, "the image that lands names the wait it ends");
+  assert.equal(paintings(th).length, 0, "the wait ends when the image lands");
   run("UPDATE bots SET weekly_cap_usd=0 WHERE id=?", bot.id);
   const capped = await dynamicTool({ bot: { id: bot.id }, mems: new Map() }, th, { tool: "generate_image", arguments: { prompt: "another" }, threadId: th });
   assert.equal(capped.success, false);
   assert.match(capped.contentItems[0].text, /spending cap/);
+});
+
+test("the wait paints in the brief's colours", () => {
+  assert.deepEqual(I.paletteFor("Marigold lamps on a navy night, rangoli in pink").slice(0, 4), ["#f2a93b", "#4f7dff", "#ff6fab", "#2b2b33"]);
 });
 
 test("Codex image_gen results are saved to out/images and shown; a used-up plan limit says so", () => {

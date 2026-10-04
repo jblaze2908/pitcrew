@@ -82,7 +82,9 @@ export interface ThreadEvent<D = Record<string, any>> { id: number; thread_id: s
 
 /** A message waiting for the thread's run to end; it enters the transcript only when it goes to the member. via: the trigger. */
 export interface QueuedItem { id: string; text: string; attachments: string[]; via: string; display: string | null; created_at: number }
-export interface ThreadView { thread: Thread; bot: Bot; events: ThreadEvent[]; pitstops: PitStop[]; surfaces: { id: string; title: string; spec: any; saved: number }[]; queued: QueuedItem[] }
+export interface ThreadView { thread: Thread; bot: Bot; events: ThreadEvent[]; pitstops: PitStop[]; surfaces: { id: string; title: string; spec: any; saved: number }[]; queued: QueuedItem[]; painting: Painting[] }
+/** An image being made right now; the thread draws the wait (catch the paint) until its image event lands. */
+export interface Painting { id: string; botId: string; n: number; aspect: string; palette: string[]; model: string; startedAt: number }
 
 // ---------- front door ----------
 export interface RoutePick {
@@ -187,6 +189,7 @@ export interface StreamEvents {
   activity: { threadId: string; botId?: string; text: string };
   context: { threadId: string; tokens: number; window: number };
   queue: { threadId: string; queued: QueuedItem[] };
+  painting: { threadId: string; id: string; painting?: Painting; done?: boolean };
 }
 export type StreamType = keyof StreamEvents;
 

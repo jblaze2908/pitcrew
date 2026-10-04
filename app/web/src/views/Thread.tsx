@@ -1,5 +1,6 @@
 // A thread: the transcript (live over SSE), the composer, and the side panel.
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { CatchThePaint } from "./thread/Painting";
 import type { Origin, PitStop, Surface as SurfaceRow, ThreadEvent, ThreadView } from "../../../shared/types";
 import { MemberMenu } from "../components/MemberMenu";
 import { Surface } from "../components/Surface";
@@ -66,6 +67,7 @@ function LiveThread({ d }: { d: ThreadView }) {
 
   const [events, setEvents] = useState(d.events);
   const [queued, setQueued] = useState(d.queued);
+  const [painting, setPainting] = useState(d.painting || []);
   const [pits, setPits] = useState<Record<string, PitStop>>(() => Object.fromEntries(d.pitstops.map((p) => [p.id, p])));
   const [surfaces, setSurfaces] = useState<Record<string, SurfaceRow>>(() => Object.fromEntries(d.surfaces.map((s) => [s.id, s])));
   const [running, setRunning] = useState(d.thread.running);
@@ -115,6 +117,7 @@ function LiveThread({ d }: { d: ThreadView }) {
       case "activity": setActivity(e.data.text); return;
       case "context": setCtx({ tokens: e.data.tokens, window: e.data.window }); return;
       case "queue": setQueued(e.data.queued); return;
+      case "painting": { const x = e.data; scrollSoon(); setPainting((l) => x.done || !x.painting ? l.filter((p) => p.id !== x.id) : [...l.filter((p) => p.id !== x.id), x.painting]); return; }
       case "turn":
         setRunning(false); buffer.current = null; setStreaming(null); setCloseSteps((n) => n + 1);
         return;
@@ -167,6 +170,7 @@ function LiveThread({ d }: { d: ThreadView }) {
             ? <Steps key={it.key} events={it.steps} results={scriptResults} closeSignal={closeSteps} initialOpen={it.key === openOnLoad.current || liveIds.current.has(it.steps[0].id)} />
             : <Fragment key={it.key}>{it.el}</Fragment>)}
           {streaming && <div className={`msg bot${endsWithAgent(events) ? " cont" : ""}`}>{endsWithAgent(events) ? <span /> : <Face b={b} size="sm" mood="working" />}<div className="md">{streaming.text}</div></div>}
+          {painting.map((p) => <CatchThePaint key={p.id} p={p} b={b} />)}
           <div className={`live ${running ? "" : "hidden"}`}><Loader /><span>{activity}</span></div>
         </div>
         <Composer threadId={id} name={b.name} running={running} queued={queued} fromName={fromName} />

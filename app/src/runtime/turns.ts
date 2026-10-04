@@ -12,6 +12,7 @@ import { enqueue, peekQueued, takeQueued, requeue, queuedThreads } from "./queue
 import { getThread, addEvent, setThreadStatus, nameThread } from "./threads.js";
 import { brain, computer } from "./machines.js";
 import { weekSpend, logSize, billedUsage } from "./spend.js";
+import { endPaintings } from "./painting.js";
 import { activePlan, planLog, emitPlan, planRow } from "./planStore.js";
 import { ensureMemberToken, threadContext, skillsIndex } from "../engram.js";
 import { memberLinked } from "../engramStore.js";
@@ -211,7 +212,7 @@ export function prewarmBrain(threadId: string) {
 export async function finishTurn(threadId: string, status: string, error?: string | null) {
   const a = active.get(threadId);
   if (!a) return;
-  active.delete(threadId);
+  active.delete(threadId); endPaintings(threadId);
   const t = getThread(threadId)!, b = getBot(t.bot_id)!;
   const u = a.total && a.base ? { input: a.total.inputTokens - a.base.inputTokens, cached: a.total.cachedInputTokens - a.base.cachedInputTokens, output: a.total.outputTokens - a.base.outputTokens } : { input: 0, cached: 0, output: 0 };
   const billed = billedUsage(b.id, a.turnId, a.usageFrom);

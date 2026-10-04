@@ -28,6 +28,16 @@ export async function imageModels(): Promise<ImageModel[]> {
   return catalog.models;
 }
 
+// Paint for the wait (catch the paint): colours named in the brief, else the crew's hues. Pure string work, per call.
+const COLOURS: [RegExp, string][] = [[/\b(red|crimson|scarlet)\b/, "#e5484d"], [/\b(maroon|burgundy|wine)\b/, "#8e2a3b"], [/\b(orange|saffron|marigold|amber)\b/, "#f2a93b"],
+  [/\b(gold|golden|yellow|mustard)\b/, "#f2c94c"], [/\b(green|emerald|leaf|forest)\b/, "#2fcc80"], [/\b(mint|sage|olive)\b/, "#9ccf9a"], [/\b(teal|turquoise|cyan|aqua)\b/, "#16c2c2"],
+  [/\b(blue|navy|cobalt|sky)\b/, "#4f7dff"], [/\b(indigo|purple|violet|lavender)\b/, "#9577ff"], [/\b(pink|magenta|rose|rangoli)\b/, "#ff6fab"],
+  [/\b(brown|coffee|chocolate|wood)\b/, "#9a6b4f"], [/\b(cream|beige|ivory|white|snow)\b/, "#f4ecdc"], [/\b(black|night|dark|charcoal)\b/, "#2b2b33"], [/\b(grey|gray|silver|steel)\b/, "#a9a9b4"]];
+export function paletteFor(prompt: string) {
+  const p = prompt.toLowerCase(), found = COLOURS.filter(([re]) => re.test(p)).map(([, c]) => c);
+  return [...new Set([...found, "#ff6fab", "#4f7dff", "#16c2c2", "#9577ff", "#2fcc80"])].slice(0, Math.max(4, Math.min(found.length, 6)));
+}
+
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(" ").slice(0, 6).join("-").slice(0, 48).replace(/-+$/, "") || "image";
 
 /** Writes one image to out/images under a name that doesn't clobber another; returns its path under /bot/work. */
