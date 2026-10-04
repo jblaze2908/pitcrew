@@ -9,7 +9,7 @@ import { active, waits } from "./state.js";
 import { getThread, addEvent, setThreadStatus } from "./threads.js";
 import { describePattern, learnable, learn, learnProgress } from "./rules.js";
 import { addSchedule } from "./schedules.js";
-import { applySoul } from "./manage.js";
+import { applySoul, applyRetire } from "./manage.js";
 
 // similar: what "allow similar" (scope thread or always) would cover, named the way the rules list names it.
 export const pitRow = (p: PitstopRow | undefined): PitStop | undefined => {
@@ -55,6 +55,7 @@ export async function decide(id: string, decision: string, { scope = "once", not
   }
   if (ps.kind === "site") applySiteChoice(ps, status, scope);
   if (ps.kind === "soul" && status === "approved") applySoul(detail);
+  if (ps.kind === "retire" && status === "approved") applyRetire(detail);
   if (detail.pattern && ps.kind !== "hire" && (status === "approved" || status === "denied") && note !== "Kill switch" && learnable(getBot(ps.bot_id)?.policy, ps.effect, json(ps.jev, {}).by)) learn(ps, detail, status);
   run("UPDATE pitstops SET status=?, scope=?, note=?, decided_at=? WHERE id=?", status, scope, String(note).slice(0, 500), now(), id);
   // A kill-switch denial judges nothing about the call, so it trains as no answer.

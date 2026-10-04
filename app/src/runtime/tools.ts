@@ -12,7 +12,7 @@ import { viewSkill } from "./skills.js";
 import { harnessHelp, TOPICS } from "../manual.js";
 import { CHANGELOG } from "../changelog.js";
 import { suggest } from "./retro.js";
-import { crewOverview, soulProposal, triageSuggestion, openSuggestions } from "./manage.js";
+import { crewOverview, soulProposal, retireProposal, triageSuggestion, openSuggestions } from "./manage.js";
 import { computer } from "./machines.js";
 import { pitStop } from "./pitstops.js";
 import { addSchedule, listSchedules, updateSchedule, deleteSchedule, lastScheduledRun } from "./schedules.js";
@@ -182,6 +182,14 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
       if ("error" in pr) return say(pr.error!, false);
       const decision = await pitStop({ botId: b.id, threadId, kind: "soul", effect: "soul", title: `New SOUL for ${pr.bot!.name}`, detail: pr.detail! });
       return say(decision === "approved" ? `${pr.bot!.name}'s SOUL is updated; its new threads use it.` : decision === "expired" ? `${getSetting("driver_name", "the driver")} didn't answer; the SOUL is unchanged and the proposal expired.` : `${getSetting("driver_name", "the driver")} kept the current SOUL.`, decision === "approved");
+    }
+    case "propose_retire": {
+      if (b.kind !== "chief") return say("Only the Crew Chief manages the crew.", false);
+      const pr = retireProposal(String(a.member || ""), String(a.why || ""));
+      if ("error" in pr) return say(pr.error!, false);
+      const decision = await pitStop({ botId: b.id, threadId, kind: "retire", effect: "retire", title: `Retire ${pr.bot!.name}`, detail: pr.detail! });
+      const driver = getSetting("driver_name", "the driver");
+      return say(decision === "approved" ? `${pr.bot!.name} is retired; its schedules are off. Your crew list updates in your next thread.` : decision === "expired" ? `${driver} didn't answer; ${pr.bot!.name} stays and the proposal expired.` : `${driver} kept ${pr.bot!.name}.`, decision === "approved");
     }
     case "triage_suggestion": {
       if (b.kind !== "chief") return say("Only the Crew Chief manages the crew.", false);

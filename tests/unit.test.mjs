@@ -1027,3 +1027,34 @@ test("the Chief manages the crew: overview (private members show setup only), SO
   assert.match(one("SELECT evidence FROM improvements WHERE id=?", x.id).evidence, /merged “Throttle bulk reads per host”: more 429s/);
   assert.equal(M.triageSuggestion(x.id, { note: "seen on Grocery too" }), "Note added.");
 });
+
+test("the Chief proposes a retirement; the driver approves it and the member leaves the crew with its schedules off", async () => {
+  const M = await import("../app/dist/src/runtime/manage.js");
+  const Tl = await import("../app/dist/src/runtime/tools.js");
+  const { getBot, listBots } = await import("../app/dist/src/crew.js");
+  run("INSERT INTO bots(id,name,kind,job,created_at) VALUES('chief_r','Chief R','chief','',0),('ret_a','Fares','specialist','Watches train fares',0),('ret_b','Keeper','specialist','Keeps things',0)");
+  run("INSERT INTO schedules(id,bot_id,spec,prompt,enabled,created_at) VALUES('sc_ret','ret_a','0 9 * * *','check fares',1,0)");
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_ret','chief_r','r',0,0)");
+  assert.match(M.retireProposal("Ghost", "idle").error, /No crew member/);
+  assert.match(M.retireProposal("Fares", " ").error, /Say why/);
+  assert.match(M.retireProposal("Chief R", "x").error, /No crew member/, "the Chief can't be retired");
+  assert.equal(M.retireProposal("fares", "idle 4 weeks").detail.schedules, 1);
+
+  const c = { bot: { id: "chief_r" }, mems: new Map() };
+  const prop = Tl.dynamicTool(c, "th_ret", { tool: "propose_retire", threadId: "cx_r", arguments: { member: "Fares", why: "No runs in 4 weeks; the trip is over" } });
+  let ps; for (let i = 0; i < 50 && !(ps = one("SELECT * FROM pitstops WHERE kind='retire' AND status='pending'")); i++) await new Promise((r) => setTimeout(r, 5));
+  assert.equal(ps.title, "Retire Fares");
+  await R.decide(ps.id, "approve");
+  assert.match((await prop).contentItems[0].text, /Fares is retired/);
+  assert.equal(getBot("ret_a").archived, true);
+  assert.equal(one("SELECT enabled FROM schedules WHERE id='sc_ret'").enabled, 0);
+  assert.ok(!listBots().some((b) => b.id === "ret_a"));
+
+  const kept = Tl.dynamicTool(c, "th_ret", { tool: "propose_retire", threadId: "cx_r", arguments: { member: "Keeper", why: "maybe idle" } });
+  for (let i = 0; i < 50 && !(ps = one("SELECT * FROM pitstops WHERE kind='retire' AND status='pending'")); i++) await new Promise((r) => setTimeout(r, 5));
+  await R.decide(ps.id, "deny");
+  assert.match((await kept).contentItems[0].text, /kept Keeper/);
+  assert.equal(getBot("ret_b").archived, false);
+  const notChief = await Tl.dynamicTool({ bot: { id: "ret_b" }, mems: new Map() }, "th_ret", { tool: "propose_retire", threadId: "cx_r", arguments: { member: "Keeper", why: "y" } });
+  assert.equal(notChief.success, false);
+});
