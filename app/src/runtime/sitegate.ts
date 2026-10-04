@@ -44,6 +44,11 @@ export async function siteStep(b: Bot, threadId: string, call: Call): Promise<Pi
 // payment confirmation raises a bad-tone system event and an audit entry, once per page. Per action: a regex pass over
 // the title and snapshot (capped at 60 KB), plus one browser call only when a blocked landing has to be undone.
 const confirmSeen = new Map<string, string>(); // thread id → last confirmation (url|phrase) alerted
+// Receipts in an order history read like confirmations ("Order placed"), so moving between history pages, or opening a
+// URL directly, never alerts: neither can place an order. A click from a cart or checkout onto a receipt still does.
+const HISTORY = /\/(account\/|my-?)?(orders?|purchases|order-history|purchase-history)(\/|$)/i;
+const inHistory = (u: string | null) => { try { return !!u && HISTORY.test(new URL(u).pathname); } catch { return false; } };
+export const mayConfirm = (tool: string, url: string | null, before: string | null) => !/^browser_(navigate|navigate_back|navigate_forward|reload|tabs)$/.test(tool) && !(inHistory(url) && inHistory(before));
 export async function afterAction(b: Bot, threadId: string, codexId: string, mcp: Rpc, { tool, text, snap, url, before = null, tabsBefore = null }: { tool: string; text: string; snap: string | null; url: string | null; before?: string | null; tabsBefore?: number | null }) {
   const title = /^- Page Title: (.*)$/m.exec(text || "")?.[1] || null, notes: string[] = [];
   const seen = snapshots.get(codexId);
@@ -61,7 +66,7 @@ export async function afterAction(b: Bot, threadId: string, codexId: string, mcp
     else if (sv.site?.domain && !sv.local) recordVisit(b.id, sv.site.domain);
   }
   const phrase = confirmationOf(`${title || ""}\n${String(snap || "").slice(0, 60000)}`)?.slice(0, 80);
-  if (phrase && url && confirmSeen.get(threadId) !== `${url}|${phrase}`) {
+  if (phrase && url && mayConfirm(tool, url, before) && confirmSeen.get(threadId) !== `${url}|${phrase}`) {
     confirmSeen.set(threadId, `${url}|${phrase}`);
     const host = hostOf(url);
     audit("jev", "page.confirmation", { botId: b.id, threadId, tool, host, phrase });

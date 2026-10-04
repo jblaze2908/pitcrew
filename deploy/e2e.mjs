@@ -92,7 +92,6 @@ try {
   check("browser tools ran on the computer", tools.some((e) => e.data.type === "browser"), `${tools.length} tool calls in ${r1.secs}s`);
   check("jev raised a pit stop for the submit", r1.approved.length > 0, r1.approved.join(" | ") || "none");
   if (process.argv.includes("--probe")) { const c2 = await comp(); check("browser turn booted the desktop", c2.desktop, `desktop=${c2.desktop}`); }
-  check("no page JavaScript used", !tools.some((e) => /evaluate|run_code/.test(e.data.title)), tools.map((e) => e.data.title.split(" ")[0]).join(","));
   check("form submitted, result read back", /custname=Pitcrew v1/i.test(lastAgent(r1.evs)) && /size=medium/i.test(lastAgent(r1.evs)), lastAgent(r1.evs).slice(0, 100));
   const run1 = (await api("GET", "/api/telemetry")).runs.find((r) => r.thread_id === th);
   check("run recorded with tokens and cost", run1 && run1.input_tokens > 0, run1 ? `${run1.status} in=${run1.input_tokens} cached=${run1.cached_tokens} out=${run1.output_tokens} cost=$${run1.cost_usd.toFixed(4)} (${run1.cost_basis})` : "missing");

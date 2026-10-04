@@ -31,6 +31,9 @@ export const botDir = (id: string) => `${ROOT}/bots/${id}`;
 export const PW_OUT = "/bot/run/playwright";
 // Playwright MCP waits this long after each action for triggered work (default 500 ms; click 589-620 → 196-226 ms, measured).
 export const PW_SETTLE_MS = 100;
+// Opt-in Playwright MCP capabilities: storage (cookies, local/session storage). Network request reads are core; request
+// mocking (the network cap) is covered by browser_run_code_unsafe. Part of the manifest cache key, so a change re-lists.
+export const PW_CAPS = "storage";
 export const brainDir = (id: string) => `${ROOT}/brains/${id}`;
 export const usageLog = (id: string) => `${ROOT}/brains/_usage/${id}.jsonl`;
 export const chatgptAuthPath = () => `${ROOT}/chatgpt/auth.json`;
@@ -318,7 +321,7 @@ export class Computer {
   // Playwright's per-action snapshot files go to PW_OUT, not the default ./.playwright-mcp in the workspace, where they
   // showed up as the run's "changed files". --codegen none drops the "Ran Playwright code" block from every result.
   async #spawnMcp(kind: ToolKind) {
-    const cmd = kind === "browser" ? ["-e", "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright", this.name, "playwright-mcp", "--cdp-endpoint", "http://127.0.0.1:9222", "--output-dir", PW_OUT, "--output-max-size", String(32 << 20), "--codegen", "none", "--timeout-settle", String(PW_SETTLE_MS)] : ["-e", "DISPLAY=:1", this.name, "node", "/opt/pitcrew/computer-mcp.mjs"];
+    const cmd = kind === "browser" ? ["-e", "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright", this.name, "playwright-mcp", "--cdp-endpoint", "http://127.0.0.1:9222", "--output-dir", PW_OUT, "--output-max-size", String(32 << 20), "--codegen", "none", "--timeout-settle", String(PW_SETTLE_MS), "--caps", PW_CAPS] : ["-e", "DISPLAY=:1", this.name, "node", "/opt/pitcrew/computer-mcp.mjs"];
     const rpc = new Rpc(spawn("docker", ["exec", "-i", ...cmd], { stdio: ["pipe", "pipe", "pipe"] }), { name: `${kind} tools` });
     try { await rpc.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "pitcrew", version: "1.1" } }, 30000); }
     catch (e: any) { rpc.proc.kill(); throw e; }
@@ -398,7 +401,7 @@ export async function toolManifest(): Promise<ToolManifest> {
   if (manifest) return manifest;
   const cache = `${ROOT}/data/tools-manifest.json`;
   const img = (await docker(["image", "inspect", "-f", "{{.Id}}", IMAGE])).out.trim();
-  try { const c = JSON.parse(readFileSync(cache, "utf8")); if (c.image === img) return (manifest = c); } catch {}
+  try { const c = JSON.parse(readFileSync(cache, "utf8")); if (c.image === img && c.caps === PW_CAPS) return (manifest = c); } catch {}
   const list = async (args: string[]): Promise<McpTool[]> => {
     const rpc = new Rpc(spawn("docker", ["run", "--rm", "-i", "--network", "none", "--entrypoint", args[0], IMAGE, ...args.slice(1)], { stdio: ["pipe", "pipe", "pipe"] }), { name: "manifest" });
     await rpc.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "pitcrew", version: "1.1" } }, 60000);
@@ -411,7 +414,7 @@ export async function toolManifest(): Promise<ToolManifest> {
   const exec = new Rpc(spawn("docker", ["run", "--rm", "-i", "--network", "none", "--entrypoint", "codex", IMAGE, "exec-server", "--listen", "stdio"], { stdio: ["pipe", "pipe", "pipe"] }), { name: "exec-info" });
   const execInfo = (await exec.request("initialize", { clientName: "codex-environment", resumeSessionId: null }, 60000)).environmentInfo;
   exec.proc.kill();
-  manifest = { image: img, execInfo, browser: await list(["playwright-mcp", "--cdp-endpoint", "http://127.0.0.1:9"]), computer: await list(["node", "/opt/pitcrew/computer-mcp.mjs"]) };
+  manifest = { image: img, caps: PW_CAPS, execInfo, browser: await list(["playwright-mcp", "--cdp-endpoint", "http://127.0.0.1:9", "--caps", PW_CAPS]), computer: await list(["node", "/opt/pitcrew/computer-mcp.mjs"]) };
   writeFileSync(cache, JSON.stringify(manifest));
   return manifest;
 }

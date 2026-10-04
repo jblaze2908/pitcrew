@@ -3,7 +3,7 @@
 import { run, now, uid, audit } from "../db.js";
 import { getSecret } from "../auth.js";
 import { getBot } from "../crew.js";
-import { jev, redact, jevSystemOne, secretKind, type Call, type Policy, type Verdict } from "../jev.js";
+import { jev, redact, jevSystemOne, secretKind, PAGE_CODE, type Call, type Policy, type Verdict } from "../jev.js";
 import { siteTag } from "../domains.js";
 import type { Brain } from "../computer.js";
 import { bus } from "./bus.js";
@@ -28,8 +28,9 @@ export async function gate(c: Brain, threadId: string, call: Call, pit: PitInfo)
   const policy = site.policy!, sig = signature(call), pat = pattern(call), browser = call.kind === "mcp" && call.server === "browser";
   // Untrusted content from Engram in this thread: no shortcut may stand in for the driver on an outbound effect.
   const taint = tainted(threadId);
-  // A fully allowed site skips jev, except for anything that looks like paying (checkout pages never count as full).
-  if (browser && site.full && !taint && call.effect !== "pay" && !/^(card|cvv)$/.test(secretKind(JSON.stringify(call.arguments?.grounded_elements || [])) || ""))
+  // A fully allowed site skips jev, except for anything that looks like paying (checkout pages never count as full) and
+  // page code or storage writes, whose effect only jev can read from the code.
+  if (browser && site.full && !taint && call.effect !== "pay" && !PAGE_CODE.test(call.tool || "") && !/^(card|cvv)$/.test(secretKind(JSON.stringify(call.arguments?.grounded_elements || [])) || ""))
     return logDecision(threadId, b.id, { decision: "allow", effect: call.effect || "browse", reason: `${site.site!.domain} is fully allowed`, by: "site" }, call);
   const v = await jev(call, { policy, apiKey: getSecret("openrouter") || "missing" });
   if (v.decision === "block") { logDecision(threadId, b.id, v, call); addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Blocked by jev: ${v.reason}. Nothing ran.`, tone: "bad" }); return false; }

@@ -126,3 +126,28 @@ export function snapshotToText(yaml: string | null | undefined) {
   if (s.length <= READ_MAX) return s;
   return `${s.slice(0, s.lastIndexOf("\n", READ_MAX))}\n\nTruncated at ${(READ_MAX / 1024).toFixed(0)} of ${(s.length / 1024).toFixed(0)} KB. Pass target (a ref from browser_snapshot) to read one part.`;
 }
+
+// Credential values in a data tool's result: cookie values (bar short flags like "1" or "en"), auth and cookie headers,
+// and storage entries whose key names a token (plus JWTs and Bearer values anywhere in storage). The agent still uses
+// them, since the page's own requests carry them; they just don't enter the transcript or the model's context. Files
+// written with filename stay unmasked on the computer. One regex pass per result line.
+const COOKIE_LINE = /^([^=\n]+)=(.*?)( \(domain: [^)]*\))$/gm, STORAGE_LINE = /^([^=\n]+)=(.*)$/gm;
+const SECRET_HEADER = /^(\s*)(authorization|proxy-authorization|cookie|set-cookie|x-[\w-]*(?:token|auth|key|session|csrf|xsrf)[\w-]*):\s*(.+)$/gim;
+const SECRET_KEY = /token|auth|session|secret|jwt|csrf|xsrf|bearer|api[-_]?key|password|credential|\bsid\b/i;
+const BEARERISH = /\beyJ[\w-]{10,}\.[\w-]{10,}\.[\w-]*|\bBearer\s+[\w.~+/-]+=*/g;
+const masked = (v: string) => `[masked, ${v.length} chars]`;
+export function maskSecrets(tool: string, text: string) {
+  if (/^browser_cookie_(list|get)$/.test(tool)) return text.replace(COOKIE_LINE, (_, k, v, rest) => `${k}=${v.length >= 16 || SECRET_KEY.test(k) ? masked(v) : v}${rest}`);
+  if (/^browser_(local|session)storage_(list|get)$/.test(tool)) return text.replace(STORAGE_LINE, (_, k, v) => `${k}=${SECRET_KEY.test(k) ? masked(v) : v.replace(BEARERISH, masked)}`);
+  if (/^browser_network_request$/.test(tool)) return text.replace(SECRET_HEADER, (_, ind, k, v) => `${ind}${k}: ${masked(v)}`);
+  return text;
+}
+
+// Data tools (page JS, Playwright code, network, storage, console) return whatever the code or page produced. Over
+// DATA_MAX the model gets the head and a pointer to filename, so one call can't flood the context.
+export const DATA_TOOLS = /^browser_(evaluate|run_code_unsafe|network_requests?|console_messages|cookie_\w+|(local|session)storage_\w+)$/, DATA_MAX = 24000;
+export function capData(text: string, max = DATA_MAX) {
+  if (text.length <= max) return text;
+  const kb = (n: number) => (n / 1024).toFixed(0);
+  return `${text.slice(0, max)}\n…\nTruncated: showing ${kb(max)} of ${kb(text.length)} KB. Filter inside the call, or pass filename (a path under /bot/work) and read the file from the shell.`;
+}

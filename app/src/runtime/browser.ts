@@ -1,6 +1,7 @@
 // Browser and pixel tools run on the crew member's computer, booting it (and its desktop) on first use.
 // The gate sees the grounded element; the computer's MCP server sees only the model's own arguments.
-// browser_read is ours: a gated browser_snapshot turned into text, so it runs no page JS.
+// browser_read is ours: a gated browser_snapshot turned into text. Page JS and Playwright code run like any other tool:
+// gated per call (gate.ts never lets a fully allowed site skip jev for them), with secrets masked and size capped.
 import { getBot } from "../crew.js";
 import { PW_SETTLE_MS, type Brain, type Rpc } from "../computer.js";
 import type { ToolResult } from "../shots.js";
@@ -12,7 +13,7 @@ import { gate } from "./gate.js";
 import { takeRefusal, afterAction } from "./sitegate.js";
 import { planLive } from "./plans.js";
 import { ground, pixelContext, snapshotOf, noteSnapshot } from "./grounding.js";
-import { SNAP_LINK, SNAP_MODES, shapeSnapshot, verifyLine, snapshotToText, readTabs, pageHead } from "./pageText.js";
+import { SNAP_LINK, SNAP_MODES, DATA_TOOLS, shapeSnapshot, verifyLine, snapshotToText, readTabs, pageHead, maskSecrets, capData } from "./pageText.js";
 import { short, summariseArgs, hostOf, say, debugArgs } from "./util.js";
 
 // A dynamic tool call from the brain (item/tool/call): p.threadId is Codex's thread id.
@@ -23,10 +24,11 @@ export interface ToolCall { tool: string; threadId: string; callId?: string; arg
 export async function runtimeTool(br: Brain, threadId: string, p: ToolCall): Promise<ToolResult> {
   const b = getBot(br.bot.id)!, turnId = active.get(threadId)?.turnId, t0 = Date.now();
   const kind = p.tool.startsWith("browser_") ? "browser" : "computer", reading = p.tool === "browser_read";
-  if (/^browser_(evaluate|run_code)/.test(p.tool)) return say("Page JavaScript isn't available. Use the element tools (click, type, fill_form, snapshot).", false);
   if (kind === "browser" && !(await planLive(threadId))) return say("This plan runs on what the crew already knows: the driver turned live lookups off. Answer from your memory and say what you couldn't check.", false);
   // `snapshot` (what the result shows of the page afterwards) is ours; Playwright never sees it.
   const { snapshot: snapArg, ...given } = p.arguments || {};
+  // jev judges the code it can see; a snippet loaded from a file would run unread.
+  if (p.tool === "browser_run_code_unsafe" && given.filename) return say("Pass the Playwright function inline as code; loading it from a file isn't supported here.", false);
   const tool = reading ? "browser_snapshot" : kind === "browser" ? p.tool : p.tool.replace(/^computer_/, "");
   const args: Record<string, any> = reading ? (given.target ? { target: String(given.target) } : {}) : tool === "browser_take_screenshot" && !given.type && !given.filename ? { ...given, type: "jpeg" } : given;
   const g = kind === "browser" ? ground(snapshots.get(p.threadId), tool, args) : { grounded: pixelContext(args, snapshots.get(p.threadId)), effect: null, label: "" };
@@ -50,13 +52,13 @@ export async function runtimeTool(br: Brain, threadId: string, p: ToolCall): Pro
     const r = await mcp.request("tools/call", { name: tool, arguments: kind === "computer" ? { ...args, _watched: comp.viewers > 0 } : args }, 120000);
     timing.run = Date.now() - t;
     const content: McpContent[] = Array.isArray(r.content) ? r.content : [];
-    const text = content.filter((x) => x.type === "text").map((x) => x.text).join("\n");
+    const text = maskSecrets(tool, content.filter((x) => x.type === "text").map((x) => x.text).join("\n"));
     let out = text;
     if (kind === "browser") {
       const prev = snapshots.get(p.threadId), url = /^- Page URL: (\S+)/m.exec(text)?.[1] || prev?.url || null, snap = snapshotOf(b.id, text);
       const mode = SNAP_MODES.includes(snapArg) ? snapArg : undefined;
       if (reading) out = snap == null ? text : `${pageHead(text)}\n\n${snapshotToText(snap)}`;
-      else out = `${SNAP_LINK.test(text) ? `${verifyLine(tool, text, { before: prev?.url, tabsBefore })}\n` : ""}${shapeSnapshot(text, snap, { prev, url, mode })}`;
+      else out = `${SNAP_LINK.test(text) ? `${verifyLine(tool, text, { before: prev?.url, tabsBefore })}\n` : ""}${shapeSnapshot(DATA_TOOLS.test(tool) ? capData(text) : text, snap, { prev, url, mode })}`;
       noteSnapshot(p.threadId, snap, url, { scoped: !!(args.target || args.depth), seen: !reading && mode !== "none" });
       const post = await afterAction(b, threadId, p.threadId, mcp, { tool, text, snap, url, before: prev?.url, tabsBefore });
       if (post) out = `${post}\n\n${out}`;
