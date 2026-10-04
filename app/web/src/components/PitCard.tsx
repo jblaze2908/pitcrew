@@ -45,7 +45,9 @@ export function PitCard({ p: given, onDone }: { p: PitStop; onDone?: (r: PitStop
     : p.kind === "site" ? <SiteSummary d={d} />
     : p.kind === "engram" && d.proposal ? <ProposalSummary x={d.proposal} />
     : p.kind === "soul" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><pre>{d.soul}</pre>{d.before && <details><summary className="small faint">Current SOUL</summary><pre>{d.before}</pre></details>}</div>
-    : p.kind === "retire" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><p className="small faint">{d.memberName}: {d.job || "no job set"}{d.schedules ? ` · ${d.schedules} schedule${d.schedules === 1 ? "" : "s"} will stop` : ""}. Threads and memory stay.</p></div> : null;
+    : p.kind === "retire" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><p className="small faint">{d.memberName}: {d.job || "no job set"}{d.schedules ? ` · ${d.schedules} schedule${d.schedules === 1 ? "" : "s"} will stop` : ""}. Threads and memory stay.</p></div>
+    : p.kind === "member" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p>{(d.diff || []).map((x: { field: string; before: string; after: string }) => <div key={x.field}><b className="small">{x.field}</b><pre>{`${x.before || "(empty)"}\n→ ${x.after || "(empty)"}`}</pre></div>)}</div>
+    : p.kind === "files" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><pre>{(d.paths || []).map((x: { path: string; dir: boolean; size: number }) => `${x.path}${x.dir ? "/ (folder and everything in it)" : ` · ${x.size} B`}`).join("\n")}</pre></div> : null;
 
   const outcome = `${p.kind === "engram" && p.note ? p.note : p.status} ${ago(p.decided_at)}`;
   // Decided: one line that opens to the details, so a thread's history doesn't keep full cards around.
@@ -75,6 +77,8 @@ export function PitCard({ p: given, onDone }: { p: PitStop; onDone?: (r: PitStop
     {openLink("Open thread")}</div></>;
   else if (p.kind === "soul") actions = <div className="acts">{btn("Use this SOUL", () => decide("approve", "once"), true)}{btn("Keep current", () => decide("deny"))}{openLink("Open thread")}</div>;
   else if (p.kind === "retire") actions = <div className="acts">{btn(`Retire ${d.memberName || "member"}`, () => decide("approve", "once"), true)}{btn("Keep", () => decide("deny"))}{openLink("Open thread")}</div>;
+  else if (p.kind === "member") actions = <div className="acts">{btn("Apply changes", () => decide("approve", "once"), true)}{btn("Keep as is", () => decide("deny"))}{openLink("Open thread")}</div>;
+  else if (p.kind === "files") actions = <div className="acts">{btn("Delete", () => decide("approve", "once"), true)}{btn("Keep files", () => decide("deny"))}{openLink("Open thread")}</div>;
   else if (p.kind === "plan") actions = <div className="acts">
     {btn(p.effect === "browse" ? "Allow for this plan" : "Allow", () => decide("approve", "once"), true)}
     {btn(p.effect === "browse" ? "Use what they know" : "Finish with what it has", () => decide("deny"))}

@@ -155,7 +155,7 @@ export function instructions(b: Pick<Bot, "name" | "personality"> & Partial<Bot>
     memories.length ? `Your own memory (only you see it; rewrite one by passing its id to remember, forget removes it):\n${memories.map((m) => `- [${m.id}] ${m.text}`).join("\n")}` : "",
     skills ? `Your skills (load one with skill_view before a task it covers):\n${skills}` : "",
     engram ? engramBlock(driver, engram, b.engram_scope) : "",
-    b.kind === "chief" ? `You are the Crew Chief, the only built-in crew member, and you manage the crew. When you notice recurring work that deserves its own crew member (the same kind of task 3+ times), call propose_crew_member. To keep members working well: crew_overview shows each one's setup and record; propose_soul rewrites a member's SOUL when its runs or retros show it's set up wrong; propose_retire retires a member whose job is gone, duplicated or idle; triage_suggestion merges duplicate suggestions. ${driver} approves hires, SOULs and retirements; you can't change a member yourself.` : "",
+    b.kind === "chief" ? `You are the Crew Chief, the only built-in crew member, and you manage the crew. When you notice recurring work that deserves its own crew member (the same kind of task 3+ times), call propose_crew_member. You are the workspace admin: crew_overview and member_files show how each member is set up and doing; propose_soul, propose_member_change (profile, model, budget, policy), propose_retire and delete_member_files change a member once ${driver} approves the pit stop. Propose only with evidence (runs, retros, idle weeks). triage_suggestion merges duplicate suggestions.` : "",
     b.kind === "chief" ? crewRoster(b as Bot, driver) : `The Crew Chief may ask you something on ${driver}'s behalf. Answer it fully in one reply; that reply goes back to the Chief.`,
     b.kind === "chief" && plansOn() ? planRules(driver) : "",
     unseen > 0 ? `The harness changed since you last looked (${unseen} note${unseen === 1 ? "" : "s"}): call whats_new before you start.` : "",
@@ -307,7 +307,7 @@ export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { br
   if (b.kind === "chief") tools.push({ type: "function", name: "ask_crew_member",
     description: "Ask another crew member a question, or give them a task in their job, and wait up to 10 minutes for their answer. They work in their own thread with their own memory, logins, computer, cap and permissions; any pit stop they hit still goes to the driver.",
     inputSchema: { type: "object", properties: { member: { type: "string", description: "The member's name" }, question: { type: "string", description: "Self-contained: they can't see this thread. Say what you need back." } }, required: ["member", "question"] } });
-  // The Chief manages the crew: it reads every member's setup and record, proposes SOUL changes and retirements, tidies suggestions.
+  // The Chief is the workspace admin: it reads every member's setup, record and files; every change it proposes waits for the driver.
   if (b.kind === "chief") tools.push(
     { type: "function", name: "crew_overview", description: "How each member is set up and doing: SOUL, house rules, skills with loads and staleness, memory use, last runs, retros, open suggestions (private members: setup only). Omit member for the whole crew.",
       inputSchema: { type: "object", properties: { member: { type: "string" } } } },
@@ -315,6 +315,12 @@ export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { br
       inputSchema: { type: "object", properties: { member: { type: "string" }, soul: { type: "string" }, why: { type: "string", description: "The evidence: runs, retros, what kept going wrong" } }, required: ["member", "soul", "why"] } },
     { type: "function", name: "propose_retire", description: "Propose retiring a member: it leaves the crew and its schedules stop; its threads and memory stay. The driver approves it in a pit stop.",
       inputSchema: { type: "object", properties: { member: { type: "string" }, why: { type: "string", description: "The evidence: idle weeks, a job another member covers, work that ended" } }, required: ["member", "why"] } },
+    { type: "function", name: "propose_member_change", description: "Propose changing a member's profile: name, job, house_rules, hue, shape, personality, provider, model, weekly_cap_usd, policy ({effect: allow|ask}), engram_scope. Pass only what changes. The driver approves it in a pit stop.",
+      inputSchema: { type: "object", properties: { member: { type: "string" }, changes: { type: "object" }, why: { type: "string", description: "The evidence for the change" } }, required: ["member", "changes", "why"] } },
+    { type: "function", name: "member_files", description: "List one folder of a member's /bot/work (not a private member's). Omit path for the top.",
+      inputSchema: { type: "object", properties: { member: { type: "string" }, path: { type: "string" } }, required: ["member"] } },
+    { type: "function", name: "delete_member_files", description: "Propose deleting files or folders (with their contents) from a member's /bot/work: 1 to 50 paths. The driver approves it in a pit stop.",
+      inputSchema: { type: "object", properties: { member: { type: "string" }, paths: { type: "array", items: { type: "string" } }, why: { type: "string" } }, required: ["member", "paths", "why"] } },
     { type: "function", name: "triage_suggestion", description: "Tidy the crew's open suggestions: merge_into folds a duplicate into another (votes and evidence move over); note adds evidence. Accepting and dismissing stay with the driver.",
       inputSchema: { type: "object", properties: { id: { type: "string" }, merge_into: { type: "string" }, note: { type: "string" } }, required: ["id"] } });
   if (b.kind === "chief") tools.push({ type: "function", name: "propose_crew_member",

@@ -12,7 +12,7 @@ import { viewSkill } from "./skills.js";
 import { harnessHelp, TOPICS } from "../manual.js";
 import { CHANGELOG } from "../changelog.js";
 import { suggest } from "./retro.js";
-import { crewOverview, soulProposal, retireProposal, triageSuggestion, openSuggestions } from "./manage.js";
+import { crewOverview, soulProposal, retireProposal, memberChange, memberFiles, fileDeletion, triageSuggestion, openSuggestions } from "./manage.js";
 import { computer } from "./machines.js";
 import { pitStop } from "./pitstops.js";
 import { addSchedule, listSchedules, updateSchedule, deleteSchedule, lastScheduledRun } from "./schedules.js";
@@ -190,6 +190,29 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
       const decision = await pitStop({ botId: b.id, threadId, kind: "retire", effect: "retire", title: `Retire ${pr.bot!.name}`, detail: pr.detail! });
       const driver = getSetting("driver_name", "the driver");
       return say(decision === "approved" ? `${pr.bot!.name} is retired; its schedules are off. Your crew list updates in your next thread.` : decision === "expired" ? `${driver} didn't answer; ${pr.bot!.name} stays and the proposal expired.` : `${driver} kept ${pr.bot!.name}.`, decision === "approved");
+    }
+    case "propose_member_change": {
+      if (b.kind !== "chief") return say("Only the Crew Chief manages the crew.", false);
+      const pr = memberChange(String(a.member || ""), a.changes, String(a.why || ""));
+      if ("error" in pr) return say(pr.error!, false);
+      const fields = pr.detail!.diff.map((d) => d.field);
+      const decision = await pitStop({ botId: b.id, threadId, kind: "member", effect: "member", title: `Change ${pr.bot!.name}: ${fields.join(", ")}`, detail: pr.detail! });
+      const driver = getSetting("driver_name", "the driver");
+      return say(decision === "approved" ? `${pr.bot!.name} is updated (${fields.join(", ")}); its next run uses it.` : decision === "expired" ? `${driver} didn't answer; nothing changed and the proposal expired.` : `${driver} kept ${pr.bot!.name} as it was.`, decision === "approved");
+    }
+    case "member_files": {
+      if (b.kind !== "chief") return say("Only the Crew Chief manages the crew.", false);
+      const r = memberFiles(String(a.member || ""), String(a.path || ""));
+      return "error" in r ? say(r.error!, false) : say(r.text!);
+    }
+    case "delete_member_files": {
+      if (b.kind !== "chief") return say("Only the Crew Chief manages the crew.", false);
+      const pr = fileDeletion(String(a.member || ""), a.paths, String(a.why || ""));
+      if ("error" in pr) return say(pr.error!, false);
+      const n = pr.detail!.paths.length;
+      const decision = await pitStop({ botId: b.id, threadId, kind: "files", effect: "delete", title: `Delete ${n} item${n === 1 ? "" : "s"} from ${pr.bot!.name}'s files`, detail: pr.detail! });
+      const driver = getSetting("driver_name", "the driver");
+      return say(decision === "approved" ? `Deleted from ${pr.bot!.name}'s workspace: ${pr.detail!.paths.map((p) => p.path).join(", ")}.` : decision === "expired" ? `${driver} didn't answer; nothing was deleted and the proposal expired.` : `${driver} kept the files.`, decision === "approved");
     }
     case "triage_suggestion": {
       if (b.kind !== "chief") return say("Only the Crew Chief manages the crew.", false);

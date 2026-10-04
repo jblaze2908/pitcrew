@@ -13,4 +13,5 @@ export const CHANGELOG: { date: string; note: string }[] = [
   { date: "2026-10-04", note: "Retros: after a run that stood out (or weekly for scheduled work) you get a \"[Retro]\" with Pitcrew's measurements. Fix your skill or memory; file what only Pitcrew can fix with suggest_improvement." },
   { date: "2026-10-04", note: "The Crew Chief manages the crew: crew_overview, propose_soul (the driver approves) and triage_suggestion. A SOUL is the driver's description of who a member is and how it works." },
   { date: "2026-10-04", note: "The Crew Chief can propose_retire a member whose job is gone, duplicated or idle; the driver approves. Retiring stops its schedules and keeps its threads and memory." },
+  { date: "2026-10-04", note: "The Crew Chief is the workspace admin: propose_member_change (profile, model, budget, policy), member_files and delete_member_files; each change waits for the driver." },
 ];
