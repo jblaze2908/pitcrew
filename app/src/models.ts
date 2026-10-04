@@ -10,7 +10,7 @@ export interface BotRow {
 export interface ThreadRow {
   id: string; bot_id: string; title: string; codex_id: string | null; pinned: number; status: ThreadStatus;
   ctx_tokens: number | null; ctx_window: number | null; carry: string | null; archived: number;
-  origin: string | null; autonomy: string; created_at: number; updated_at: number;
+  origin: string | null; autonomy: string; tools_sig: string | null; created_at: number; updated_at: number;
 }
 export interface TurnRow {
   id: string; thread_id: string; bot_id: string; codex_turn_id: string | null; status: string; trigger: string;
