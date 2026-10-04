@@ -10,6 +10,7 @@ import { stepView } from "../../lib/steps";
 import { StepIcon } from "../../components/StepIcon";
 import { api } from "../../lib/api";
 import { useFetch } from "../../lib/useFetch";
+import { catches } from "./Painting";
 
 export const stepOk = (e: ThreadEvent) => e.data.status === "completed" && (e.data.exitCode == null || e.data.exitCode === 0);
 const isImg = (p: string) => /\.(png|jpe?g|webp|gif)$/i.test(p);
@@ -46,15 +47,19 @@ function Shot({ e, b }: { e: ThreadEvent; b: Bot }) {
 /** Images a member made (generate_image or Codex's image_gen), kept in its out/images. */
 function Images({ e, b }: { e: ThreadEvent; b: Bot }) {
   const d = e.data, paths = d.paths as string[];
+  // The paint caught while waiting covers the image, then falls away once (Painting.tsx).
+  const [cover] = useState(() => (d.paintingId && catches.get(d.paintingId)) || null);
+  const [gone, setGone] = useState(!cover);
+  useEffect(() => { if (!cover) return; catches.delete(d.paintingId); const t = setTimeout(() => setGone(true), 1700); return () => clearTimeout(t); }, [cover, d.paintingId]);
   const meta = [d.from?.length ? `edited from ${(d.from as string[]).map((p) => p.split("/").pop()).join(", ")}` : null, d.model, d.cost != null ? `$${Number(d.cost).toFixed(3)}` : null].filter(Boolean).join(" · ");
   return (
     <div className="msg bot"><Face b={b} size="sm" mood="idle" />
       <figure className="shot">
-        <div className={paths.length > 1 ? "shot-grid" : undefined}>{paths.map((p) => {
+        <div className={`img-wrap${paths.length > 1 ? " shot-grid" : ""}`}>{paths.map((p) => {
           const src = `/files/${d.botId}/${p}?inline=1`;
           return <a key={p} href={src} target="_blank" rel="noopener"><img src={src} alt={d.caption} loading="lazy" /></a>;
-        })}</div>
-        <figcaption className="small muted">{d.caption}{meta && <span className="faint">{` · ${meta}`}</span>}</figcaption>
+        })}{!gone && cover && <div className="unveil" aria-hidden="true">{Array.from({ length: 48 }, (_, i) => <i key={i} style={{ background: cover[i] || undefined, ["--r" as any]: `${((i * 47) % 60) - 30}deg`, animationDelay: `${((i * 29) % 12) * 35}ms` }} />)}</div>}</div>
+        <figcaption className="small muted">{d.caption}{meta && <span className="faint">{` · ${meta}`}</span>}{cover && cover.length > 0 && <span className="faint">{` · thanks for the ${cover.length} squares`}</span>}</figcaption>
       </figure>
     </div>
   );
