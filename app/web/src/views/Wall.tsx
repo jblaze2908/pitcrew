@@ -19,7 +19,9 @@ export function Wall() {
   const [asksVersion, setAsksVersion] = useState(0);
   const hour = hourNow();
   const greet = hour < 5 ? "Late night" : hour < 12 ? "Morning" : hour < 17 ? "Afternoon" : "Evening";
-  const n = S.pitstops.length;
+  // Pit stops block a run; Engram notes only wait for your review, so they sit apart and don't count.
+  const pits = S.pitstops.filter((p) => p.kind !== "engram"), notes = S.pitstops.filter((p) => p.kind === "engram");
+  const n = pits.length;
   // Kept dashboards bound to a ledger: always current, since they read the ledger on view (server/ledger.ts).
   const boards = useFetch(() => api.get<KeptSurface[]>("/api/surfaces?bound=1", { quiet: true }), []);
   return (
@@ -41,8 +43,13 @@ export function Wall() {
       {n > 0 && (
         <section className="col">
           <div className="spread"><p className="pc-lab">Box, box: waiting on you</p>{n > 1 && <a className="small faint" href="#/pitstops">Batch decide</a>}</div>
-          <div className="grid2">{S.pitstops.slice(0, 6).map((p) => <PitCard key={p.id} p={p} />)}</div>
+          <div className="grid2">{pits.slice(0, 6).map((p) => <PitCard key={p.id} p={p} />)}</div>
         </section>)}
+      {notes.length > 0 && (
+        <details className="col">
+          <summary className="pc-lab">{`Notes for Engram · ${notes.length} to review`}</summary>
+          <div className="grid2">{notes.slice(0, 8).map((p) => <PitCard key={p.id} p={p} />)}</div>
+        </details>)}
       {!!boards.data?.length && (
         <section className="col">
           <p className="pc-lab">Dashboards</p>

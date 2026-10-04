@@ -68,7 +68,8 @@ function TopBar({ crumb }: { crumb: string }) {
 
 function Side({ route }: { route: Route }) {
   const { S, threadBot } = useStore();
-  const pending = S.pitstops.length;
+  // Engram notes wait for review without blocking anything, so they don't count as pit stops.
+  const pending = S.pitstops.filter((p) => p.kind !== "engram").length;
   const nav = (id: string, label: string, href: string, count?: ReactNode, hot = false) => (
     <a className={`pc-nav ${route.name === id ? "on" : ""}`} href={href}>{label}{count != null && <em className={hot ? "hot" : ""}>{count}</em>}</a>
   );

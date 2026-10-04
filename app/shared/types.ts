@@ -125,7 +125,8 @@ export interface Schedule { id: string; bot_id: string; thread_id: string | null
 export interface Rule { id: string; bot_id: string; bot_name?: string; label: string; effect: string; created_at: number }
 export interface Learned { id: number; bot_id: string; bot_name?: string; label: string; effect: string; streak: number; need: number; approvals: number; denials: number }
 /** GET /api/bots/:id */
-export interface BotDetail { bot: BotCard; memory: Memory[]; memoryIn: "pitcrew" | "engram"; memoryError: string | null; schedules: Schedule[]; rules: Rule[]; learned: Learned[] }
+/** memory: the member's own (agent tier, in Pitcrew); global: notes it filed in Engram, null when unlinked. */
+export interface BotDetail { bot: BotCard; memory: Memory[]; global: Memory[] | null; memoryIn: "pitcrew" | "engram"; memoryError: string | null; schedules: Schedule[]; rules: Rule[]; learned: Learned[] }
 /** A connection a new member could read through Engram (GET /api/engram/connections). */
 export interface EngramConnection { id: string; name: string; status: "ok" | "warn" | "signal"; detail: string; read: number; write: number }
 /** A row of BotCard.threads, or of GET /api/bots/:id/threads?q= (which adds archived and a snippet). */

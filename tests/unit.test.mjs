@@ -893,3 +893,33 @@ test("threads are titled from the conversation after their first run, never over
   assert.equal(await Tt.nameFromConversation("th_name", { fetcher }), null);
   assert.equal(one("SELECT title FROM threads WHERE id='th_name'").title, "Mine", "a hand-set title stays");
 });
+
+test("memory tiers: session notes ride the recap, agent memory is capped and private, global refuses task state", async () => {
+  const Tl = await import("../app/dist/src/runtime/tools.js");
+  const T = await import("../app/dist/src/runtime/turns.js");
+  run("INSERT INTO bots(id,name,created_at) VALUES('b_mem','Memo',0)");
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_mem','b_mem','m',0,0)");
+  const c = { bot: { id: "b_mem" }, mems: new Map() };
+  const call = (args) => Tl.dynamicTool(c, "th_mem", { tool: "remember", threadId: "cx_mem", arguments: args });
+  const text = (r) => r.contentItems[0].text;
+
+  assert.match(text(await call({ text: "Waiting on Jai to pick the Goa dates", scope: "session" })), /Noted for this thread/);
+  assert.match(T.recap("th_mem"), /Notes you kept for this thread:\n- Waiting on Jai to pick the Goa dates/);
+
+  const r1 = await call({ text: "Blinkit replay returns 403; read history through the browser session" });
+  assert.match(text(r1), /Saved to your memory as \[me_/);
+  const id = /\[(me_[^\]]+)\]/.exec(text(r1))[1];
+  assert.equal(one("SELECT text FROM memory WHERE id=?", id).text, "Blinkit replay returns 403; read history through the browser session");
+  for (let i = 0; i < 10; i++) await call({ text: `filler ${i} `.padEnd(300, "x") });
+  const full = await call({ text: "one more thing that doesn't fit".padEnd(300, "y") });
+  assert.equal(full.success, false); assert.match(text(full), /memory is full \(3000 chars/);
+  assert.match(text(await call({ text: "Blinkit replay 403s; use the browser session", id })), /Saved to your memory/, "a rewrite fits");
+
+  assert.match(text(await call({ text: "Prefers flat FHD+ phones", scope: "global" })), /aren't linked/);
+  assert.equal(Tl.notGlobal("The ledger is at /bot/work/grocery/ledger.db"), "it names files or paths in your workspace");
+  assert.equal(Tl.notGlobal("update.py runs at 23:30 from the schedule"), "it names files or paths in your workspace");
+  assert.equal(Tl.notGlobal("Jai's grocery budget is ₹3,000 a week"), null);
+
+  const f = await Tl.dynamicTool(c, "th_mem", { tool: "forget", threadId: "cx_mem", arguments: { id } });
+  assert.match(text(f), /^Forgotten/); assert.ok(one("SELECT forgotten_at FROM memory WHERE id=?", id).forgotten_at);
+});

@@ -255,22 +255,18 @@ function openProposal(x: z.output<typeof ProposalZ>, agents: Map<string, string>
 export async function mirrorInbox() {
   const inbox = shape(InboxZ, await call("/link/inbox"), "inbox");
   const agents = new Map(all<{ bot_id: string; agent_id: string }>("SELECT bot_id, agent_id FROM engram_members").map((r) => [r.agent_id, r.bot_id]));
-  const present = new Set<string>(), auto: string[] = []; let opened = 0, closed = 0;
+  const present = new Set<string>(); let opened = 0, closed = 0;
   for (const raw of inbox.proposals as any[]) {
     if (typeof raw?.id === "string" && (raw.status === undefined || raw.status === "open")) present.add(raw.id);
     const p = ProposalZ.safeParse(raw);
-    if (p.success && p.data.scope !== "private" && (!p.data.status || p.data.status === "open") && openProposal(p.data, agents)) { opened++; if (savesItself(p.data)) auto.push(`eg_${p.data.id}`); }
+    if (p.success && p.data.scope !== "private" && (!p.data.status || p.data.status === "open") && openProposal(p.data, agents)) opened++;
   }
-  // Plain new memories save without a pit stop (30 days to 2026-10-04: 26 of 30 Engram pit stops were answered in Engram
-  // or never). Sequential: one Engram call each, only for proposals that opened on this pass.
-  for (const id of auto) await decideProposal(id, "accept", { auto: true }).catch(() => {});
+  // Global notes wait for the driver (memory tiers, 2026-10-04): nothing here accepts on their behalf.
   for (const ps of all<{ id: string; detail: string }>("SELECT id, detail FROM pitstops WHERE kind='engram' AND status='pending'"))
     if (!present.has(json(ps.detail, {}).proposal?.id)) { closePit(ps.id, GONE); closed++; }
   return { open: present.size, opened, closed };
 }
 
-// A new fact: no conflict with a held memory, not held for review, not a share, tool call or skill. Those still ask.
-const savesItself = (x: z.output<typeof ProposalZ>) => x.kind === "memory" && !x.replaces && !x.held;
 export async function decideProposal(id: string, decision: EngramDecision, { auto = false } = {}) {
   const ps = one<PitstopRow>("SELECT * FROM pitstops WHERE id=? AND kind='engram'", id);
   if (!ps) throw httpErr(404, "No such pit stop");
@@ -380,10 +376,10 @@ const memCache = new Map<string, Map<string, string>>();
 export const engramMemories = (botId: string) => { const m = memCache.get(botId); return m ? [...m].map(([id, text]) => ({ id, text })) : null; };
 
 // One POST per remember. In a thread that read untrusted content Engram holds it for review instead of accepting it.
-export async function remember(b: Bot, text: string, { id = null, threadId = null, by = "member", validUntil = null }: { id?: string | null; threadId?: string | null; by?: "member" | "driver"; validUntil?: string | null } = {}) {
+export async function remember(b: Bot, text: string, { id = null, threadId = null, by = "member", validUntil = null, review = false }: { id?: string | null; threadId?: string | null; by?: "member" | "driver"; validUntil?: string | null; review?: boolean } = {}) {
   const cache = memCache.get(b.id), supersedes = id && cache?.has(id) ? id : null;
   const res = shape(RememberZ, await call("/link/memories", { method: "POST", body: { pitcrew_id: b.id, text, supersedes,
-    ...(threadId ? { ref: `pitcrew:thread:${threadId}` } : {}), ...(validUntil ? { valid_until: validUntil } : {}), untrusted: tainted(threadId), by } }), "memory result");
+    ...(threadId ? { ref: `pitcrew:thread:${threadId}` } : {}), ...(validUntil ? { valid_until: validUntil } : {}), untrusted: tainted(threadId), by, ...(review ? { review: true } : {}) } }), "memory result");
   // Engram answers a restatement with the existing id; known marks it so "Learned this run" won't offer to undo it.
   const known = res.status === "accepted" && !supersedes && !!cache?.has(res.id);
   if (res.status === "accepted" && cache) { if (supersedes) cache.delete(supersedes); cache.set(res.id, text); }

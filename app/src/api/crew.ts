@@ -10,13 +10,13 @@ import { memberChanged, listMemories, remember, forget } from "../engram.js";
 import { memberLinked } from "../engramStore.js";
 import { learnedFor, undoLearned } from "../runtime/learned.js";
 import { signedIn, type Env } from "../http/guard.js";
-import { readJson, jsonBody, raw, text, trimmed, flag, field } from "../http/body.js";
+import { readJson, jsonBody, raw, text, trimmed, flag, field, pick } from "../http/body.js";
 import { botCard, LEARNED, liveLearned } from "./views.js";
 import { ledgerOverview, tablePreview } from "../ledger.js";
 import { json } from "../db.js";
 import type { LearnedRow, PitstopRow, ScheduleRow } from "../models.js";
 
-const Memory = z.object({ text: trimmed(500) });
+const Memory = z.object({ text: trimmed(500), scope: pick(["agent", "global"] as const, "agent") });
 const MemoryEdit = z.object({ text: text(500) });
 const ForgetSource = z.object({ source: raw });
 const Schedule = z.object({ threadId: field((v) => v || null), spec: text(), prompt: text() });
@@ -30,14 +30,14 @@ export const crewRoutes = new Hono<Env>()
   .get("/api/bots/:id", signedIn, async (c) => {
     const id = c.req.param("id"), b = member(id);
     const pending = all<PitstopRow>("SELECT * FROM pitstops WHERE status='pending'");
-    // A linked member's memories are read from Engram (one GET per view); Pitcrew's own stay as they were.
-    let memory: unknown[], memoryIn = "pitcrew", memoryError: string | null = null;
+    // Agent memory is Pitcrew's own; global notes a linked member filed live in Engram (one GET per view).
+    const memory = all("SELECT * FROM memory WHERE bot_id=? AND forgotten_at IS NULL ORDER BY created_at DESC", id);
+    let global: unknown[] | null = null, memoryError: string | null = null;
     if (memberLinked(b)) {
-      memoryIn = "engram";
-      try { memory = (await listMemories(b)).map((m) => ({ id: m.id, bot_id: id, text: m.text, source: m.source, created_at: m.created_at, updated_at: m.created_at })); }
-      catch (e: any) { memory = []; memoryError = e.message; }
-    } else memory = all("SELECT * FROM memory WHERE bot_id=? AND forgotten_at IS NULL ORDER BY created_at DESC", id);
-    return c.json({ bot: botCard(b, pending), memory, memoryIn, memoryError,
+      try { global = (await listMemories(b)).map((m) => ({ id: m.id, bot_id: id, text: m.text, source: m.source, created_at: m.created_at, updated_at: m.created_at })); }
+      catch (e: any) { global = []; memoryError = e.message; }
+    }
+    return c.json({ bot: botCard(b, pending), memory, global, memoryIn: "pitcrew", memoryError,
       schedules: all<ScheduleRow>("SELECT * FROM schedules WHERE bot_id=? ORDER BY created_at DESC", id).map((s) => ({ ...s, last: R.lastScheduledRun(s) })), rules: all("SELECT * FROM rules WHERE bot_id=? AND revoked_at IS NULL ORDER BY created_at DESC", id), learned: liveLearned(all<LearnedRow>(`${LEARNED} WHERE l.bot_id=? ORDER BY l.updated_at DESC`, id)) });
   })
   // The patch is normalised by updateBot itself (crew.ts), field by field.
@@ -63,13 +63,13 @@ export const crewRoutes = new Hono<Env>()
   // Memory and schedules
   .post("/api/bots/:id/memory", signedIn, async (c) => {
     const id = c.req.param("id"), b = await jsonBody(c, Memory), bot = member(id); if (!b.text) throw httpErr(400, "Empty");
-    if (memberLinked(bot)) { const r = await remember(bot, b.text, { by: "driver" }); return c.json({ id: r.id, status: r.status }); }
+    if (b.scope === "global" && memberLinked(bot)) { const r = await remember(bot, b.text, { by: "driver" }); return c.json({ id: r.id, status: r.status }); }
     const mid = uid("me"); run("INSERT INTO memory(id,bot_id,text,source,created_at,updated_at) VALUES(?,?,?,?,?,?)", mid, id, b.text, "driver", now(), now()); return c.json({ id: mid }); })
   .patch("/api/memory/:id", signedIn, async (c) => { const b = await jsonBody(c, MemoryEdit); run("UPDATE memory SET text=?, updated_at=? WHERE id=?", b.text, now(), c.req.param("id")); return c.json({ ok: true }); })
   .post("/api/memory/:id/forget", signedIn, (c) => { const id = c.req.param("id"); run("UPDATE memory SET forgotten_at=? WHERE id=?", now(), id); audit("driver", "memory.forgotten", { id }); return c.json({ ok: true }); })
   .post("/api/bots/:id/memory/:mid/forget", signedIn, async (c) => {
     const id = c.req.param("id"), mid = c.req.param("mid"), b = member(id);
-    if (memberLinked(b)) { await forget(b, mid, "driver"); return c.json({ ok: true }); }
+    if (!mid.startsWith("me_") && memberLinked(b)) { await forget(b, mid, "driver"); return c.json({ ok: true }); }
     run("UPDATE memory SET forgotten_at=? WHERE id=? AND bot_id=?", now(), mid, id); audit("driver", "memory.forgotten", { id: mid }); return c.json({ ok: true });
   })
   // "Learned this run" card: what a turn remembered, and undoing a new one.

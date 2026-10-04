@@ -7,7 +7,7 @@ import { resolveSurface, ledgerPath, listLedgers, mayRead, runQueries } from "..
 import { imageFrom, saveShot, type ToolResult } from "../shots.js";
 import type { Brain } from "../computer.js";
 import { active } from "./state.js";
-import { addEvent, findThreads, threadLink, readThread } from "./threads.js";
+import { addEvent, findThreads, threadLink, readThread, addThreadNote, NOTES_MAX } from "./threads.js";
 import { computer } from "./machines.js";
 import { pitStop } from "./pitstops.js";
 import { addSchedule, listSchedules, updateSchedule, deleteSchedule, lastScheduledRun } from "./schedules.js";
@@ -21,6 +21,16 @@ import { memberLinked } from "../engramStore.js";
 
 const ist = (t: number | null) => (t ? new Date(t + IST).toISOString().slice(0, 16).replace("T", " ") : "—");
 
+// Agent memory's cap (chars across a member's memories): small enough to sit in every thread's instructions (~750
+// tokens, estimate), so it gets rewritten instead of growing.
+export const AGENT_MEMORY_MAX = 3000;
+// Why a note isn't about the driver (so it belongs in agent memory), or null. Paths, files and task state are the
+// member's working knowledge, not facts about the driver.
+export function notGlobal(text: string) {
+  if (/\/bot\/|\.(db|py|mjs|js|csv|json|md)\b/i.test(text)) return "it names files or paths in your workspace";
+  if (/\b(ledger|update\.py|schedule[sd]?|backfill|cursor|script|endpoint)\b/i.test(text)) return "it's about how your task runs";
+  return null;
+}
 export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Promise<ToolResult> {
   const b = getBot(c.bot.id)!, a = p.arguments || {};
   switch (p.tool) {
@@ -62,38 +72,46 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
       if (!text) return say("Nothing to remember", false);
       const until = /^\d{4}-\d{2}-\d{2}$/.test(String(a.valid_until || "")) ? String(a.valid_until) : null;
       if (a.valid_until && !until) return say("valid_until must be a date as YYYY-MM-DD", false);
-      if (memberLinked(b)) {
-        try {
-          const r = await remember(b, text, { id: a.id ? String(a.id) : null, threadId, validUntil: until });
-          noteLearned(turnId, threadId, b.id, r.id, text, r.status !== "accepted" ? "held" : r.known ? "known" : r.replaced ? "replaced" : "saved");
-          if (r.status === "accepted") {
-            if (r.replaced) c.mems.get(p.threadId)?.delete(r.replaced);
-            c.mems.get(p.threadId)?.set(r.id, text);
-            addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Remembered in Engram: ${text}` });
-            return say(`Saved in Engram as [${r.id}].`);
-          }
-          addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Sent to Engram for review: ${text}` });
-          return say(`Engram is holding this for ${getSetting("driver_name", "the driver")} to review${r.reasons.length ? ` (${r.reasons.join("; ")})` : ""}. It isn't a memory until they accept it.`);
-        } catch (e: any) { return say(`Couldn't save it to Engram: ${e.message}`, false); }
+      const scope = ["session", "agent", "global"].includes(a.scope) ? a.scope : "agent";
+      if (scope === "session") {
+        const notes = addThreadNote(threadId, text);
+        if (notes == null) return say(`This thread's notes are full (${NOTES_MAX} chars): fold older notes into one.`, false);
+        addEvent(threadId, turnId, "system", { text: `Noted for this thread: ${text}` });
+        return say("Noted for this thread; it carries over if the thread restarts.");
       }
-      // Pitcrew's own table has no expiry column, so the date goes in the text.
+      if (scope === "global") {
+        if (!memberLinked(b)) return say("Global notes live in Engram, and you aren't linked to it. Keep it as agent memory instead.", false);
+        const why = notGlobal(text);
+        if (why) return say(`Not global: ${why}. Save it with scope "agent" (your own memory) instead.`, false);
+        try {
+          const r = await remember(b, text, { id: a.id ? String(a.id) : null, threadId, validUntil: until, review: true });
+          noteLearned(turnId, threadId, b.id, r.id, text, r.status !== "accepted" ? "held" : r.known ? "known" : r.replaced ? "replaced" : "saved");
+          if (r.status === "accepted") return say(r.known ? `Engram already knows this [${r.id}].` : `Saved in Engram as [${r.id}].`);
+          addEvent(threadId, turnId, "system", { text: `Sent to Engram for ${getSetting("driver_name", "the driver")}'s review: ${text}` });
+          return say(`Sent to Engram for ${getSetting("driver_name", "the driver")}'s review${r.reasons.length ? ` (${r.reasons.join("; ")})` : ""}. It isn't shared until they accept it.`);
+        } catch (e: any) { return say(`Couldn't send it to Engram: ${e.message}`, false); }
+      }
+      // Agent memory: the member's own, in Pitcrew, written freely. The cap makes it consolidate instead of growing.
       const local = until ? `${text} (valid until ${until})` : text;
-      const id = a.id && one("SELECT 1 FROM memory WHERE id=? AND bot_id=?", a.id, b.id) ? a.id : uid("me");
+      const id = a.id && one("SELECT 1 FROM memory WHERE id=? AND bot_id=? AND forgotten_at IS NULL", a.id, b.id) ? String(a.id) : uid("me");
+      const used = one<{ n: number }>("SELECT COALESCE(SUM(length(text)),0) n FROM memory WHERE bot_id=? AND forgotten_at IS NULL AND id<>?", b.id, id)!.n;
+      if (used + local.length > AGENT_MEMORY_MAX) return say(`Your memory is full (${AGENT_MEMORY_MAX} chars, ${used} used). Rewrite older memories into fewer (pass id) or forget stale ones, then save this.`, false);
       noteLearned(turnId, threadId, b.id, id, local, id === a.id ? "replaced" : "saved");
       if (id === a.id) run("UPDATE memory SET text=?, updated_at=? WHERE id=?", local, now(), id);
       else run("INSERT INTO memory(id,bot_id,text,source,created_at,updated_at) VALUES(?,?,?,?,?,?)", id, b.id, local, `thread:${threadId}`, now(), now());
       c.mems.get(p.threadId)?.set(id, local); // this thread already knows; other threads get it on their next turn
-      addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Remembered: ${local}` });
-      return say(`Saved as [${id}].`);
+      addEvent(threadId, turnId, "system", { text: `Remembered: ${local}` });
+      return say(`Saved to your memory as [${id}].`);
     }
     case "forget": {
-      if (memberLinked(b)) {
-        try { await forget(b, String(a.id || "")); } catch (e: any) { return say(`Couldn't forget it in Engram: ${e.message}`, false); }
-        c.mems.get(p.threadId)?.delete(String(a.id));
+      const id = String(a.id || "");
+      // me_… ids are the member's own memory in Pitcrew; anything else is an Engram id.
+      if (!id.startsWith("me_") && memberLinked(b)) {
+        try { await forget(b, id); } catch (e: any) { return say(`Couldn't forget it in Engram: ${e.message}`, false); }
         return say("Forgotten in Engram.");
       }
-      run("UPDATE memory SET forgotten_at=? WHERE id=? AND bot_id=?", now(), String(a.id), b.id);
-      c.mems.get(p.threadId)?.delete(String(a.id));
+      run("UPDATE memory SET forgotten_at=? WHERE id=? AND bot_id=?", now(), id, b.id);
+      c.mems.get(p.threadId)?.delete(id);
       return say("Forgotten.");
     }
     case "schedule_task": {

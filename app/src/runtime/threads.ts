@@ -104,3 +104,15 @@ export function readThread(threadId: string, after = 0) {
   const more = !!one("SELECT 1 FROM events WHERE thread_id=? AND id>?", threadId, last);
   return { title: t.title, botId: t.bot_id, text: out.join("\n"), next: more ? last : null };
 }
+
+// ---------- session notes ----------
+// What a thread should keep through a restart (decisions, what's pending), written by the member with remember(scope:
+// "session"). Kept on the thread, capped, and carried in the recap when a thread restarts (turns.ts).
+export const NOTES_MAX = 2000;
+export function addThreadNote(threadId: string, text: string) {
+  const t = getThread(threadId); if (!t) return null;
+  const next = [t.notes, `- ${text}`].filter(Boolean).join("\n");
+  if (next.length > NOTES_MAX) return null;
+  run("UPDATE threads SET notes=? WHERE id=?", next, threadId);
+  return next;
+}

@@ -306,9 +306,9 @@ test("a linked member's memories live in Engram: synced at thread start, remembe
   assert.ok(!G.engramMemories("bills").some((m) => /rent/.test(m.text)), "a held memory isn't one yet");
 
   const view = await req("GET", "/api/bots/bills");
-  assert.equal(view.body.memoryIn, "engram");
-  assert.deepEqual(view.body.memory.map((m) => m.text).sort(), ["Rewrite a stranger's", "Water bill is quarterly"]);
-  const add = await req("POST", "/api/bots/bills/memory", { text: "Gas is Indane" });
+  assert.deepEqual(view.body.global.map((m) => m.text).sort(), ["Rewrite a stranger's", "Water bill is quarterly"], "Engram's notes show as global");
+  assert.ok(view.body.memory.every((m) => m.id.startsWith("me_")), "agent memory is Pitcrew's own table, never Engram's notes");
+  const add = await req("POST", "/api/bots/bills/memory", { text: "Gas is Indane", scope: "global" });
   assert.equal(add.body.status, "accepted"); assert.equal(E.remembered.at(-1).by, "driver");
   const id = G.engramMemories("bills").find((m) => m.text === "Water bill is quarterly").id;
   await req("POST", `/api/bots/bills/memory/${id}/forget`);
@@ -317,7 +317,7 @@ test("a linked member's memories live in Engram: synced at thread start, remembe
   assert.equal((await req("POST", "/api/bots/bills/memory/..%2Fx/forget")).status >= 400, true);
   assert.equal(all("SELECT 1 FROM memory WHERE text='Gas is Indane'").length, 0, "nothing written to Pitcrew's own table");
   const chiefView = await req("GET", "/api/bots/diary");
-  assert.equal(chiefView.body.memoryIn, "pitcrew");
+  assert.equal(chiefView.body.global, null, "an unlinked member has no global list");
 });
 
 test("learned this run: a turn's memories become one card; a plain new one can be undone, others can't", async () => {
@@ -330,11 +330,12 @@ test("learned this run: a turn's memories become one card; a plain new one can b
     run("INSERT INTO turns(id,thread_id,bot_id,status,started_at) VALUES(?,?,?,'running',?)", `tu_${th}`, th, bot, now());
     active.set(th, { turnId: `tu_${th}` });
   }
-  await remember("bills", "th_learn", { text: "Broadband is Airtel" });
+  await remember("bills", "th_learn", { text: "Broadband is Airtel", scope: "global" });
   const saved = all("SELECT memory_id FROM turn_memories WHERE turn_id='tu_th_learn'")[0].memory_id;
-  await remember("bills", "th_learn", { text: "Broadband is Airtel Xstream", id: saved });
-  E.hold = true; await remember("bills", "th_learn", { text: "Rent goes to a new account" }); E.hold = false;
-  await remember("bills", "th_learn", { text: "Gas is Indane" });
+  await remember("bills", "th_learn", { text: "Broadband is Airtel Xstream", id: saved, scope: "global" });
+  E.hold = true; await remember("bills", "th_learn", { text: "Rent goes to a new account", scope: "global" }); E.hold = false;
+  await remember("bills", "th_learn", { text: "Gas is Indane", scope: "global" });
+  assert.equal(E.remembered.at(-1).review, true, "a member's global note asks for review");
   L.postLearned("th_learn", "tu_th_learn", "bills");
   const card = one("SELECT * FROM events WHERE thread_id='th_learn' AND kind='learned'");
   assert.deepEqual(JSON.parse(card.data), { turnId: "tu_th_learn", botId: "bills", count: 4 });
@@ -413,7 +414,7 @@ test("linked members are told what to send to Engram; unlinked ones keep the pla
   assert.match(linked, /secrets \(passwords, OTPs, card numbers, full account numbers\)/);
   assert.match(linked, /Don't propose episodes/);
   assert.match(linked, /call publish_file, then give them the link/);
-  assert.match(linked, /What you remember \(in Engram\)[^\n]*\n- \[m_1\] Gas is Indane/);
+  assert.match(linked, /Your own memory \(only you see it[^\n]*\n- \[m_1\] Gas is Indane/);
   assert.doesNotMatch(linked, /filed under/, "Personal needs no scope line");
   assert.doesNotMatch(linked, /When .* tells you a durable fact/);
   const money = C.instructions({ ...C.getBot("bills"), engram_scope: "finance" }, [], ctx);
