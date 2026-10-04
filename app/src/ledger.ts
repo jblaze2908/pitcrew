@@ -4,7 +4,7 @@
 // one SELECT/WITH statement (so no ATTACH can reach another file), and a worker enforces a deadline and a row cap.
 // Cost: one stat per view; queries run only when the ledger changed (cache keyed on the file's and its WAL's mtime+size).
 import { Worker } from "node:worker_threads";
-import { realpathSync, statSync } from "node:fs";
+import { readdirSync, realpathSync, statSync } from "node:fs";
 import { botDir } from "./computer.js";
 
 export const LEDGER_EXT = /\.(db|sqlite|sqlite3)$/i, MAX_QUERIES = 20, MAX_SQL = 3000, MAX_ROWS = 500, DEADLINE_MS = 3000;
@@ -66,6 +66,26 @@ export async function runQueries(file: string, queries: Record<string, string>):
   try { asOf = Math.max(statSync(file).mtimeMs, (() => { try { return statSync(`${file}-wal`).mtimeMs; } catch { return 0; } })()); } catch {}
   return { results, asOf };
 }
+
+// ---------- reading another member's ledger ----------
+// Crew members read each other's ledgers read-only; the owner is the only writer (its own shell). A private member's
+// ledgers stay with it. Returns the ledgers a member keeps (bounded walk: depth 3, 50 files) or one query's rows.
+export function listLedgers(botId: string) {
+  const root = `${botDir(botId)}/work`, out: string[] = [];
+  const walk = (rel: string, depth: number) => {
+    if (depth > 3 || out.length >= 50) return;
+    let ents: import("node:fs").Dirent[] = [];
+    try { ents = readdirSync(`${root}/${rel}`, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+      if (e.name.startsWith(".") || e.name === "node_modules") continue;
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(r, depth + 1); else if (e.isFile() && LEDGER_EXT.test(e.name)) out.push(r);
+    }
+  };
+  walk("", 0);
+  return out;
+}
+export const mayRead = (reader: { id: string }, owner: { id: string; private: boolean }) => reader.id === owner.id || !owner.private;
 
 // ---------- binding ----------
 // Which props a bound component gets from its query's rows. A bound component may leave these out of its spec.
