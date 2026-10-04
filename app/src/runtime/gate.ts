@@ -1,7 +1,8 @@
 // The gate: decides one tool call. The site policy first (browser and pixel tools), then rules and standing approvals,
 // then jev, then the driver. Every decision is logged for audit and for training a local classifier.
 import { readFileSync, realpathSync, statSync } from "node:fs";
-import { run, all, now, uid, audit, json } from "../db.js";
+import { createHash } from "node:crypto";
+import { run, one, all, now, uid, audit, json } from "../db.js";
 import { getSecret } from "../auth.js";
 import { getBot } from "../crew.js";
 import { jev, redact, jevSystemOne, secretKind, PAGE_CODE, type Call, type JevContext, type Policy, type Verdict } from "../jev.js";
@@ -35,12 +36,27 @@ export async function gate(c: Brain, threadId: string, call: Call, pit: PitInfo)
   // page code or storage writes, whose effect only jev can read from the code.
   if (browser && site.full && !taint && call.effect !== "pay" && !PAGE_CODE.test(call.tool || "") && !/^(card|cvv)$/.test(secretKind(JSON.stringify(call.arguments?.grounded_elements || [])) || ""))
     return logDecision(threadId, b.id, { decision: "allow", effect: call.effect || "browse", reason: `${site.site!.domain} is fully allowed`, by: "site" }, call);
-  const v = await jev(withScript(b.id, call), { policy, apiKey: getSecret("openrouter") || "missing", context: () => jevContext(threadId, b.house_rules) });
-  if (v.decision === "block") { logDecision(threadId, b.id, v, call); addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Blocked by jev: ${v.reason}. Nothing ran.`, tone: "bad" }); return false; }
+  const judged = withScript(b.id, call), script = judged.script;
+  // The same bytes of a workspace script that jev allowed or the driver approved before run again without asking.
+  if (script && !script.downloaded && one("SELECT 1 FROM script_trust WHERE bot_id=? AND sha=?", b.id, script.sha))
+    return allowed(threadId, logDecision(threadId, b.id, { decision: "allow", effect: "write_workspace", reason: `same ${script.path} as allowed before`, by: "script" }, call, { source: "standing" }));
+  const v = await jev(judged, { policy, apiKey: getSecret("openrouter") || "missing", context: () => jevContext(threadId, b.house_rules) });
+  if (v.decision === "block") {
+    logDecision(threadId, b.id, v, call);
+    const n = noteBlock(threadId);
+    // After ESCALATE_AFTER jev blocks in a row the driver decides instead (hard rules never escalate); past
+    // STOP_AFTER blocks in one run the run stops, so a member can't keep probing for a way through.
+    if (n.total >= STOP_AFTER) { addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Stopped: jev blocked ${n.total} actions in this run. Tell ${b.name} how to go on, or change its house rules.`, tone: "bad" }); import("./turns.js").then((T) => T.interrupt(threadId)).catch(() => {}); return false; }
+    if (n.consecutive < ESCALATE_AFTER || v.by === "rule") { addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Blocked by jev: ${v.reason}. Nothing ran.`, tone: "bad" }); return false; }
+    const decision = await pitStop({ botId: b.id, threadId, kind: pit.kind, effect: v.effect === "unknown" ? "ask" : v.effect, title: `${pit.title} · jev blocked ${n.consecutive} in a row`, detail: { ...pit.detail, signature: sig, pattern: pat, escalated: true }, jev: v });
+    if (decision === "approved") { trustScript(b.id, script, "driver"); return allowed(threadId, true); }
+    if (decision === "expired" && call.kind !== "shell") noteRefusal(threadId, EXPIRED_NOTE(pit.title));
+    return false;
+  }
   const forced = taint && OUTBOUND.has(v.effect);
   // Hands-free or YOLO stands in for the driver here; jev's verdict is still logged, so the audit shows what was waived.
   if ((v.decision !== "allow" || forced) && waived(auto, v.effect) && !v.forbidden) return logDecision(threadId, b.id, v, call, { decision: "allow", by: auto === "yolo" ? "yolo" : "hands-free", source: "standing" });
-  if (v.decision === "allow" && !forced) { const lid = uid("jl"), ok = logDecision(threadId, b.id, v, call, { id: lid }); shadowVerify(lid, call, v, policy); return ok; }
+  if (v.decision === "allow" && !forced) { const lid = uid("jl"), ok = logDecision(threadId, b.id, v, call, { id: lid }); shadowVerify(lid, call, v, policy); trustScript(b.id, script, "jev"); return allowed(threadId, ok); }
   // A standing approval covers repeats of the same action, but never money, deletion or sharing. Browser approvals
   // match only by their host-bearing pattern, so one granted on a.example never covers b.example; on a checkout page
   // nothing stands in for the driver on pay or send.
@@ -61,7 +77,22 @@ export async function gate(c: Brain, threadId: string, call: Call, pit: PitInfo)
   // An expired pit stop isn't a refusal: the driver wasn't there. Said so to the tool call; a command, whose decline
   // Codex reports as "rejected by user", also gets a steered note (pitstops.ts).
   if (decision === "expired" && call.kind !== "shell") noteRefusal(threadId, EXPIRED_NOTE(pit.title));
+  if (decision === "approved") { trustScript(b.id, script, "driver"); allowed(threadId, true); }
   return decision === "approved";
+}
+
+// Blocks per thread: in a row (any allowed call resets it) and in the current run. In memory: a restart starts afresh.
+export const ESCALATE_AFTER = 3, STOP_AFTER = 20;
+const blocks = new Map<string, { consecutive: number; total: number; turnId: string | null }>();
+export function noteBlock(threadId: string) {
+  const turnId = active.get(threadId)?.turnId ?? null, prev = blocks.get(threadId);
+  const n = { consecutive: (prev?.consecutive ?? 0) + 1, total: (prev && prev.turnId === turnId ? prev.total : 0) + 1, turnId };
+  blocks.set(threadId, n);
+  return n;
+}
+function allowed(threadId: string, ok: boolean) { const n = blocks.get(threadId); if (ok && n) n.consecutive = 0; return ok; }
+function trustScript(botId: string, script: Call["script"], by: string) {
+  if (script && !script.downloaded && !script.truncated) run("INSERT OR REPLACE INTO script_trust(bot_id,sha,path,by,at) VALUES(?,?,?,?,?)", botId, script.sha, script.path, by, now());
 }
 export const EXPIRED_NOTE = (title: string) => `Not done yet: the pit stop for "${title.slice(0, 160)}" expired because the driver didn't answer within 30 minutes. That isn't a refusal. Don't try it another way; finish what you can without it and say clearly what is waiting on the driver, so they can approve it when they're back.`;
 
@@ -83,7 +114,7 @@ export function withScript(botId: string, call: Call): Call {
     const root = realpathSync(`${botDir(botId)}/work`), f = realpathSync(`${botDir(botId)}${m[1].slice("/bot".length)}`);
     if (!f.startsWith(`${root}/`) || statSync(f).size > 1 << 20) return call;
     const src = readFileSync(f, "utf8");
-    return { ...call, script: { path: m[1], source: src.slice(0, SCRIPT_MAX), truncated: src.length > SCRIPT_MAX } };
+    return { ...call, script: { path: m[1], source: src.slice(0, SCRIPT_MAX), truncated: src.length > SCRIPT_MAX, sha: createHash("sha256").update(src).digest("hex").slice(0, 32), downloaded: m[1].startsWith("/bot/work/downloads/") } };
   } catch { return call; }
 }
 

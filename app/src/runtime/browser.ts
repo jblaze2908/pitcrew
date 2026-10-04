@@ -48,7 +48,7 @@ export async function runtimeTool(br: Brain, threadId: string, p: ToolCall): Pro
     const mcp = await comp.mcp(kind);
     comp.touch();
     timing.boot = Date.now() - t; t = Date.now();
-    if (kind === "browser" && tool !== "browser_tabs") await frontTab(mcp);
+    if (kind === "browser" && tool !== "browser_tabs" && needsFront(mcp, comp.viewers)) await frontTab(mcp);
     if (kind === "browser" && comp.viewers > 0 && /^browser_(click|select_option)$/.test(tool) && args.target) await glideTo(mcp, args);
     const tabsBefore = tabCounts.get(mcp);
     timing.prep = Date.now() - t; t = Date.now();
@@ -65,7 +65,7 @@ export async function runtimeTool(br: Brain, threadId: string, p: ToolCall): Pro
       noteSnapshot(p.threadId, snap, url, { scoped: !!(args.target || args.depth), seen: !reading && mode !== "none" });
       const post = await afterAction(b, threadId, p.threadId, mcp, { tool, text, snap, url, before: prev?.url, tabsBefore });
       if (post) out = `${post}\n\n${out}`;
-      const tb = readTabs(text); if (tb) tabCounts.set(mcp, tb.count);
+      const tb = readTabs(text); if (tb) noteTabs(mcp, tb.count);
     }
     addEvent(threadId, turnId, "tool", { type: kind, title, ...viaScript(p), server: kind, tool, input: debugArgs(args), status: r.isError ? "failed" : "completed", output: text.slice(0, 8000), timing });
     return { success: !r.isError, contentItems: toContentItems([{ type: "text", text: out }, ...content.filter((x) => x.type !== "text")], { codeMode: String(p.callId || "").startsWith("exec-") }) };
@@ -158,14 +158,21 @@ export function toContentItems(content: McpContent[], { codeMode = false } = {})
 // tabs in the live view, or a fresh MCP session adopted tab 0). Then the live view shows another tab, and Chrome throttles
 // the background tab's animation frames, so clicks wait on stability checks and time out. Before each action, bring the
 // agent's tab to the front. Costs two local MCP calls, only while more than one tab is open.
+// Only when something could have moved the foreground: the first action of a session, a change in the tab count (a popup,
+// a closed tab), or a driver watching the live view (they can switch tabs there). Otherwise the agent's tab is still in
+// front, and the check cost two MCP calls per action (the Blinkit backfill ran 165 navigations with 3 tabs open).
 const tabCounts = new WeakMap<Rpc, number>(); // browser MCP session → tab count from its last response
+const fronted = new WeakSet<Rpc>();            // sessions whose current tab was brought to the front since the count last changed
+export const needsFront = (mcp: Rpc, viewers = 0) => viewers > 0 || !fronted.has(mcp);
+export function noteTabs(mcp: Rpc, count: number) { if (tabCounts.get(mcp) !== count) fronted.delete(mcp); tabCounts.set(mcp, count); }
 export async function frontTab(mcp: Rpc) {
-  if (tabCounts.get(mcp) === 1) return;
+  if (tabCounts.get(mcp) === 1) { fronted.add(mcp); return; }
   try {
     const call = (args: Record<string, unknown>) => mcp.request("tools/call", { name: "browser_tabs", arguments: args }, 15000);
     const t = readTabs(((await call({ action: "list" })).content || []).map((x) => x.text || "").join("\n"));
     tabCounts.set(mcp, t?.count ?? 1);
     if (t && t.count > 1) await call({ action: "select", index: t.current });
+    fronted.add(mcp);
   } catch {}
 }
 

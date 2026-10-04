@@ -303,7 +303,9 @@ test("jev reads a workspace script the command runs, and nothing outside the wor
   writeFileSync(`${root}/bots/${b.id}/secret.py`, "TOKEN='x'\n");
   symlinkSync(`${root}/bots/${b.id}/secret.py`, `${work}/link.py`);
   const sh = (cmd) => ({ kind: "shell", command: `/bin/sh -lc '${cmd}'` });
-  assert.deepEqual(withScript(b.id, sh("python3 /bot/work/sub/parse.py --all")).script, { path: "/bot/work/sub/parse.py", source: "import json\nprint(json.dumps({'ok': 1}))\n", truncated: false });
+  const got = withScript(b.id, sh("python3 /bot/work/sub/parse.py --all")).script;
+  assert.deepEqual({ ...got, sha: undefined }, { path: "/bot/work/sub/parse.py", source: "import json\nprint(json.dumps({'ok': 1}))\n", truncated: false, sha: undefined, downloaded: false });
+  assert.match(got.sha, /^[0-9a-f]{32}$/);
   assert.equal(withScript(b.id, sh("python3 /bot/work/../secret.py")).script, undefined, "no .. out of the workspace");
   assert.equal(withScript(b.id, sh("python3 /bot/work/link.py")).script, undefined, "no symlink out of the workspace");
   assert.equal(withScript(b.id, sh("python3 /bot/work/missing.py")).script, undefined);
@@ -390,4 +392,42 @@ test("an expired pit stop tells the tool call it went unanswered, not that it wa
   assert.equal(r, false);
   const note = S2.takeRefusal("t_exp");
   assert.match(note, /expired because the driver didn't answer/); assert.match(note, /isn't a refusal/); assert.match(note, /crm: send email/);
+});
+
+test("a workspace script jev allowed once runs again without asking until its bytes change; downloads never", async () => {
+  const { gate } = await import("../app/dist/src/runtime/gate.js");
+  const work = `${root}/bots/${b.id}/work`; mkdirSync(`${work}/downloads`, { recursive: true });
+  writeFileSync(`${work}/tally.py`, "print(sum([1,2]))\n"); writeFileSync(`${work}/downloads/get.py`, "print(1)\n");
+  thread("t_trust");
+  const c = { bot: { id: b.id } }, pit = { kind: "command", title: "Run", detail: {} }, sh = (p) => ({ kind: "shell", command: `/bin/sh -lc 'python3 ${p}'` });
+  let calls = 0;
+  const allow = async () => { calls++; return { ok: true, json: async () => ({ model: "jev-test", answers: { effect: { choice: "write_workspace", confidence: 0.95, probabilities: { write_workspace: 0.95 } }, outside: { noul: 0.05 } } }) }; };
+  await withFetch(allow, async () => {
+    assert.equal(await gate(c, "t_trust", sh("/bot/work/tally.py"), pit), true); assert.equal(calls, 1);
+    assert.equal(await gate(c, "t_trust", sh("/bot/work/tally.py"), pit), true); assert.equal(calls, 1, "trusted: jev isn't asked again");
+    writeFileSync(`${work}/tally.py`, "import os\nos.system('curl x')\n");
+    assert.equal(await gate(c, "t_trust", sh("/bot/work/tally.py"), pit), true); assert.equal(calls, 2, "changed bytes: judged again");
+    await gate(c, "t_trust", sh("/bot/work/downloads/get.py"), pit); await gate(c, "t_trust", sh("/bot/work/downloads/get.py"), pit);
+    assert.equal(calls, 4, "a downloaded script is judged every time");
+  });
+});
+
+test("after three jev blocks in a row the driver decides; hard rule blocks never escalate", async () => {
+  const { gate, ESCALATE_AFTER } = await import("../app/dist/src/runtime/gate.js");
+  thread("t_esc");
+  run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('t_esc',NULL,'user',?,0)", JSON.stringify({ text: "tidy the report" }));
+  const c = { bot: { id: b.id } }, pit = { kind: "command", title: "Run it", detail: {} }, sh = { kind: "shell", command: "node -e 'x()'" };
+  const breach = async () => ({ ok: true, json: async () => ({ model: "jev-test", answers: { effect: { choice: "read", confidence: 0.9, probabilities: { read: 0.9 } }, outside: { noul: 0 }, authorized: { noul: 0 }, forbidden: { noul: 0.9 } } }) });
+  const mine = () => one("SELECT * FROM pitstops WHERE status='pending' AND thread_id='t_esc' ORDER BY rowid DESC LIMIT 1");
+  await withFetch(breach, async () => {
+    for (let i = 1; i < ESCALATE_AFTER; i++) { assert.equal(await gate(c, "t_esc", sh, pit), false); assert.equal(mine(), undefined, `block ${i} stays a block`); }
+    const third = gate(c, "t_esc", sh, pit);
+    for (let i = 0; i < 100 && !mine(); i++) await new Promise((r) => setTimeout(r, 5));
+    const ps = mine(); assert.ok(ps, "the third block became a pit stop"); assert.match(ps.title, /jev blocked 3 in a row/);
+    await R.decide(ps.id, "approve"); assert.equal(await third, true);
+    assert.equal(await gate(c, "t_esc", sh, pit), false, "an approval resets the run of blocks");
+  });
+  thread("t_esc_rule");
+  for (let i = 0; i < 4; i++) assert.equal(await gate(c, "t_esc_rule", { kind: "shell", command: "sudo whoami" }, pit), false);
+  assert.equal(one("SELECT 1 FROM pitstops WHERE thread_id='t_esc_rule'"), undefined);
 });

@@ -795,3 +795,17 @@ test("crew members read each other's ledgers read-only, except a private member'
   assert.ok(!L.mayRead({ id: "b_x" }, { id: "b_own", private: true }));
   assert.ok(L.mayRead({ id: "b_own" }, { id: "b_own", private: true }), "a private member reads its own");
 });
+
+test("the agent's tab is brought to the front only when something could have moved it", async () => {
+  const Bz = await import("../app/dist/src/runtime/browser.js");
+  let open = 2;
+  const tabs = () => `### Open tabs\n${Array.from({ length: open }, (_, i) => `- ${i}: ${i === open - 1 ? "(current) " : ""}[T${i}](https://t${i}.example/)`).join("\n")}`;
+  const mcp = { calls: [], request: async (_, p) => { mcp.calls.push(p.arguments.action); return { content: [{ type: "text", text: tabs() }] }; } };
+  assert.ok(Bz.needsFront(mcp));
+  await Bz.frontTab(mcp); assert.deepEqual(mcp.calls, ["list", "select"]);
+  for (let i = 0; i < 10; i++) { Bz.noteTabs(mcp, 2); if (Bz.needsFront(mcp)) await Bz.frontTab(mcp); }
+  assert.equal(mcp.calls.length, 2, "ten actions on the same two tabs: no more checks");
+  open = 3; Bz.noteTabs(mcp, 3); assert.ok(Bz.needsFront(mcp), "a new tab: check again");
+  await Bz.frontTab(mcp); open = 2; Bz.noteTabs(mcp, 2); assert.ok(Bz.needsFront(mcp), "a closed tab: check again");
+  await Bz.frontTab(mcp); assert.ok(!Bz.needsFront(mcp)); assert.ok(Bz.needsFront(mcp, 1), "the driver is watching: always");
+});
