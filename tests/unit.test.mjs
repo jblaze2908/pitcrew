@@ -838,3 +838,16 @@ test("local git in a task folder is a workspace write; remotes, hooks and other 
   for (const cmd of ["git push origin main", "git -C /etc init", "git -c core.hooksPath=/tmp commit -m x", "git remote add o https://x.example/r.git", "git config core.hooksPath /tmp", "git --git-dir=/other commit -m x", "cd /etc && git init", "cd /bot/work/../.. && git status"])
     assert.notEqual(v(cmd), "allow", cmd);
 });
+
+test("json() falls back to its default for NULL and empty columns, so a fresh plan's log is a list", async () => {
+  assert.deepEqual(json(null, []), []); assert.deepEqual(json(undefined, {}), {}); assert.deepEqual(json("", []), []);
+  assert.deepEqual(json("null", []), []); assert.deepEqual(json("[1]", []), [1]); assert.equal(json("{bad", 7), 7); assert.equal(json(null), null);
+  const P = await import("../app/dist/src/runtime/plans.js");
+  const { getBot } = await import("../app/dist/src/crew.js");
+  const { setSetting } = await import("../app/dist/src/db.js");
+  setSetting("plans", "1");
+  run("INSERT INTO bots(id,name,kind,created_at) VALUES('chief_p','Chief P','chief',0),('mem_p','Member P','specialist',0)");
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('t_plan','chief_p','t',0,0)");
+  const r = await P.planTool(getBot("chief_p"), "t_plan", { goal: "Collect feedback", constraints: ["short"], add: [{ key: "m", member: "Member P", task: "Review your chats" }] });
+  assert.ok(r.success !== false, JSON.stringify(r).slice(0, 300));
+});

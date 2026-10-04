@@ -122,7 +122,8 @@ export const one = <T = Row>(sql: string, ...a: Param[]) => db.prepare(sql).get(
 export const all = <T = Row>(sql: string, ...a: Param[]) => db.prepare(sql).all(...(a as SQLInputValue[])) as T[];
 export const run = (sql: string, ...a: Param[]) => db.prepare(sql).run(...(a as SQLInputValue[]));
 // Parsed JSON columns are dynamic; callers that care name T.
-export const json = <T = any>(s: unknown, d: any = null): T => { try { return JSON.parse(s as string); } catch { return d; } };
+// A NULL column parses as null without throwing (JSON.parse(null) reads "null"), so null falls back to the default too.
+export const json = <T = any>(s: unknown, d: any = null): T => { if (s == null || s === "") return d; try { return JSON.parse(s as string) ?? d; } catch { return d; } };
 
 export function getSetting(k: string, d: string): string;
 export function getSetting(k: string): string | null;
