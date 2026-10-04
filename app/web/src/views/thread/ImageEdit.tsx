@@ -1,4 +1,4 @@
-// The image edit panel (brush an area, pin notes, quick fixes, pick the model) and the before/after compare.
+// The image edit panel: brush an area, pin notes, quick fixes, pick the model. Before/after lives in Viewer.tsx.
 // Strokes and pins live in the image's own pixels; Send turns them into a mask and a marked copy (uploads/), and the
 // server writes the member's instructions (images.ts editMessage). Pitcrew pastes the result back inside the mask.
 import { useEffect, useRef, useState } from "react";
@@ -125,25 +125,6 @@ export function EditPanel({ img, version, b, threadId, onClose }: { img: Img; ve
         </div>
         {err && <p className="small" style={{ color: "var(--bad)", margin: 0 }}>{err}</p>}
       </aside>
-    </div>
-  );
-}
-
-export function Compare({ before, after, labels, onClose }: { before: Img; after: Img; labels: [string, string]; onClose: () => void }) {
-  const [x, setX] = useState(50);
-  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; addEventListener("keydown", k); return () => removeEventListener("keydown", k); }, [onClose]);
-  return (
-    <div className="ie-shade center" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="ie-compare" role="dialog" aria-label="Compare versions">
-        <header><b>{`${labels[0]} → ${labels[1]}`}</b><button className="pc-pill o s" onClick={onClose}>Close</button></header>
-        <div className="ie-cmp">
-          <img src={imgSrc(after)} alt={labels[1]} draggable={false} />
-          <img src={imgSrc(before)} alt={labels[0]} className="top" style={{ clipPath: `inset(0 ${100 - x}% 0 0)` }} draggable={false} />
-          <i className="ie-handle" style={{ left: `${x}%` }} />
-          <span className="ie-tag l">{labels[0]}</span><span className="ie-tag r">{labels[1]}</span>
-          <input type="range" min={0} max={100} value={x} onChange={(e) => setX(+e.target.value)} aria-label="Before and after" />
-        </div>
-      </div>
     </div>
   );
 }
