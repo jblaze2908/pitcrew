@@ -1,6 +1,8 @@
 // A thread: the transcript (live over SSE), the composer, and the side panel.
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CatchThePaint } from "./thread/Painting";
+import { EditPanel, Compare } from "./thread/ImageEdit";
+import { indexImages, imgName, imgSrc, type Img } from "../lib/images";
 import type { Origin, PitStop, Surface as SurfaceRow, ThreadEvent, ThreadView } from "../../../shared/types";
 import { MemberMenu } from "../components/MemberMenu";
 import { Surface } from "../components/Surface";
@@ -68,6 +70,10 @@ function LiveThread({ d }: { d: ThreadView }) {
   const [events, setEvents] = useState(d.events);
   const [queued, setQueued] = useState(d.queued);
   const [painting, setPainting] = useState(d.painting || []);
+  const [editing, setEditing] = useState<Img | null>(null);
+  const [comparing, setComparing] = useState<[Img, Img] | null>(null);
+  const [picked, setPicked] = useState<Img | null>(null);
+  const [dismissed, setDismissed] = useState<string | null>(null);
   const [pits, setPits] = useState<Record<string, PitStop>>(() => Object.fromEntries(d.pitstops.map((p) => [p.id, p])));
   const [surfaces, setSurfaces] = useState<Record<string, SurfaceRow>>(() => Object.fromEntries(d.surfaces.map((s) => [s.id, s])));
   const [running, setRunning] = useState(d.thread.running);
@@ -152,8 +158,17 @@ function LiveThread({ d }: { d: ThreadView }) {
     return m;
   }, [events]);
   const scriptResults = useMemo(() => new Map(events.filter((e) => e.kind === "tool" && e.data.type === "scriptResult").map((e) => [e.data.callId as string, e.data])), [events]);
+  // Versions: which image came from which. The newest image is what the next message edits, until a new message is sent.
+  const images = useMemo(() => indexImages(events), [events]);
+  const lastUserAt = useMemo(() => { for (let i = events.length - 1; i >= 0; i--) if (events[i].kind === "user") return events[i].ts; return 0; }, [events]);
+  const auto = images.latest && images.latest.at >= lastUserAt && images.latest.id !== dismissed ? images.latest : null;
+  const targetImg = picked || auto;
+  const label = (im: Img) => `${imgName(im.path)} · v${images.chain(im.id).length}`;
   const evCtx: EventCtx = {
-    b, fromName, pits, latest,
+    b, fromName, pits, latest, images,
+    onEdit: setEditing, onPick: setPicked, onCompare: (a, c) => setComparing([a, c]),
+    onMore: (im) => api.post(`/api/threads/${id}/messages`, { text: "Make 4 more variations of this image, same brief.", mode: "queue", edit: { image: im.path } }),
+    onKeep: (imageId) => api.post(`/api/images/${imageId}/keep`),
     surface: (sid) => { const s = surfaces[sid]; return s ? <ThreadSurface s={s} /> : null; },
   };
   const items = layout(events, evCtx);
@@ -173,7 +188,11 @@ function LiveThread({ d }: { d: ThreadView }) {
           {painting.map((p) => <CatchThePaint key={p.id} p={p} b={b} />)}
           <div className={`live ${running ? "" : "hidden"}`}><Loader /><span>{activity}</span></div>
         </div>
-        <Composer threadId={id} name={b.name} running={running} queued={queued} fromName={fromName} />
+        <Composer threadId={id} name={b.name} running={running} queued={queued} fromName={fromName}
+          target={targetImg ? { path: targetImg.path, label: label(targetImg), src: imgSrc(targetImg) } : null}
+          onClearTarget={() => { if (picked) setPicked(null); else if (auto) setDismissed(auto.id); }} />
+        {editing && <EditPanel img={editing} version={images.chain(editing.id).length} b={b} threadId={id} onClose={() => setEditing(null)} />}
+        {comparing && <Compare before={comparing[0]} after={comparing[1]} labels={[`v${images.chain(comparing[0].id).length}`, `v${images.chain(comparing[1].id).length}`]} onClose={() => setComparing(null)} />}
       </section>
       <Panel id={id} b={b} ctx={ctx} lease={lease} onHandedBack={() => setLease(false)} />
     </div>

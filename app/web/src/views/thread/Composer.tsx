@@ -40,7 +40,9 @@ function QueuedStack({ threadId, queued, fromName, onEdit }: { threadId: string;
   );
 }
 
-export function Composer({ threadId, name, running, queued, fromName }: { threadId: string; name: string; running: boolean; queued: QueuedItem[]; fromName: string }) {
+/** The image the next message edits: the newest one by default (Thread.tsx), or one the driver picked. */
+export interface EditTarget { path: string; label: string; src: string }
+export function Composer({ threadId, name, running, queued, fromName, target, onClearTarget }: { threadId: string; name: string; running: boolean; queued: QueuedItem[]; fromName: string; target?: EditTarget | null; onClearTarget?: () => void }) {
   const [text, setText] = useState("");
   const [mode, setMode] = useState<"steer" | "queue">("steer");
   const [atts, setAtts] = useState<Attachment[]>([]);
@@ -83,7 +85,8 @@ export function Composer({ threadId, name, running, queued, fromName }: { thread
     if (typed) return runCmd(typed);
     setSending(true);
     try {
-      await api.post(`/api/threads/${threadId}/messages`, { text, attachments: atts.map((a) => a.path), mode: running ? mode : "auto" });
+      await api.post(`/api/threads/${threadId}/messages`, { text, attachments: atts.map((a) => a.path), mode: running ? mode : "auto", ...(target ? { edit: { image: target.path } } : {}) });
+      if (target) onClearTarget?.();
       setText(""); atts.forEach((a) => a.preview && URL.revokeObjectURL(a.preview)); setAtts([]);
     } finally { setSending(false); ta.current?.focus(); }
   };
@@ -100,6 +103,8 @@ export function Composer({ threadId, name, running, queued, fromName }: { thread
                 <span className="col" style={{ gap: 2, minWidth: 0, textAlign: "left" }}><b>/{c.name}</b><span className="small faint">{c.hint}</span></span>
               </button>))}
           </div>)}
+        {target && <div className="editing"><span className="pc-chip blue">Editing</span><img src={target.src} alt="" /><span className="small">{target.label}</span>
+          <span className="small faint">your next message changes this image</span><span style={{ flex: 1 }} /><button className="x" title="Not an edit" onClick={onClearTarget}>×</button></div>}
         <div className={`atts ${atts.length ? "" : "hidden"}`}>
           {atts.map((a) => (
             <div key={a.path} className={`att ${a.preview ? "img" : ""}`} title={a.name}>

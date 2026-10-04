@@ -25,7 +25,9 @@ const AUTONOMY_NOTE: Record<Autonomy, string> = {
   yolo: "YOLO: this thread runs without pit stops, paying and sending included. Only jev's hard blocks and blocked sites still stop it.",
 };
 const ThreadEdit = z.object({ title: truthy((v) => String(v).slice(0, 120)), archived: given((v) => (v ? 1 : 0)), autonomy: pick(AUTONOMY, undefined) });
-const Message = z.object({ text: raw, attachments: field((v): string[] => (Array.isArray(v) ? v.filter((a) => /^uploads\/[\w.-]+$/.test(a)) : [])), mode: raw });
+const Message = z.object({ text: raw, attachments: field((v): string[] => (Array.isArray(v) ? v.filter((a) => /^uploads\/[\w.-]+$/.test(a)) : [])), mode: raw,
+  edit: z.object({ image: z.string().max(300), mask: z.string().max(300).nullish(), marked: z.string().max(300).nullish(), model: z.string().max(120).nullish(),
+    pins: z.array(z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), note: z.string().max(200) })).max(9).optional() }).nullish() });
 const SurfaceAction = z.object({ action: raw, values: field((v): Record<string, unknown> => (v && typeof v === "object" ? v : {})) });
 const Save = z.object({ saved: flag });
 
@@ -96,7 +98,15 @@ export const threadRoutes = new Hono<Env>()
     }
     return c.json({ ok: true });
   })
-  .post("/api/threads/:id/messages", signedIn, async (c) => { const b = await jsonBody(c, Message); return c.json(await R.sendMessage(c.req.param("id"), { text: b.text, attachments: b.attachments, mode: b.mode as string })); })
+  .post("/api/threads/:id/messages", signedIn, async (c) => { const b = await jsonBody(c, Message); return c.json(await R.sendMessage(c.req.param("id"), { text: b.text, attachments: b.attachments, mode: b.mode as string, edit: b.edit ?? null })); })
+  // "Use this": the driver's pick among an image's versions. A note in the thread, so every client draws it.
+  .post("/api/images/:id/keep", signedIn, (c) => {
+    const im = one<{ id: string; thread_id: string | null; path: string; kept_at: number | null }>("SELECT id,thread_id,path,kept_at FROM images WHERE id=?", c.req.param("id"));
+    if (!im) throw httpErr(404, "No such image");
+    if (!im.kept_at) { run("UPDATE images SET kept_at=? WHERE id=?", now(), im.id); if (im.thread_id) addEvent(im.thread_id, null, "system", { text: `Kept ${im.path.split("/").pop()}`, kept: im.id }); }
+    audit("driver", "image.kept", { id: im.id });
+    return c.json({ ok: true });
+  })
   .delete("/api/threads/:id/queue/:qid", signedIn, (c) => c.json(R.removeQueued(c.req.param("id"), c.req.param("qid"))))
   .post("/api/threads/:id/queue/:qid/send-now", signedIn, async (c) => c.json(await R.sendQueuedNow(c.req.param("id"), c.req.param("qid"))))
   .post("/api/threads/:id/interrupt", signedIn, async (c) => c.json({ ok: await R.interrupt(c.req.param("id")) }))

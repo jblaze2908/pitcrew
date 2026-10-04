@@ -51,6 +51,7 @@ const PAGES = (driver: string): Record<string, string> => ({
     "- Models: google/gemini-3.1-flash-image (default: fast, cheap, good edits); openai/gpt-image-2.5-sunburst (best quality and text in images; transparent backgrounds); black-forest-labs/flux-3-image (photoreal); recraft/recraft-v4.1-vector (logos and icons as SVG); bytedance-seed/seedream-5-0-pro. A model that doesn't take an option says which values it does.",
     "- Write the prompt as a brief: subject, composition, style, lighting, exact text in quotes, what to keep unchanged when editing.",
     "- Look at the result with view_image before calling it done; fix it with another edit rather than starting over.",
+    "- Edits from the driver say [Edit of <image>] or [Editing image <image>]: change that image, passing it first in images (or referenced_image_paths). A brushed edit names a mask and a marked copy (pink = change only there, numbered pins = notes for that spot): follow its How line exactly; with mask, Pitcrew keeps everything outside it unchanged. Every result is a new version; never overwrite the original.",
     `- Name files for what they are (name). Don't publish or send an image unless ${driver} asks.`,
   ].join("\n"),
   files: [

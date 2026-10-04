@@ -295,7 +295,8 @@ export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { br
     description: `Make or edit images with any OpenRouter image model; saved to /bot/work/out/images and shown in this chat. To edit or restyle, pass images (workspace paths). Model choice and options: harness_help images. Default model ${DEFAULT_IMAGE_MODEL}.`,
     inputSchema: { type: "object", properties: { prompt: { type: "string" }, images: { type: "array", items: { type: "string" }, description: "Workspace images to edit or use as references" },
       model: { type: "string" }, aspect_ratio: { type: "string" }, resolution: { type: "string" }, quality: { type: "string" }, background: { type: "string", enum: ["auto", "transparent", "opaque"] },
-      output_format: { type: "string", enum: ["png", "jpeg", "webp", "svg"] }, n: { type: "integer", minimum: 1, maximum: 4 }, name: { type: "string", description: "File name, without extension" } }, required: ["prompt"] } });
+      output_format: { type: "string", enum: ["png", "jpeg", "webp", "svg"] }, n: { type: "integer", minimum: 1, maximum: 4 }, name: { type: "string", description: "File name, without extension" },
+      mask: { type: "string", description: "Workspace PNG: white where the edit goes. Pitcrew keeps the rest of images[0] unchanged." } }, required: ["prompt"] } });
   // Only for a member linked to Engram, which hosts the published files.
   if (engram) tools.push({ type: "function", name: "publish_file",
     description: "Only when the driver asks for a link or file: publish one file from /bot/work (md, html, pdf, an image, or any single file) as a page they open at a link. Private to the driver; public only when they ask to share it and approve. Pass id to update one you published (same link, new version).",

@@ -1,5 +1,6 @@
 // One transcript event as an element. Tool calls are grouped by the caller (see groupEvents).
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import type { Img, ImageIndex } from "../../lib/images";
 import type { Bot, DelegationCard as Deleg, PitStop, PlanSnapshot, ThreadEvent } from "../../../../shared/types";
 import { DelegationCard } from "../../components/DelegationCard";
 import { PitCard } from "../../components/PitCard";
@@ -44,22 +45,37 @@ function Shot({ e, b }: { e: ThreadEvent; b: Bot }) {
   );
 }
 
-/** Images a member made (generate_image or Codex's image_gen), kept in its out/images. */
-function Images({ e, b }: { e: ThreadEvent; b: Bot }) {
-  const d = e.data, paths = d.paths as string[];
+/** Images a member made (generate_image or Codex's image_gen), kept in its out/images, with their versions and actions. */
+function Images({ e, b, c }: { e: ThreadEvent; b: Bot; c: EventCtx }) {
+  const d = e.data, paths = d.paths as string[], ids: string[] = paths.map((p, i) => d.ids?.[i] || `p:${p}`);
   // The paint caught while waiting covers the image, then falls away once (Painting.tsx).
   const [cover] = useState(() => (d.paintingId && catches.get(d.paintingId)) || null);
   const [gone, setGone] = useState(!cover);
+  const [burst, setBurst] = useState<string | null>(null);
   useEffect(() => { if (!cover) return; catches.delete(d.paintingId); const t = setTimeout(() => setGone(true), 1700); return () => clearTimeout(t); }, [cover, d.paintingId]);
-  const meta = [d.from?.length ? `edited from ${(d.from as string[]).map((p) => p.split("/").pop()).join(", ")}` : null, d.model, d.cost != null ? `$${Number(d.cost).toFixed(3)}` : null].filter(Boolean).join(" · ");
+  const I = c.images, one = paths.length === 1 ? I?.byId.get(ids[0]) : undefined, chain = one ? I!.chain(one.id) : [];
+  const parent = one?.parentId ? I?.byId.get(one.parentId) : undefined;
+  const keep = async (id: string) => { if (id.startsWith("p:") || I?.kept.has(id)) return; setBurst(id); setTimeout(() => setBurst(null), 900); await c.onKeep?.(id); };
+  const meta = [d.pasted ? (d.pasted.ok ? "kept outside the brush" : "whole image changed") : null, d.model, d.cost != null ? `$${Number(d.cost).toFixed(3)}` : null].filter(Boolean).join(" · ");
+  const Burst = () => <span className="burst" aria-hidden="true">{["--c5", "--c2", "--c3", "--c6", "--c1", "--c5"].map((h, i) => <i key={i} style={{ background: `var(${h})`, ["--a" as any]: `${i * 60}deg` }} />)}</span>;
   return (
     <div className="msg bot"><Face b={b} size="sm" mood="idle" />
       <figure className="shot">
-        <div className={`img-wrap${paths.length > 1 ? " shot-grid" : ""}`}>{paths.map((p) => {
-          const src = `/files/${d.botId}/${p}?inline=1`;
-          return <a key={p} href={src} target="_blank" rel="noopener"><img src={src} alt={d.caption} loading="lazy" /></a>;
+        <div className={`img-wrap${paths.length > 1 ? " shot-grid" : ""}`}>{paths.map((p, i) => {
+          const src = `/files/${d.botId}/${p}?inline=1`, im = I?.byId.get(ids[i]), kept = I?.kept.has(ids[i]);
+          return <div key={p} className={`img-tile${kept ? " kept" : ""}`}><a href={src} target="_blank" rel="noopener"><img src={src} alt={d.caption} loading="lazy" /></a>
+            {paths.length > 1 && im && <span className="img-acts"><button onClick={() => c.onEdit?.(im)}>Edit</button>{!ids[i].startsWith("p:") && <button onClick={() => keep(ids[i])}>{kept ? "Kept" : "Use this"}{burst === ids[i] && <Burst />}</button>}</span>}</div>;
         })}{!gone && cover && <div className="unveil" aria-hidden="true">{Array.from({ length: 48 }, (_, i) => <i key={i} style={{ background: cover[i] || undefined, ["--r" as any]: `${((i * 47) % 60) - 30}deg`, animationDelay: `${((i * 29) % 12) * 35}ms` }} />)}</div>}</div>
         <figcaption className="small muted">{d.caption}{meta && <span className="faint">{` · ${meta}`}</span>}{cover && cover.length > 0 && <span className="faint">{` · thanks for the ${cover.length} squares`}</span>}</figcaption>
+        {chain.length > 1 && <div className="vers" aria-label="Versions">{chain.map((v, i) => <Fragment key={v.id}>{i > 0 && <i className="ln" />}
+          <button className={`ver${v.id === one!.id ? " on" : ""}${I!.kept.has(v.id) ? " kept" : ""}`} title={`Your next message edits v${i + 1}`} onClick={() => c.onPick?.(v)}><img src={`/files/${v.botId}/${v.path}?inline=1`} alt="" loading="lazy" /><span>{`v${i + 1}`}</span></button></Fragment>)}</div>}
+        {one && <div className="img-actions">
+          <button className="pc-pill s" onClick={() => c.onEdit?.(one)}>Edit</button>
+          <button className="pc-pill s o" onClick={() => c.onMore?.(one)}>More like this</button>
+          {parent && <button className="pc-pill s o" onClick={() => c.onCompare?.(parent, one)}>Compare</button>}
+          {!one.id.startsWith("p:") && (I!.kept.has(one.id) ? <span className="pc-chip ok">kept</span>
+            : <button className="pc-pill s o burst-host" onClick={() => keep(one.id)}>Use this{burst === one.id && <Burst />}</button>)}
+        </div>}
       </figure>
     </div>
   );
@@ -141,7 +157,8 @@ function LearnedCard({ d }: { d: Record<string, any> }) {
   );
 }
 
-export interface EventCtx { cont?: boolean; b: Bot; fromName: string; pits: Record<string, PitStop>; latest: Map<string, Record<string, any>>; surface: (id: string) => ReactNode }
+export interface EventCtx { cont?: boolean; b: Bot; fromName: string; pits: Record<string, PitStop>; latest: Map<string, Record<string, any>>; surface: (id: string) => ReactNode;
+  images?: ImageIndex; onEdit?: (im: Img) => void; onPick?: (im: Img) => void; onMore?: (im: Img) => void; onCompare?: (a: Img, b: Img) => void; onKeep?: (id: string) => Promise<unknown> }
 
 /** The element for one event, or null when it draws nothing (an unknown pit stop or surface). */
 export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
@@ -154,7 +171,7 @@ export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
     case "agent": if (/^\s*QUIET\b/.test(d.text || "")) return <p className="sys faint">{`Nothing new · ${String(d.text).replace(/^\s*QUIET:?\s*/, "")}`}</p>;
       return <div className={`msg bot${c.cont ? " cont" : ""}`}>{c.cont ? <span /> : <Face b={c.b} size="sm" mood="idle" />}<Md text={d.text} /></div>;
     case "shot": return <Shot e={e} b={c.b} />;
-    case "image": return <Images e={e} b={c.b} />;
+    case "image": return <Images e={e} b={c.b} c={c} />;
     case "tool": return <Tool e={e} />;
     case "system": return <p className={`sys ${d.tone === "bad" ? "bad" : ""}`}>{d.text}</p>;
     case "error": return <p className="err">{d.text}</p>;

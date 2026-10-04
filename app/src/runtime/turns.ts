@@ -13,6 +13,7 @@ import { getThread, addEvent, setThreadStatus, nameThread } from "./threads.js";
 import { brain, computer } from "./machines.js";
 import { weekSpend, logSize, billedUsage } from "./spend.js";
 import { endPaintings } from "./painting.js";
+import { editMessage, editTarget, type EditRequest } from "../images.js";
 import { activePlan, planLog, emitPlan, planRow } from "./planStore.js";
 import { ensureMemberToken, threadContext, skillsIndex } from "../engram.js";
 import { memberLinked } from "../engramStore.js";
@@ -28,11 +29,18 @@ import type { Bot } from "../../shared/types.js";
 
 export const isRunning = (threadId: string) => active.has(threadId);
 
-export interface Message { text?: unknown; attachments?: string[]; mode?: string; trigger?: string; display?: string | null }
-export async function sendMessage(threadId: string, { text: given, attachments = [], mode = "auto", trigger = "driver", display = null }: Message) {
+export interface Message { text?: unknown; attachments?: string[]; mode?: string; trigger?: string; display?: string | null; edit?: EditRequest | null }
+export async function sendMessage(threadId: string, { text: given, attachments = [], mode = "auto", trigger = "driver", display = null, edit = null }: Message) {
   const t = getThread(threadId);
   if (!t) throw Object.assign(new Error("No such thread"), { status: 404 });
-  const text = String(given || "").slice(0, 20000);
+  let text = String(given || "").slice(0, 20000);
+  // An image edit: the member gets the image, the marks and how to call the tool; the transcript shows what was typed.
+  if (edit) {
+    let m; try { m = editMessage(t.bot_id, text, edit); } catch (e: any) { throw Object.assign(new Error(e.message), { status: 400 }); }
+    const extras = [edit.mask ? "brushed" : "", edit.pins?.length ? `${edit.pins.length} pin${edit.pins.length > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ");
+    display ??= `${text.trim() || "Edit this image"}${extras ? ` · ${extras}` : ""}`;
+    text = m.text; attachments = [...attachments, ...m.attachments];
+  }
   if (!text.trim() && !attachments.length) throw Object.assign(new Error("Say something"), { status: 400 });
   if (trigger === "driver" && text.trim() === "/refresh" && !attachments.length) return refresh(threadId);
   nameThread(t, text, attachments);
@@ -41,6 +49,7 @@ export async function sendMessage(threadId: string, { text: given, attachments =
   if (a && mode === "queue") return { queued: true, id: enqueue(threadId, { text, attachments, trigger, display }) };
   const said = () => addEvent(threadId, null, "user", { text, attachments, via: trigger, ...(display ? { display } : {}) });
   if (a) {
+    a.editOf = editTarget(text) ?? a.editOf;
     await brain(getBot(t.bot_id)!).request("turn/steer", { threadId: t.codex_id, expectedTurnId: a.codexTurnId, input: toInput(t.bot_id, text, attachments) });
     said();
     return { steered: true };
@@ -101,7 +110,7 @@ export async function startTurn(threadId: string, text: string, attachments: str
   const warm = warmPlan(threadId);
   if (warm) computer(b).prewarm(warm.desktop);
   const turnId = uid("tu");
-  active.set(threadId, { turnId, codexTurnId: null, base: null, total: null, last: null, usageFrom: logSize(b.id), ...(trigger === "schedule" || trigger === "retro" ? { quietFrom: t.updated_at } : {}) });
+  active.set(threadId, { turnId, codexTurnId: null, base: null, total: null, last: null, usageFrom: logSize(b.id), editOf: editTarget(text), ...(trigger === "schedule" || trigger === "retro" ? { quietFrom: t.updated_at } : {}) });
   run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,provider,model,started_at) VALUES(?,?,?,?,?,?,?,?)", turnId, threadId, b.id, "starting", trigger, b.provider, b.model, now());
   setThreadStatus(threadId, "running");
   try {

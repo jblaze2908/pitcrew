@@ -11,7 +11,7 @@ import { short, summariseArgs, debugArgs } from "./util.js";
 import { connName } from "../engram.js";
 import { scanScripts } from "./scripts.js";
 import { engramUntrusted, taint } from "./taint.js";
-import { saveImage, paletteFor } from "../images.js";
+import { saveImage, paletteFor, recordImage, imageAt } from "../images.js";
 import { startPainting, endPainting } from "./painting.js";
 
 // A Codex thread item (commandExecution, mcpToolCall, fileChange, …) as the app-server sends it.
@@ -64,7 +64,7 @@ export function onNotify(c: Brain, method: string, p: Record<string, any>) {
         addEvent(threadId, a?.turnId, "system", { text: "Engram returned untrusted content. For the next 10 minutes, sending, paying, signing in, sharing and deleting ask you first." });
       else if (it.type === "fileChange") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: it.status });
       else if (it.type === "webSearch") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: "completed" });
-      else if (it.type === "imageGeneration") codexImage(c.bot.id, threadId, a?.turnId, it);
+      else if (it.type === "imageGeneration") codexImage(c.bot.id, threadId, a?.turnId, it, a?.editOf);
       else if (it.type === "contextCompaction") addEvent(threadId, a?.turnId, "system", { text: "Thread compacted." });
       break;
     }
@@ -83,7 +83,7 @@ export function onNotify(c: Brain, method: string, p: Record<string, any>) {
 }
 
 // Codex's image_gen (ChatGPT plan): the PNG comes base64 in the item; a copy goes to out/images for the Library and the thread.
-function codexImage(botId: string, threadId: string, turnId: string | undefined, it: Item) {
+function codexImage(botId: string, threadId: string, turnId: string | undefined, it: Item, editOf?: string | null) {
   endPainting(threadId, it.id);
   if (it.status !== "completed" || typeof it.result !== "string" || !it.result) {
     const limit = it.failure?.type === "usageLimitExceeded";
@@ -93,6 +93,7 @@ function codexImage(botId: string, threadId: string, turnId: string | undefined,
   const caption = short(String(it.revisedPrompt || "Image"), 300);
   try {
     const path = saveImage(botId, Buffer.from(it.result, "base64"), "png", caption);
-    addEvent(threadId, turnId, "image", { botId, paths: [path], caption, model: "gpt-image-2 · ChatGPT plan", cost: null, paintingId: it.id });
+    const parentId = imageAt(botId, editOf), id = recordImage(botId, threadId, path, { parentId, model: "gpt-image-2 · ChatGPT plan" });
+    addEvent(threadId, turnId, "image", { botId, paths: [path], ids: [id], parentId, caption, model: "gpt-image-2 · ChatGPT plan", cost: null, paintingId: it.id });
   } catch (e: any) { addEvent(threadId, turnId, "error", { text: `The image was made but couldn't be saved: ${short(e.message, 200)}` }); }
 }
