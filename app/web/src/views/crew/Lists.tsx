@@ -7,31 +7,36 @@ import { toast } from "../../lib/toast";
 import { SCOPE_LABEL } from "./ProfileTab";
 
 // A linked member's memories live in Engram; this lists that member's own and adds or forgets there.
-export function MemoryTab({ b, memory, memoryIn, error, reload }: { b: BotCard; memory: Memory[]; memoryIn: "pitcrew" | "engram"; error: string | null; reload: () => void }) {
-  const [text, setText] = useState("");
-  const engram = memoryIn === "engram";
-  const add = async () => {
-    if (!text.trim()) return;
-    const r = await api.post<{ status?: string }>(`/api/bots/${b.id}/memory`, { text });
-    if (r.status && r.status !== "accepted") toast("Engram is holding it for review in Pit stops");
-    setText(""); reload();
-  };
-  const who = (m: Memory) => (engram ? m.source || "Engram" : m.source === "driver" ? "you" : "learned in a thread");
+// Two tiers: the member's own memory (it writes freely, capped at 3,000 chars) and global notes in Engram (about you,
+// for the whole crew; a member's go through your review, yours save directly).
+export function MemoryTab({ b, memory, global, error, reload }: { b: BotCard; memory: Memory[]; global: Memory[] | null; error: string | null; reload: () => void }) {
+  const used = memory.reduce((n, m) => n + m.text.length, 0);
   return (
     <div className="col">
-      {engram && <p className="small muted">{`In Engram, under ${SCOPE_LABEL[b.engram_scope]}. Engram is the source; edit or retract there for anything beyond forgetting.`}</p>}
+      <MemoryList b={b} title={`Own memory · ${used} / 3,000 chars`} help={`${b.name}'s working knowledge: how its job runs, site quirks, where things are. Only it reads this.`} items={memory} scope="agent" reload={reload} />
+      {global && <MemoryList b={b} title="Global, in Engram" help={`Facts about you that ${b.name} filed for the whole crew, under ${SCOPE_LABEL[b.engram_scope]}. Its new ones wait for your review in Engram; ones you add here save directly.`} items={global} scope="global" reload={reload} />}
       {error && <p className="small badc">{`Couldn't read Engram: ${error}`}</p>}
-      <div className="row"><div style={{ flex: 1 }}><input placeholder="Add a fact this crew member should know" value={text} onChange={(e) => setText(e.target.value)} /></div><button className="pc-pill s" onClick={add}>Add</button></div>
+    </div>
+  );
+}
+function MemoryList({ b, title, help, items, scope, reload }: { b: BotCard; title: string; help: string; items: Memory[]; scope: "agent" | "global"; reload: () => void }) {
+  const [text, setText] = useState("");
+  const add = async () => { if (!text.trim()) return; await api.post(`/api/bots/${b.id}/memory`, { text, scope }); setText(""); reload(); };
+  const who = (m: Memory) => (scope === "global" ? m.source || "Engram" : m.source === "driver" ? "you" : "learned in a thread");
+  return (
+    <section className="col">
+      <p className="pc-lab">{title}</p><p className="small muted">{help}</p>
+      <div className="row"><div style={{ flex: 1 }}><input placeholder={scope === "agent" ? "Add something this member should know for its job" : "Add a fact about you for the whole crew"} value={text} onChange={(e) => setText(e.target.value)} /></div><button className="pc-pill s" onClick={add}>Add</button></div>
       <div className="pc-card tight">
-        {memory.length ? (
-          <table className="tbl"><tbody>{memory.map((m) => (
+        {items.length ? (
+          <table className="tbl"><tbody>{items.map((m) => (
             <tr key={m.id}>
               <td>{m.text}</td><td className="small faint">{who(m)}</td><td className="num faint small">{when(m.created_at)}</td>
               <td className="num"><button className="small faint" onClick={async () => { await api.post(`/api/bots/${b.id}/memory/${m.id}/forget`); reload(); }}>Forget</button></td>
             </tr>))}</tbody></table>
-        ) : <p className="empty">Nothing remembered yet.</p>}
+        ) : <p className="empty">Nothing yet.</p>}
       </div>
-    </div>
+    </section>
   );
 }
 

@@ -13,7 +13,7 @@ import { getThread, addEvent, setThreadStatus, nameThread } from "./threads.js";
 import { brain, computer } from "./machines.js";
 import { weekSpend, logSize, billedUsage } from "./spend.js";
 import { activePlan, planLog, emitPlan, planRow } from "./planStore.js";
-import { ensureMemberToken, threadContext, skillsIndex, engramMemories } from "../engram.js";
+import { ensureMemberToken, threadContext, skillsIndex } from "../engram.js";
 import { memberLinked } from "../engramStore.js";
 import { setRollout } from "./scripts.js";
 import { taint, tainted } from "./taint.js";
@@ -87,7 +87,8 @@ export function recap(threadId: string, carry: string | null = null, current = "
     if (size + line.length > max) break;
     lines.unshift(line); size += line.length;
   }
-  return [carry, `This thread continues an earlier conversation. Your tools changed since it started, so it was restarted. Files in /bot/work are as you left them. The latest messages, oldest first:\n\n${lines.join("\n\n")}`].filter(Boolean).join("\n\n");
+  const notes = getThread(threadId)?.notes;
+  return [carry, notes ? `Notes you kept for this thread:\n${notes}` : "", `This thread continues an earlier conversation. Your tools changed since it started, so it was restarted. Files in /bot/work are as you left them. The latest messages, oldest first:\n\n${lines.join("\n\n")}`].filter(Boolean).join("\n\n");
 }
 export async function startTurn(threadId: string, text: string, attachments: string[], trigger: string) {
   const t = getThread(threadId)!, b = getBot(t.bot_id)!;
@@ -120,9 +121,9 @@ export async function startTurn(threadId: string, text: string, attachments: str
     const eg = !codexId || !c.loaded.has(codexId) || refreshNow ? await threadContext(b, !codexId || refreshNow) : null;
     // A linked member whose sync failed still gets the Engram rules (no profile or skills): its remember goes there.
     const egCtx = eg ? { profile: eg.profile, skills: skillsIndex(eg.skills) } : memberLinked(b) ? { profile: null, skills: "" } : null;
-    // A linked member's memories are Engram's (cached from the last sync); null until one succeeds, so nothing is
-    // reported forgotten just because Engram was unreachable.
-    const mems = memberLinked(b) ? engramMemories(b.id) : all<{ id: string; text: string }>("SELECT id,text FROM memory WHERE bot_id=? AND forgotten_at IS NULL ORDER BY created_at LIMIT 60", b.id);
+    // The member's own memory (agent tier, capped; tools.ts AGENT_MEMORY_MAX). Facts about the driver come from Engram's
+    // profile and search; the member's Engram memories aren't listed, so the prompt doesn't grow with them.
+    const mems = all<{ id: string; text: string }>("SELECT id,text FROM memory WHERE bot_id=? AND forgotten_at IS NULL ORDER BY created_at LIMIT 80", b.id);
     const common = { model: b.model, modelProvider: b.provider, cwd: "/bot/work", developerInstructions: instructions(b, mems ?? [], egCtx) };
     let refreshed: string | null = null;
     if (!codexId) {
