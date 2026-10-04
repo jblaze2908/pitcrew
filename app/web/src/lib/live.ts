@@ -4,7 +4,7 @@ import type { StreamEvents, StreamType } from "../../../shared/types";
 
 export type LiveEvent = { [K in StreamType]: { type: K; data: StreamEvents[K] } }[StreamType];
 
-const TYPES: StreamType[] = ["thread", "turn", "pitstop", "computer", "paused", "lease", "event", "delta", "activity", "context"];
+const TYPES: StreamType[] = ["thread", "turn", "pitstop", "computer", "paused", "lease", "event", "delta", "activity", "context", "queue"];
 /** Events that change /api/state; the rest only matter to an open thread. */
 export const GLOBAL: ReadonlySet<StreamType> = new Set(["thread", "turn", "pitstop", "computer", "paused", "lease"]);
 

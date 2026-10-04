@@ -72,7 +72,9 @@ export interface Thread {
 export type EventKind = "user" | "agent" | "tool" | "system" | "error" | "shot" | "changes" | "pitstop" | "surface" | "delegation" | "plan" | "learned";
 export interface ThreadEvent<D = Record<string, any>> { id: number; thread_id: string; turn_id: string | null; kind: EventKind; data: D; ts: number }
 
-export interface ThreadView { thread: Thread; bot: Bot; events: ThreadEvent[]; pitstops: PitStop[]; surfaces: { id: string; title: string; spec: any; saved: number }[] }
+/** A message waiting for the thread's run to end; it enters the transcript only when it goes to the member. via: the trigger. */
+export interface QueuedItem { id: string; text: string; attachments: string[]; via: string; display: string | null; created_at: number }
+export interface ThreadView { thread: Thread; bot: Bot; events: ThreadEvent[]; pitstops: PitStop[]; surfaces: { id: string; title: string; spec: any; saved: number }[]; queued: QueuedItem[] }
 
 // ---------- front door ----------
 export interface RoutePick {
@@ -161,7 +163,7 @@ export interface PublishedPage { items: PublishedArtifact[]; next: string | null
 export interface Surface { id: string; title: string; spec: any; saved?: number }
 export interface KeptSurface extends Surface { thread_id: string; bot_id: string; bot_name: string; hue: Hue; created_at: number }
 
-/** Server-sent events on /api/stream. The thread-only kinds (event, delta, activity, context) arrive only with ?thread=. */
+/** Server-sent events on /api/stream. The thread-only kinds (event, delta, activity, context, queue) arrive only with ?thread=. */
 export interface StreamEvents {
   thread: { id: string; botId?: string; status: ThreadStatus; title?: string };
   turn: { threadId: string; turnId: string; status: string; cost?: number; botId: string };
@@ -173,6 +175,7 @@ export interface StreamEvents {
   delta: { threadId: string; itemId: string; text: string };
   activity: { threadId: string; botId?: string; text: string };
   context: { threadId: string; tokens: number; window: number };
+  queue: { threadId: string; queued: QueuedItem[] };
 }
 export type StreamType = keyof StreamEvents;
 

@@ -111,6 +111,40 @@ test("a restart marks cut turns interrupted, says so in the thread, and resumes 
   assert.equal(R.resumable({ ...by.tu_run, thread_id: "th_gone" }, t0), false);
 });
 
+test("a queued message waits in the store, out of the transcript; a blocked member keeps it; boot finds idle queues", async () => {
+  const { active } = await import("../app/dist/src/runtime/state.js");
+  const { setSetting } = await import("../app/dist/src/db.js");
+  run("INSERT INTO bots(id,name,created_at) VALUES('b_q','Queuer',0)");
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_q','b_q','Busy',0,0),('th_q2','b_q','Idle',0,0)");
+  active.set("th_q", { turnId: "tu_q", codexTurnId: "c_q", base: null, total: null, last: null, usageFrom: 0 });
+  const events = (th, kind) => all("SELECT data FROM events WHERE thread_id=? AND kind=?", th, kind).map((e) => json(e.data, {}));
+  try {
+    const a = await R.sendMessage("th_q", { text: "first", mode: "queue" });
+    const b = await R.sendMessage("th_q", { text: "[Scheduled: daily 09:00] Check spend", attachments: ["uploads/k1-a.pdf"], mode: "queue", trigger: "schedule", display: "Check spend" });
+    assert.equal(a.queued, true);
+    assert.equal(all("SELECT 1 FROM events WHERE thread_id='th_q'").length, 0, "no user bubble and no system line while queued");
+    assert.deepEqual(R.listQueued("th_q").map((q) => [q.id, q.text, q.via, q.display, q.attachments]),
+      [[a.id, "first", "driver", null, []], [b.id, "[Scheduled: daily 09:00] Check spend", "schedule", "Check spend", ["uploads/k1-a.pdf"]]]);
+    assert.equal(one("SELECT COUNT(*) n FROM queued WHERE thread_id='th_q'").n, 2, "kept in the store, so a restart keeps it");
+    assert.throws(() => R.removeQueued("th_q2", a.id), /No such queued/, "an id only works on its own thread");
+    R.removeQueued("th_q", a.id);
+    assert.throws(() => R.removeQueued("th_q", a.id), /No such queued/);
+    assert.deepEqual(R.listQueued("th_q").map((q) => q.id), [b.id]);
+
+    const c = R.enqueue("th_q2", { text: "later", attachments: [], trigger: "driver", display: null });
+    assert.deepEqual(R.idleQueued().filter((t) => t.startsWith("th_q")), ["th_q2"], "a running thread keeps its queue until finishTurn");
+    setSetting("paused", "1");
+    assert.equal(R.startQueued("th_q2"), false);
+    assert.deepEqual(R.listQueued("th_q2").map((q) => q.id), [c], "a blocked member leaves the item at the head");
+    assert.equal(events("th_q2", "user").length, 0);
+    assert.match(events("th_q2", "error")[0].text, /kill switch.*still waiting/);
+    assert.equal(R.startQueues(), 0);
+    assert.equal(events("th_q2", "error").length, 1, "boot and resume stay quiet about it");
+    await assert.rejects(R.sendQueuedNow("th_q2", c), /kill switch/);
+    assert.deepEqual(R.listQueued("th_q2").map((q) => q.id), [c], "a refused send-now keeps it");
+  } finally { active.delete("th_q"); setSetting("paused", "0"); }
+});
+
 test("plain link clicks are navigation; consequential links are not", () => {
   const snap = { url: "https://example.com/", lines: ['- link "Learn more" [ref=e13] [cursor=pointer]:', '- link "Unsubscribe" [ref=e14]', '- button "Next" [ref=e15]'] };
   assert.equal(R.ground(snap, "browser_click", { target: "e13" }).effect, "browse");

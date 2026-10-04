@@ -83,6 +83,8 @@ export const threadRoutes = new Hono<Env>()
     return c.json({ ok: true });
   })
   .post("/api/threads/:id/messages", signedIn, async (c) => { const b = await jsonBody(c, Message); return c.json(await R.sendMessage(c.req.param("id"), { text: b.text, attachments: b.attachments, mode: b.mode as string })); })
+  .delete("/api/threads/:id/queue/:qid", signedIn, (c) => c.json(R.removeQueued(c.req.param("id"), c.req.param("qid"))))
+  .post("/api/threads/:id/queue/:qid/send-now", signedIn, async (c) => c.json(await R.sendQueuedNow(c.req.param("id"), c.req.param("qid"))))
   .post("/api/threads/:id/interrupt", signedIn, async (c) => c.json({ ok: await R.interrupt(c.req.param("id")) }))
   .post("/api/threads/:id/refresh", signedIn, (c) => { const id = c.req.param("id"); if (!R.getThread(id)) throw httpErr(404, "No such thread"); return c.json(R.refresh(id)); })
   .post("/api/threads/:id/compact", signedIn, async (c) => { await R.compact(c.req.param("id")); return c.json({ ok: true }); })
