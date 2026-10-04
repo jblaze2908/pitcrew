@@ -413,7 +413,7 @@ test("linked members are told what to send to Engram; unlinked ones keep the pla
   assert.match(linked, /pass the old memory's id to remember/);
   assert.match(linked, /secrets \(passwords, OTPs, card numbers, full account numbers\)/);
   assert.match(linked, /Don't propose episodes/);
-  assert.match(linked, /call publish_file, then give them the link/);
+  assert.match(linked, /Publish only when [^\n]* asks for a page, file or link[^\n]*call publish_file, then give them the link/);
   assert.match(linked, /Your own memory \(only you see it[^\n]*\n- \[m_1\] Gas is Indane/);
   assert.doesNotMatch(linked, /filed under/, "Personal needs no scope line");
   assert.doesNotMatch(linked, /When .* tells you a durable fact/);

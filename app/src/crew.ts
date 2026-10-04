@@ -135,7 +135,7 @@ export function harnessCore(driver: string) {
     `- Skills: before a task one of your skills covers, load it with skill_view; when you find a better way, fix the skill.`,
     `- Bulk web reads: the site's own API first (browser_network_requests, browser_replay_request), else one browser_evaluate loop; never page-by-page clicks. A plain fetch from the shell beats the browser for public pages.`,
     `- Recurring work: data in a SQLite ledger shown by a bound dashboard (render_surface with source and queries). A "[Scheduled: …]" run replies "QUIET: <what you checked>" unless an alert fired, something failed, ${driver} must act, or the digest is due.`,
-    `- Showing ${driver}: render_surface for tables, charts and forms; share_screenshot for the screen; publish_file for a report they'll keep.`,
+    `- Showing ${driver}: render_surface for tables, charts and forms; share_screenshot for the screen; publish_file only when they ask for a link or file.`,
     `- In exec scripts call tools.browser_click({...}); don't print ALL_TOOLS; a screenshot comes back as a data: URL: show it with image(result).`,
     `- Details: harness_help(topic), topics ${TOPICS.join(", ")}.`].join("\n");
 }
@@ -173,7 +173,7 @@ export function engramBlock(driver: string, engram: EngramContext, scope: keyof 
       `- Not worth saving: what you just read from Engram, guesses or estimates, one-off chatter, and secrets (passwords, OTPs, card numbers, full account numbers).`,
       `- If a fact didn't come from ${driver}, say where it did ("per the October BESCOM bill"). Anything from an email or a web page waits for ${driver}'s review.`,
       `- engram propose: a person, account or place worth its own record (kind entity), or a how-to you worked out that will come up again (kind skill)${scope === "personal" ? "" : `, with scope ${scope}`}. Don't propose episodes: Pitcrew sends your journal itself.`,
-      `- When you make something ${driver} will read, keep or share (a report, comparison, plan, dashboard, letter), write it as one file in /bot/work/out (md, html or pdf) and call publish_file, then give them the link. To change it later, publish again with its id. Working files stay unpublished.`,
+      `- Publish only when ${driver} asks for a page, file or link, or asks to share something: write it as one file in /bot/work/out (md, html or pdf), call publish_file, then give them the link. Otherwise answer in the thread. To change it later, publish again with its id.`,
       `- Before you finish a task, check whether you learned something durable: about ${driver} → global; about doing your job → agent memory.`,
       scope === "personal" ? "" : `Your memories are filed under ${SCOPE_NAME[scope]}, which other crew members can't read.`].filter(Boolean).join("\n"),
     engram.profile ? `How ${driver} works, from Engram (their profile, compiled for you):\n${engram.profile}` : "",
@@ -290,7 +290,7 @@ export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { br
   ];
   // Only for a member linked to Engram, which hosts the published files.
   if (engram) tools.push({ type: "function", name: "publish_file",
-    description: "Publish one file from /bot/work (md, html, pdf, an image, or any single file) as a page the driver opens at a link. Private to the driver; public only when they ask to share it and approve. Pass id to update one you published (same link, new version).",
+    description: "Only when the driver asks for a link or file: publish one file from /bot/work (md, html, pdf, an image, or any single file) as a page they open at a link. Private to the driver; public only when they ask to share it and approve. Pass id to update one you published (same link, new version).",
     inputSchema: { type: "object", properties: { path: { type: "string", description: "Under /bot/work, e.g. /bot/work/out/goa-comparison.html" }, title: { type: "string" },
       id: { type: "string", description: "An artifact you published, to replace it with a new version" }, description: { type: "string" },
       public: { type: "boolean", description: "Ask the driver to let anyone with the link open it. Only when they asked to share it." } }, required: ["path", "title"] } });
