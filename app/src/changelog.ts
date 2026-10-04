@@ -1,0 +1,13 @@
+// What changed in the harness, for crew members (whats_new). One line per change that alters what a member can do or
+// should do; append to the end, never edit or reorder (members track how many they've seen). Internal changes get none.
+export const CHANGELOG: { date: string; note: string }[] = [
+  { date: "2026-10-04", note: "Full browser access: browser_evaluate, browser_run_code_unsafe, network requests and bodies, cookies and local/session storage. Secrets come back masked; page JS is judged by jev." },
+  { date: "2026-10-04", note: "browser_replay_request re-sends a captured request with a changed body, cursor or query, from the page's session; headers stay hidden." },
+  { date: "2026-10-04", note: "Bound dashboards: render_surface with source (a SQLite ledger) and queries; tiles fill from the ledger whenever viewed. Pass id to update a surface in place." },
+  { date: "2026-10-04", note: "Scheduled runs stay quiet: reply \"QUIET: <what you checked>\" unless an alert fired, something failed, the driver must act, or the digest is due." },
+  { date: "2026-10-04", note: "read_thread reads a whole thread; list_schedules shows each schedule's last run; query_ledger reads another member's ledger." },
+  { date: "2026-10-04", note: "Probes and raw dumps go in /bot/work/.scratch. Your skills live in /bot/work/skills/<name>/ (one git repo); load one with skill_view." },
+  { date: "2026-10-04", note: "Memory tiers: remember(scope) = session (this thread), agent (your own, 3,000 chars) or global (facts about the driver, reviewed in Engram)." },
+  { date: "2026-10-04", note: "A blocked action says jev's reason; an expired pit stop means the driver didn't answer, not a refusal. Repeated blocks escalate to the driver." },
+  { date: "2026-10-04", note: "harness_help(topic) explains any part of the harness; whats_new lists changes like this one." },
+];

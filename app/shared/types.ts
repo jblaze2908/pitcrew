@@ -27,6 +27,8 @@ export interface Bot {
   engram_household: boolean;
   /** The driver's prose rules for this member, one per line ("Never place orders on Blinkit"); jev reads them on every judged call. */
   house_rules: string;
+  /** The driver's SOUL for this member: who it is, its job, voice and working style (crew.ts soulOf); empty = made from job and voice. */
+  soul: string;
 }
 export type EngramScope = "personal" | "finance" | "health";
 export interface ThreadSummary { id: string; title: string; status: ThreadStatus; created_at: number; updated_at: number; pinned: number }

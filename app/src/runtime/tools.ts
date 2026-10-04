@@ -9,6 +9,8 @@ import type { Brain } from "../computer.js";
 import { active } from "./state.js";
 import { addEvent, findThreads, threadLink, readThread, addThreadNote, NOTES_MAX } from "./threads.js";
 import { viewSkill } from "./skills.js";
+import { harnessHelp, TOPICS } from "../manual.js";
+import { CHANGELOG } from "../changelog.js";
 import { computer } from "./machines.js";
 import { pitStop } from "./pitstops.js";
 import { addSchedule, listSchedules, updateSchedule, deleteSchedule, lastScheduledRun } from "./schedules.js";
@@ -165,6 +167,17 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
       if ("error" in r) return say(`Query failed: ${r.error}`, false);
       const body = JSON.stringify(r.rows);
       return say(`${r.rows.length} row${r.rows.length === 1 ? "" : "s"}${r.truncated ? " (cut at 500)" : ""} from ${owner.name}'s ${a.source}:\n${body.length > 24000 ? `${body.slice(0, 24000)}…` : body}`);
+    }
+    case "harness_help": {
+      const page = harnessHelp(String(a.topic || ""), getSetting("driver_name", "the driver"));
+      return page ? say(page) : say(`Topics: ${TOPICS.join(", ")}.`, false);
+    }
+    case "whats_new": {
+      // Members count what they've read, so a note added later shows up exactly once (changelog.ts: append only).
+      const seen = Math.min(Number(one<{ n: number }>("SELECT changelog_seen n FROM bots WHERE id=?", b.id)?.n || 0), CHANGELOG.length);
+      run("UPDATE bots SET changelog_seen=? WHERE id=?", CHANGELOG.length, b.id);
+      const fresh = CHANGELOG.slice(seen);
+      return say(fresh.length ? fresh.map((x) => `- ${x.date}: ${x.note}`).join("\n") : "Nothing new since you last looked.");
     }
     case "skill_view": {
       const s = viewSkill(b.id, String(a.name || ""), a.file ? String(a.file) : "SKILL.md");
