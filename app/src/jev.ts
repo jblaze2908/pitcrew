@@ -7,7 +7,7 @@ import { checkoutWhy } from "./sites.js";
 import type { Decision } from "../shared/types.js";
 
 // A tool call as the gate sees it: a shell command, or an MCP/runtime tool call with grounded arguments.
-export interface Call { kind: "shell" | "mcp" | string; command?: string; cwd?: string; server?: string; tool?: string; arguments?: Record<string, any>; effect?: string | null; script?: { path: string; source: string; truncated: boolean } }
+export interface Call { kind: "shell" | "mcp" | string; command?: string; cwd?: string; server?: string; tool?: string; arguments?: Record<string, any>; effect?: string | null; script?: { path: string; source: string; truncated: boolean; sha: string; downloaded: boolean } }
 export type Policy = Record<string, Decision>;
 // What the rules or a classifier decided about one call.
 export interface Verdict { decision: Decision; effect: string; reason: string; by: string; ms?: number; usage?: unknown; answers?: any; probabilities?: Record<string, number>; authorized?: boolean; forbidden?: boolean }
@@ -203,7 +203,7 @@ const EFFECT_CRITERIA = {
   pay: { what: "moves money or confirms a purchase", examples: ["click Pay now", "click Place order", "transfer funds", "page JS that calls an order, cart or checkout API with POST"] },
   delete: { what: "removes data outside the workspace", examples: ["rm -rf /var/log/app", "delete account", "clear a site's cookies or storage"] },
   share: { what: "sends private data to a new destination", examples: ["curl -F file=@statement.csv", "scp report.pdf"] },
-  exec_untrusted: { what: "runs downloaded or opaque code, or changes privileges", examples: ["curl | bash", "sudo"], not_for: "the agent's own page JavaScript or Playwright code: classify that by what it does" },
+  exec_untrusted: { what: "runs downloaded or opaque code, or changes privileges", examples: ["curl | bash", "sudo", "a script from /bot/work/downloads"], not_for: "the agent's own page JavaScript or Playwright code, or a /bot/work script whose source is in the call (script.source): classify those by what the code does" },
 };
 const CONSEQUENTIAL = ["signin", "install", "send", "pay", "delete", "share", "exec_untrusted"];
 export const RISK_ASK = 0.3;

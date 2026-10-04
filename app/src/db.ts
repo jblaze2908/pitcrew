@@ -97,6 +97,8 @@ CREATE TABLE IF NOT EXISTS turn_memories (
   turn_id TEXT NOT NULL, memory_id TEXT NOT NULL, thread_id TEXT NOT NULL, bot_id TEXT NOT NULL, text TEXT NOT NULL,
   state TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (turn_id, memory_id))`);
 // Messages waiting for a thread's run to end (runtime/queue.ts); in the store so a restart doesn't drop them.
+// Workspace scripts jev allowed or the driver approved, by content hash: the same bytes run again without asking.
+db.exec(`CREATE TABLE IF NOT EXISTS script_trust (bot_id TEXT NOT NULL, sha TEXT NOT NULL, path TEXT NOT NULL, by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY(bot_id, sha))`);
 db.exec(`CREATE TABLE IF NOT EXISTS queued (
   id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, text TEXT NOT NULL, attachments TEXT NOT NULL DEFAULT '[]',
   trigger TEXT NOT NULL, display TEXT, created_at INTEGER NOT NULL);
