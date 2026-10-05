@@ -1,9 +1,9 @@
 // Schedules (H1): what the crew does on its own and how each run went. One row per schedule with its last 14 runs as
 // dots; a row opens to its run history and its settings (time or event trigger, the cheap check, the prompt).
 import { Fragment, useState } from "react";
-import { BusyButton, Face, Field, Loader, Seg } from "../components/ui";
+import { BusyButton, Face, Field, Inline, Loader, Seg } from "../components/ui";
 import { api } from "../lib/api";
-import { sinceLabel, tokens, until } from "../lib/format";
+import { flat, sinceLabel, tokens, until } from "../lib/format";
 import { useStore } from "../lib/store";
 import { toast } from "../lib/toast";
 import { useFetch } from "../lib/useFetch";
@@ -107,7 +107,7 @@ function Detail({ s, reload }: { s: Sched; reload: () => void }) {
                 <td className="pc-m small">{r.started_at ? sinceLabel(r.started_at) : "—"}</td>
                 <td className="pc-m small">{took(r)}</td>
                 <td><span className={`res ${cls}`}><i />{word}</span></td>
-                <td className="small muted ell">{r.summary || r.note || ""}</td>
+                <td className="small muted ell"><Inline text={flat(r.summary || r.note)} /></td>
               </tr>); })}
           </tbody></table>}
       </div>

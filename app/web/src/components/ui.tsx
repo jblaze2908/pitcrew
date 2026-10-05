@@ -1,5 +1,6 @@
 // Small building blocks over the design system's classes and web components.
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { errorDetail, errorLine } from "../../../shared/text";
 import { cap } from "../lib/format";
 import { mdToHtml } from "../lib/md";
 
@@ -36,6 +37,23 @@ export const Chev = () => <span className="chev" />;
 
 export function Md({ text, className = "md" }: { text: string | null | undefined; className?: string }) {
   return <div className={className} dangerouslySetInnerHTML={{ __html: mdToHtml(text) }} />;
+}
+
+/** Inline code and bold as elements, the rest as plain text: for bubbles and one-line cells where block markdown won't fit. */
+export function Inline({ text }: { text: string | null | undefined }) {
+  // split() with one capture group puts the matches at odd indexes.
+  return <>{String(text || "").split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/).map((p, i) => i % 2 === 0 ? p
+    : p[0] === "`" ? <code key={i} className="ic">{p.slice(1, -1)}</code> : <strong key={i}>{p.slice(2, -2)}</strong>)}</>;
+}
+
+/** A run error as its message, with the raw body folded underneath when there was one. */
+export function ErrorText({ raw, className = "small badc" }: { raw: string | null | undefined; className?: string }) {
+  const more = errorDetail(raw);
+  return (
+    <div className={`errtext ${className}`}>
+      <span>{errorLine(raw)}</span>
+      {more && <details onClick={(e) => e.stopPropagation()}><summary>Details</summary><pre>{more}</pre></details>}
+    </div>);
 }
 
 export function Field({ label, help, children }: { label: string; help?: string; children: ReactNode }) {

@@ -16,7 +16,7 @@ export function Since() {
   // A run ending or a pit stop opening changes what's new or what waits on you.
   useLiveReload((e) => e.type === "turn" || e.type === "pitstop", box.reload, 800);
   if (!box.data) return <section className="since" />;
-  const { items, unread } = box.data, oldest = items.filter((i) => i.unread).at(-1);
+  const { items, unread } = box.data, fresh = items.filter((i) => i.unread), seen = items.filter((i) => !i.unread), oldest = fresh.at(-1);
   const readAll = async () => { await api.post("/api/inbox/read"); box.reload(); refresh(); };
   return (
     <section className="since">
@@ -24,7 +24,9 @@ export function Since() {
         <div><h2 className="pc-h2">Since you last looked</h2><p className="sub">{unread && oldest ? `${unread} new since ${sinceLabel(oldest.endedAt)}` : "Nothing new"}</p></div>
         {unread > 0 && <button className="mark" onClick={readAll}>Mark all read</button>}
       </div>
-      {items.length ? <div className="list">{items.map((i) => <Row key={i.turnId} i={i} />)}</div>
+      {/* Only unread runs sit under the heading; ones already seen go under Earlier, so "Nothing new" never heads a list. */}
+      {items.length ? <div className="list">{fresh.map((i) => <Row key={i.turnId} i={i} />)}
+        {seen.length > 0 && <><p className="earlier">Earlier</p>{seen.map((i) => <Row key={i.turnId} i={i} />)}</>}</div>
         : <p className="empty">Finished runs land here: scheduled checks, answers to the Chief, and anything that ended while you were away.</p>}
     </section>
   );
