@@ -7,7 +7,7 @@ import { active } from "./state.js";
 import { getThread, addEvent, UNTITLED, titleFrom, isSmallTalk } from "./threads.js";
 import { interrupt, sendMessage, startQueues } from "./turns.js";
 import { decide } from "./pitstops.js";
-import { tickSchedules } from "./schedules.js";
+import { tickSchedules, scheduleRunsCut } from "./schedules.js";
 import { backfillTitles } from "./titles.js";
 
 export async function killSwitch() {
@@ -48,6 +48,7 @@ export function settleCutTurns() {
     run("UPDATE turns SET status='interrupted', error='Control plane restarted', ended_at=? WHERE id=?", now(), t.id);
     addEvent(t.thread_id, t.id, "system", { text: "Pitcrew restarted during this run, so it stopped partway.", tone: "bad" });
   }
+  scheduleRunsCut(cut.map((t) => t.id));
   return cut;
 }
 

@@ -743,6 +743,38 @@ test("a scheduled run that ends QUIET keeps the thread's place; one with news mo
   assert.ok(T.isQuiet("QUIET: nothing") && T.isQuiet("  QUIET") && !T.isQuiet("Quietly, 3 orders came in"));
 });
 
+test("each schedule firing is recorded: late, linked to its turn, ended quiet or failed", async () => {
+  const { active } = await import("../app/dist/src/runtime/state.js");
+  const T = await import("../app/dist/src/runtime/turns.js");
+  const Sx = await import("../app/dist/src/runtime/schedules.js");
+  const { setSetting } = await import("../app/dist/src/db.js");
+  setSetting("retros", "0");
+  run("INSERT INTO bots(id,name,provider,created_at) VALUES('b_srun','Runner','openrouter',0)");
+  run("INSERT INTO threads(id,bot_id,title,pinned,created_at,updated_at) VALUES('th_srun','b_srun','Scheduled work',1,0,0)");
+  const s = R.addSchedule("b_srun", null, "daily 22:00", "Check the bills");
+  // Due 10 minutes ago: fires on the tick and says it was late. The provider isn't connected, so the turn can't start.
+  run("UPDATE schedules SET next_run=? WHERE id=?", Date.now() - 600000, s.id);
+  R.tickSchedules();
+  await new Promise((r) => setTimeout(r, 50));
+  let [r1] = R.scheduleRuns(s.id);
+  assert.equal(r1.kind, "time"); assert.match(r1.note || "", /isn't connected|Pitcrew was stopped/);
+  assert.equal(r1.status, "failed", "a turn that can't start ends the run instead of leaving it queued");
+  // A run whose turn starts and ends QUIET.
+  run("INSERT INTO schedule_runs(id,schedule_id,bot_id,thread_id,kind,due_at,fired_at,status) VALUES('sr_q',?, 'b_srun','th_srun','manual',1,?,'queued')", s.id, Date.now() + 1000);
+  run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,provider,model,started_at) VALUES('tu_srun','th_srun','b_srun','running','schedule','openrouter','m',3)");
+  Sx.scheduleRunStarted("th_srun", "tu_srun");
+  assert.equal(one("SELECT status FROM schedule_runs WHERE id='sr_q'").status, "running");
+  active.set("th_srun", { turnId: "tu_srun", codexTurnId: null, base: null, total: null, last: null, usageFrom: 0, quietFrom: 0 });
+  run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('th_srun','tu_srun','agent',?,4)", JSON.stringify({ text: "QUIET: no new bills since Monday" }));
+  await T.finishTurn("th_srun", "completed");
+  const q = one("SELECT * FROM schedule_runs WHERE id='sr_q'");
+  assert.equal(q.status, "quiet"); assert.equal(q.summary, "no new bills since Monday"); assert.equal(q.turn_id, "tu_srun");
+  const ov = R.scheduleOverview().find((x) => x.id === s.id);
+  assert.equal(ov.runs.length, 2); assert.equal(ov.bot_name, "Runner");
+  assert.deepEqual(R.lastScheduledRun(s).status, "quiet");
+  R.deleteSchedule(s.id, null, "driver");
+});
+
 test("replaying a captured request keeps its headers inside Playwright and applies only the asked change", async () => {
   const Bz = await import("../app/dist/src/runtime/browser.js");
   const details = "### Result\n#7 [POST] https://shop.example/v1/layout/order_history?x=1\n\n  General\n    status:    [200] OK";
@@ -872,10 +904,10 @@ test("read_thread pages a whole thread: messages in full, tool calls as one line
 test("a schedule shows its last run: when, how it ended, and the first line of the reply", async () => {
   const S = await import("../app/dist/src/runtime/schedules.js");
   run("INSERT INTO threads(id,bot_id,title,pinned,created_at,updated_at) VALUES('th_sch_last','b_sch2','Scheduled work',1,0,0)");
-  assert.equal(S.lastScheduledRun({ bot_id: "b_sch2", thread_id: null, last_run: null }), null);
+  assert.equal(S.lastScheduledRun({ id: "sc_none", bot_id: "b_sch2", thread_id: null, last_run: null }), null);
   run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,started_at) VALUES('tu_sl','th_sch_last','b_sch2','completed','schedule',5000)");
   run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('th_sch_last','tu_sl','agent',?,5001)", JSON.stringify({ text: "QUIET: checked 1 page, no new orders\nmore" }));
-  assert.deepEqual(S.lastScheduledRun({ bot_id: "b_sch2", thread_id: null, last_run: 4990 }), { at: 5000, status: "completed", summary: "QUIET: checked 1 page, no new orders", threadId: "th_sch_last" });
+  assert.deepEqual(S.lastScheduledRun({ id: "sc_none", bot_id: "b_sch2", thread_id: null, last_run: 4990 }), { at: 5000, status: "completed", summary: "QUIET: checked 1 page, no new orders", threadId: "th_sch_last" });
 });
 
 test("threads are named by the plan model once they have a topic, never over a title set by hand", async () => {
