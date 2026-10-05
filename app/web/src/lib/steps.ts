@@ -92,3 +92,50 @@ export function pitLabel(p: { kind: string; title: string; detail?: Record<strin
   if (p.kind === "mcp" && d.server && tool) { const v = stepView(`${d.server}.${tool}`); return { ...v, detail: "" }; }
   return { icon: "tool", label: p.title, detail: "" };
 }
+
+export type SummaryPart = string | { em: string };
+const plural = (n: number, one: string, many: string) => (n === 1 ? one : many.replace("#", String(n)));
+const baseName = (p: string) => p.split("/").filter(Boolean).pop() || p;
+/** A run's steps as one plain sentence ("Opened example.com, ran 3 browser scripts, took 2 screenshots"); names come
+ * back as { em } so the view can brighten them. A script that only wraps tool calls is counted by what it called. */
+export function runSummary(steps: { type: string; nested: boolean; v: StepView }[]): SummaryPart[] {
+  const wraps = steps.some((s) => s.nested);
+  const order: string[] = [], n = new Map<string, number>(), names = new Map<string, string[]>();
+  const add = (k: string, name?: string) => {
+    if (!n.has(k)) order.push(k);
+    n.set(k, (n.get(k) || 0) + 1);
+    if (name && !names.get(k)?.includes(name)) names.set(k, [...(names.get(k) || []), name]);
+  };
+  for (const { type, v } of steps) {
+    if (type === "script") { if (!wraps) add("script"); }
+    else if (type === "commandExecution" || v.icon === "terminal") add("command");
+    else if (v.icon === "code") add("bscript");
+    else if (v.label === "Took a screenshot") add("shot");
+    else if (v.label === "Opened") add("open", hostOf(v.detail) || v.detail);
+    else if (v.label === "Read the page") add("read");
+    else if (v.label === "Edit") add("edit", baseName(v.detail));
+    else if (v.label === "Search the web") add("search");
+    else if (v.icon === "browser") add("browse");
+    else add("tool");
+  }
+  const out: SummaryPart[] = [];
+  for (const k of order) {
+    const c = n.get(k)!, nm = names.get(k) || [];
+    if (out.length) out.push(", ");
+    if ((k === "open" || k === "edit") && nm.length <= 2) {
+      out.push(k === "open" ? "opened " : "edited ");
+      nm.forEach((x, i) => { if (i) out.push(" and "); out.push({ em: x }); });
+      continue;
+    }
+    out.push({
+      command: plural(c, "ran a command", "ran # commands"), script: plural(c, "ran a script", "ran # scripts"),
+      bscript: plural(c, "ran a browser script", "ran # browser scripts"), shot: plural(c, "took a screenshot", "took # screenshots"),
+      open: `opened ${c} pages`, read: plural(c, "read the page", "read # pages"), edit: `edited ${nm.length} files`,
+      search: plural(c, "searched the web", "searched the web # times"), browse: plural(c, "used the browser", "used the browser # times"),
+      tool: plural(c, "used a tool", "used # tools"),
+    }[k]!);
+  }
+  if (!out.length) return ["Waited on a pit stop"];
+  if (typeof out[0] === "string") out[0] = out[0][0].toUpperCase() + out[0].slice(1);
+  return out;
+}

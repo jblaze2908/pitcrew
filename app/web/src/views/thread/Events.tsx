@@ -8,7 +8,8 @@ import { OUTCOME, PitCard } from "../../components/PitCard";
 import { PlanCard, PlanChip } from "../../components/PlanCard";
 import { BusyButton, Face, Md } from "../../components/ui";
 import { tidyTitle } from "../../lib/format";
-import { pitLabel, stepView } from "../../lib/steps";
+import { pitLabel, runSummary, stepView } from "../../lib/steps";
+import { Icon } from "../../components/Icon";
 import { StepIcon } from "../../components/StepIcon";
 import { api } from "../../lib/api";
 import { useFetch } from "../../lib/useFetch";
@@ -113,9 +114,9 @@ function Images({ e, b, c }: { e: ThreadEvent; b: Bot; c: EventCtx }) {
 
 /** A Code Mode script: its code, and its output once the turn has it (a scriptResult event, merged in by callId). */
 function Script({ e, result }: { e: ThreadEvent; result?: Record<string, any> }) {
-  const st = !result ? "" : result.status === "completed" ? "ok" : "bad", lines = String(e.data.code || "").split("\n").length;
+  const failed = !!result && result.status !== "completed", lines = String(e.data.code || "").split("\n").length;
   return (
-    <details className="tool script"><summary><span className={`st ${st}`} /><StepIcon name="code" /><span className="lbl">Ran a script</span><span className="det">{`${lines} line${lines === 1 ? "" : "s"}${result ? "" : " · running"}`}</span></summary>
+    <details className="tool script"><summary><StepIcon name="code" /><span className="lbl">Ran a script</span><span className="det">{`${lines} line${lines === 1 ? "" : "s"}${result ? "" : " · running"}`}</span>{failed && <span className="tag failed">Failed</span>}</summary>
       <pre>{e.data.code}</pre>
       {result?.output && <><p className="small faint" style={{ margin: "8px 0 4px" }}>Output</p><pre>{result.output}</pre></>}
     </details>
@@ -161,9 +162,10 @@ function Debug({ d }: { d: Record<string, any> }) {
 /** pit: the decided pit stop that gated this call, shown as its outcome tag and jev's reason instead of a row of its own. */
 export function Tool({ e, results, pit }: { e: ThreadEvent; results?: Map<string, Record<string, any>>; pit?: PitStop }) {
   if (e.data.type === "script") return <Script e={e} result={results?.get(e.data.callId)} />;
-  const st = stepOk(e) ? "ok" : e.data.status === "inProgress" ? "" : "bad";
+  const failed = !stepOk(e) && e.data.status !== "inProgress";
   const v = stepView(tidyTitle(e.data.title), e.data.conn), j = pit?.jev || {};
-  return <details className={`tool${e.data.viaScript ? " nested" : ""}`}><summary><span className={`st ${st}`} /><StepIcon name={v.icon} /><span className="lbl">{v.label}</span>{v.detail && <span className="det">{v.detail}</span>}{pit && <span className={`tag ${pit.status}`}>{OUTCOME[pit.status]}</span>}</summary>
+  return <details className={`tool${e.data.viaScript ? " nested" : ""}`}><summary><StepIcon name={v.icon} /><span className="lbl">{v.label}</span>{v.detail && <span className={`det${v.icon === "terminal" ? " code" : ""}`}>{v.detail}</span>}
+    {failed ? <span className="tag failed">Failed</span> : pit && <span className={`tag ${pit.status}`}>{OUTCOME[pit.status]}</span>}</summary>
     {j.reason && <p className="why">{`jev · ${j.by || ""} · ${j.reason}`}</p>}<Debug d={e.data} /></details>;
 }
 
@@ -239,10 +241,6 @@ export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
   return null;
 }
 
-function Last({ e }: { e: ThreadEvent }) {
-  const v = stepView(tidyTitle(e.data.title), e.data.conn);
-  return <span className="last"><StepIcon name={v.icon} />{v.detail ? `${v.label} · ${v.detail}` : v.label}</span>;
-}
 
 /** A run's tool calls fold into one "N steps" row under the message before them: open while the run goes, folded when
  * it ends (closeSignal bumps). Decided pit stops ride in the same group as their own line, counted in the summary. */
@@ -253,15 +251,16 @@ export function Steps({ events, pits, initialOpen, closeSignal, results }: { eve
   const tools = events.filter((e) => e.kind === "tool"), decided = events.flatMap((e) => (e.kind === "pitstop" && pits[e.data.id] ? [pits[e.data.id]] : []));
   const bad = tools.filter((e) => !stepOk(e) && e.data.status !== "inProgress").length;
   const n = (st: PitStop["status"]) => decided.filter((p) => p.status === st).length;
-  const counts = (["approved", "denied", "expired"] as const).filter((st) => n(st) > 0);
   const gated = useMemo(() => gatedCalls(events, pits), [events, pits]);
+  const said = useMemo(() => runSummary(tools.map((e) => ({ type: String(e.data.type), nested: !!e.data.viaScript, v: stepView(tidyTitle(e.data.title || ""), e.data.conn) }))), [events]);
+  // Approvals stay out of the sentence; only what went wrong gets a (soft) colour.
+  const trouble = [n("expired") ? { k: "expired", t: `${n("expired")} no answer` } : null, n("denied") ? { k: "denied", t: `${n("denied")} denied` } : null, bad ? { k: "failed", t: `${bad} failed` } : null].filter(Boolean) as { k: string; t: string }[];
   return (
     <details className="steps" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary>
-        <span className="n">{`${tools.length} step${tools.length === 1 ? "" : "s"}`}</span>
-        {tools.length > 0 && <Last e={tools[tools.length - 1]} />}
-        {bad > 0 && <span className="cnt denied">{`${bad} failed`}</span>}
-        {counts.map((st) => <span key={st} className={`cnt ${st}`}>{`${n(st)} ${OUTCOME[st]}`}</span>)}
+        {said.map((p, i) => typeof p === "string" ? <Fragment key={i}>{p}</Fragment> : <em key={i}>{p.em}</em>)}
+        {trouble.map((x) => <Fragment key={x.k}>{" · "}<span className={`tr ${x.k}`}>{x.t}</span></Fragment>)}
+        <Icon name="chev" size={12} />
       </summary>
       <div className="steps-body">{events.map((e) => e.kind === "pitstop"
         ? pits[e.data.id] && !gated.merged.has(e.id) && <PitCard key={e.id} p={pits[e.data.id]} row />

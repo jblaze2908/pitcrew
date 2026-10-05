@@ -64,7 +64,7 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
   if (done) return (
     <details className={row ? "tool pitrow" : "pit done"}>
       {row
-        ? <summary><span className={`st ${p.status === "approved" ? "ok" : "bad"}`} /><StepIcon name={v.icon} /><span className="lbl">{v.label}</span>{v.detail && <span className="det">{v.detail}</span>}<span className={`tag ${p.status}`}>{p.status === "expired" ? "no answer · skipped" : OUTCOME[p.status]}</span></summary>
+        ? <summary><StepIcon name={v.icon} /><span className="lbl">{v.label}</span>{v.detail && <span className="det">{v.detail}</span>}<span className={`tag ${p.status}`}>{p.status === "expired" ? "no answer · skipped" : OUTCOME[p.status]}</span></summary>
         : <summary><Face b={b} size="sm" mood="idle" /><b>{b?.name || p.bot_id}</b><span className="t1">{heading}</span><span className="pc-m small faint">{outcome}</span></summary>}
       {body}
       {j.reason && <p className="why">{`jev · ${j.by || ""} · ${j.reason}${j.ms ? ` · ${j.ms} ms` : ""}`}</p>}
