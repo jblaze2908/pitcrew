@@ -30,6 +30,8 @@ export interface MemoryRow { id: string; bot_id: string; text: string; source: s
 export interface ScheduleRow {
   id: string; bot_id: string; thread_id: string | null; spec: string; prompt: string;
   next_run: number | null; last_run: number | null; enabled: number; created_at: number; hook_secret?: string | null; check_cmd?: string | null; check_last?: string | null;
+  /** A short name for the Schedules page; backfilled from the prompt for older rows (runtime/schedules.ts). */
+  title?: string | null;
 }
 export interface ScheduleRunRow {
   id: string; schedule_id: string; bot_id: string; thread_id: string | null; turn_id: string | null;

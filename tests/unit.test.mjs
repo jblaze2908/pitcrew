@@ -89,6 +89,58 @@ test("a member lists, edits, pauses and cancels only its own schedules", () => {
   R.deleteSchedule(other.id, null, "driver");
 });
 
+test("schedules carry a short title: given, backfilled from the prompt, or reset to it", () => {
+  run("INSERT INTO bots(id,name,created_at) VALUES('b_ttl','Titler',0)");
+  assert.equal(R.scheduleTitle("Review today's spending in Tijori. Then compare it with the goals."), "Review today's spending in Tijori.");
+  assert.equal(R.scheduleTitle("[Scheduled: daily 09:00]\n\nCheck the BESCOM portal"), "Check the BESCOM portal");
+  const long = R.scheduleTitle("every day at 22:00 asia/kolkata run one pass over the grocery ledger and the bank feed and label whatever is new");
+  assert.ok(long.length <= 60 && long.endsWith("…") && long.startsWith("Every day"), long);
+  assert.equal(R.scheduleTitle("```\nonly code\n```"), "Untitled schedule");
+  // Rows from before the column: NULL or empty titles get one; titled rows are left alone.
+  run("INSERT INTO schedules(id,bot_id,spec,prompt,next_run,created_at,title) VALUES('sc_old1','b_ttl','daily 08:00','Morning bill check\nLook at the inbox',1,0,NULL),('sc_old2','b_ttl','daily 09:00','x',1,0,''),('sc_old3','b_ttl','daily 10:00','y',1,0,'Kept')");
+  assert.equal(R.backfillScheduleTitles(), 2);
+  assert.deepEqual(all("SELECT id,title FROM schedules WHERE bot_id='b_ttl' ORDER BY id").map((r) => [r.id, r.title]), [["sc_old1", "Morning bill check"], ["sc_old2", "X"], ["sc_old3", "Kept"]]);
+  assert.equal(R.backfillScheduleTitles(), 0, "a second pass finds nothing to name");
+  const a = R.addSchedule("b_ttl", null, "daily 22:00", "Review spend", "  Daily   expense review ");
+  assert.equal(a.title, "Daily expense review");
+  assert.equal(R.addSchedule("b_ttl", null, "daily 22:00", "Sort new mail\nand flag bills").title, "Sort new mail");
+  assert.equal(R.updateSchedule(a.id, null, { title: "Nightly spend" }, "driver").title, "Nightly spend");
+  assert.equal(R.updateSchedule(a.id, "b_ttl", { title: "", prompt: "Label today's transactions" }, "crew").title, "Label today's transactions", "an emptied title falls back to the prompt");
+  assert.equal(R.listSchedules("b_ttl").find((s) => s.id === a.id).title, "Label today's transactions");
+  run("DELETE FROM schedules WHERE bot_id='b_ttl'");
+});
+
+test("POST /api/bots/:id/schedules makes a titled schedule, with the driver's check, and refuses bad input", async () => {
+  const A = await import("../app/dist/src/auth.js");
+  const { api } = await import("../app/dist/src/api/index.js");
+  const cookie = `pc_s=${A.newSession()}`;
+  const req = async (method, path, body, headers = { cookie, "x-pitcrew": "1" }) => {
+    const res = await api.fetch(new Request(`http://pit.test${path}`, { method, body: body === undefined ? undefined : JSON.stringify(body),
+      headers: { ...headers, ...(body === undefined ? {} : { "content-type": "application/json" }) } }), { outgoing: { headersSent: false } });
+    return { status: res.status, body: await res.json() };
+  };
+  run("INSERT INTO bots(id,name,created_at) VALUES('b_new','Newbie',0)");
+  const ok = await req("POST", "/api/bots/b_new/schedules", { spec: "Weekdays 08:30", prompt: "Check the inbox for bills", title: "Morning bills", check: "python3 skills/bills/count.py" });
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  assert.deepEqual([ok.body.title, ok.body.spec, ok.body.check_cmd, ok.body.bot_id], ["Morning bills", "weekdays 08:30", "python3 skills/bills/count.py", "b_new"]);
+  const plain = await req("POST", "/api/bots/b_new/schedules", { spec: "daily 21:00", prompt: "Price check on the printer list" });
+  assert.equal(plain.body.title, "Price check on the printer list");
+  assert.equal(plain.body.check_cmd, null);
+  assert.equal((await req("POST", "/api/bots/b_new/schedules", { spec: "every 5 minutes", prompt: "x" })).status, 400);
+  assert.equal((await req("POST", "/api/bots/b_new/schedules", { spec: "daily 09:00", prompt: "" })).status, 400);
+  const long = await req("POST", "/api/bots/b_new/schedules", { spec: "daily 09:00", prompt: "x", title: "t".repeat(200) });
+  assert.equal(long.body.title, "t".repeat(80), "an over-long title is cut, not refused");
+  run("DELETE FROM schedules WHERE id=?", long.body.id);
+  assert.equal((await req("POST", "/api/bots/b_nobody/schedules", { spec: "daily 09:00", prompt: "x" })).status, 404);
+  assert.equal((await req("POST", "/api/bots/b_new/schedules", { spec: "daily 09:00", prompt: "x" }, { "x-pitcrew": "1" })).status, 401, "needs a session");
+  assert.equal((await req("POST", "/api/bots/b_new/schedules", { spec: "daily 09:00", prompt: "x" }, { cookie })).status, 403, "needs the CSRF header");
+  const edited = await req("PATCH", `/api/schedules/${plain.body.id}`, { title: "Printer price check" });
+  assert.equal(edited.body.title, "Printer price check");
+  const over = (await req("GET", "/api/schedules")).body.filter((s) => s.bot_id === "b_new").map((s) => s.title).sort();
+  assert.deepEqual(over, ["Morning bills", "Printer price check"]);
+  run("DELETE FROM schedules WHERE bot_id='b_new'");
+});
+
 test("a restart marks cut turns interrupted, says so in the thread, and resumes each once", () => {
   const t0 = Date.now();
   run("INSERT INTO bots(id,name,created_at) VALUES('b_cut','Cutter',0)");
