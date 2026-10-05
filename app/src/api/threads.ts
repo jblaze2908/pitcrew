@@ -24,7 +24,7 @@ const AUTONOMY_NOTE: Record<Autonomy, string> = {
   handsfree: "Hands-free: this thread only stops for paying, signing in, sending, sharing, deleting, and sites that look like another or aren't https.",
   yolo: "YOLO: this thread runs without pit stops, paying and sending included. Only jev's hard blocks and blocked sites still stop it.",
 };
-const ThreadEdit = z.object({ title: truthy((v) => String(v).slice(0, 120)), archived: given((v) => (v ? 1 : 0)), autonomy: pick(AUTONOMY, undefined) });
+const ThreadEdit = z.object({ title: truthy((v) => String(v).slice(0, 120)), archived: given((v) => (v ? 1 : 0)), pinned: given((v) => (v ? 1 : 0)), autonomy: pick(AUTONOMY, undefined) });
 const Message = z.object({ text: raw, attachments: field((v): string[] => (Array.isArray(v) ? v.filter((a) => /^uploads\/[\w.-]+$/.test(a)) : [])), mode: raw,
   edit: z.object({ image: z.string().max(300), mask: z.string().max(300).nullish(), marked: z.string().max(300).nullish(), model: z.string().max(120).nullish(),
     pins: z.array(z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), note: z.string().max(200) })).max(9).optional() }).nullish() });
@@ -91,6 +91,7 @@ export const threadRoutes = new Hono<Env>()
     const id = c.req.param("id"), b = await jsonBody(c, ThreadEdit);
     if (b.title !== undefined) run("UPDATE threads SET title=?, title_auto=0 WHERE id=?", b.title, id);
     if (b.archived !== undefined) run("UPDATE threads SET archived=? WHERE id=?", b.archived, id);
+    if (b.pinned !== undefined) run("UPDATE threads SET pinned=? WHERE id=?", b.pinned, id);
     if (b.autonomy !== undefined && R.getThread(id) && R.getThread(id)!.autonomy !== b.autonomy) {
       run("UPDATE threads SET autonomy=? WHERE id=?", b.autonomy, id);
       audit("driver", "thread.autonomy", { id, autonomy: b.autonomy });

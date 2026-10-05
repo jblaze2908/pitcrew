@@ -1,9 +1,11 @@
 // The thread composer: steer or queue while a run goes, attachments by picker or paste, Stop, / commands.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { QueuedItem } from "../../../../shared/types";
+import { Icon } from "../../components/Icon";
 import { BusyButton, Seg } from "../../components/ui";
 import { api } from "../../lib/api";
 import { go } from "../../lib/router";
+import { toast } from "../../lib/toast";
 
 interface Attachment { path: string; name: string; preview: string | null }
 const isImg = (n: string) => /\.(png|jpe?g|webp|gif)$/i.test(n);
@@ -40,9 +42,59 @@ function QueuedStack({ threadId, queued, fromName, onEdit }: { threadId: string;
   );
 }
 
+// How much this thread runs without pit stops (server: runtime/autonomy.ts). YOLO is drawn in the bad tone so it's
+// never on by accident or forgotten.
+export const AUTONOMY = [
+  ["ask", "Ask me", "Pit stops whenever jev isn't sure."],
+  ["handsfree", "Hands-free", "Stops only for paying, signing in, sending, sharing, deleting, and look-alike or non-https sites."],
+  ["yolo", "YOLO", "No pit stops, paying and sending included. Only hard blocks and blocked sites stop it."],
+] as const;
+
+function ModePicker({ threadId, value, onChange }: { threadId: string; value: string; onChange: (a: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const cur = AUTONOMY.find(([k]) => k === value) || AUTONOMY[0];
+  const set = async (a: string) => {
+    setOpen(false);
+    if (a === value) return;
+    await api.patch(`/api/threads/${threadId}`, { autonomy: a });
+    onChange(a); toast(AUTONOMY.find(([k]) => k === a)![1]);
+  };
+  return (
+    <span className="modepick">
+      <button className={`chipb mode-${cur[0]}`} title="Pit stops for this thread" aria-expanded={open} onClick={() => setOpen(!open)}><i className="d7" />{cur[1]}<Icon name="chev" size={13} /></button>
+      {open && <>
+        <div className="scrim" onClick={() => setOpen(false)} />
+        <div className="menu modes" role="menu">
+          {AUTONOMY.map(([k, label, tip]) => (
+            <button key={k} role="menuitemradio" aria-checked={k === value} className={`op mode-${k} ${k === value ? "on" : ""}`} onClick={() => set(k)}>
+              <i className="d7" /><span><b>{label}</b><small>{tip}</small></span>{k === value && <Icon name="check" />}
+            </button>))}
+          <p className="ft">This thread only</p>
+        </div>
+      </>}
+    </span>);
+}
+
+/** Context used, as a ring; click compacts the thread (same as /compact). */
+function ContextRing({ threadId, ctx, running }: { threadId: string; ctx: { tokens: number | null; window: number | null }; running: boolean }) {
+  if (!ctx.tokens || !ctx.window) return null;
+  const pct = Math.min(100, (ctx.tokens / ctx.window) * 100), c = 2 * Math.PI * 6;
+  return (
+    <button className={`ring ${pct > 70 ? "hot" : ""}`} disabled={running} title={`${Math.round(ctx.tokens / 1000)}k of ${Math.round(ctx.window / 1000)}k tokens · click to compact`}
+      onClick={async () => { await api.post(`/api/threads/${threadId}/compact`); toast("Compacting the thread"); }}>
+      <svg width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="var(--surface-3)" strokeWidth="2.2" />
+        <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeDasharray={`${(pct / 100) * c} ${c}`} transform="rotate(-90 8 8)" strokeLinecap="round" /></svg>
+      {`${Math.round(ctx.tokens / 1000)}k / ${Math.round(ctx.window / 1000)}k`}
+    </button>);
+}
+
 /** The image the next message edits: the newest one by default (Thread.tsx), or one the driver picked. */
 export interface EditTarget { path: string; label: string; src: string }
-export function Composer({ threadId, name, running, queued, fromName, target, onClearTarget }: { threadId: string; name: string; running: boolean; queued: QueuedItem[]; fromName: string; target?: EditTarget | null; onClearTarget?: () => void }) {
+interface ComposerProps {
+  threadId: string; name: string; running: boolean; queued: QueuedItem[]; fromName: string; target?: EditTarget | null; onClearTarget?: () => void;
+  autonomy: string; onAutonomy: (a: string) => void; ctx: { tokens: number | null; window: number | null };
+}
+export function Composer({ threadId, name, running, queued, fromName, target, onClearTarget, autonomy, onAutonomy, ctx }: ComposerProps) {
   const [text, setText] = useState("");
   const [mode, setMode] = useState<"steer" | "queue">("steer");
   const [atts, setAtts] = useState<Attachment[]>([]);
@@ -124,13 +176,14 @@ export function Composer({ threadId, name, running, queued, fromName, target, on
             if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
           }} />
         <div className="bar">
-          <button className="attach" title="Attach files or paste an image" onClick={() => file.current?.click()}>+ Attach</button>
+          <button className="chipb" title="Attach files or paste an image" onClick={() => file.current?.click()}><Icon name="attach" size={14} />Attach</button>
           <input ref={file} type="file" className="hidden" multiple onChange={async (e) => { const input = e.currentTarget; await upload([...(input.files || [])]); input.value = ""; }} />
-          <span className="small faint hint">Enter to send · Shift+Enter for a new line · / for commands</span>
+          <ModePicker threadId={threadId} value={autonomy} onChange={onAutonomy} />
           <span style={{ flex: 1 }} />
           {running && <Seg options={[["steer", "Steer now"], ["queue", "Queue after"]] as const} value={mode} onChange={setMode} />}
-          {running && <button className="pc-pill o s" onClick={() => api.post(`/api/threads/${threadId}/interrupt`)}>Stop</button>}
-          <button className="pc-pill s" disabled={sending} onClick={send}>Send</button>
+          <ContextRing threadId={threadId} ctx={ctx} running={running} />
+          {running && <button className="roundb stop" title="Stop the run" onClick={() => api.post(`/api/threads/${threadId}/interrupt`)}><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2" /></svg></button>}
+          <button className="roundb" title="Send (Enter)" disabled={sending} onClick={send}><Icon name="up" /></button>
         </div>
       </div>
     </div>

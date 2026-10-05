@@ -82,7 +82,9 @@ export interface ThreadEvent<D = Record<string, any>> { id: number; thread_id: s
 
 /** A message waiting for the thread's run to end; it enters the transcript only when it goes to the member. via: the trigger. */
 export interface QueuedItem { id: string; text: string; attachments: string[]; via: string; display: string | null; created_at: number }
-export interface ThreadView { thread: Thread; bot: Bot; events: ThreadEvent[]; pitstops: PitStop[]; surfaces: { id: string; title: string; spec: any; saved: number }[]; queued: QueuedItem[]; painting: Painting[] }
+export interface ThreadView { thread: Thread; bot: Bot; events: ThreadEvent[]; pitstops: PitStop[]; surfaces: { id: string; title: string; spec: any; saved: number }[]; queued: QueuedItem[]; painting: Painting[]; commands?: LiveCommandView[] }
+/** A shell command still running when the thread was opened, with its output so far. */
+export interface LiveCommandView { itemId: string; command: string; cwd: string | null; startedAt: number; output: string }
 /** An image being made right now; the thread draws the wait (catch the paint) until its image event lands. */
 export interface Painting { id: string; botId: string; n: number; aspect: string; palette: string[]; model: string; startedAt: number }
 
@@ -190,6 +192,8 @@ export interface StreamEvents {
   context: { threadId: string; tokens: number; window: number };
   queue: { threadId: string; queued: QueuedItem[] };
   painting: { threadId: string; id: string; painting?: Painting; done?: boolean };
+  /** A shell command starting (command set) or more of its output (chunk set), for the Terminal tab. */
+  output: { threadId: string; itemId: string; command?: string; cwd?: string | null; chunk?: string };
 }
 export type StreamType = keyof StreamEvents;
 

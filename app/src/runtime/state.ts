@@ -14,6 +14,10 @@ export const byCodex = new Map<string, string>();      // codex thread id → ou
 export const waits = new Map<string, (decision: string) => void>(); // pitstop id → resolve(decision)
 export const leases = new Map<string, Lease>();        // bot id → { since, waiters: [] }
 export const items = new Map<string, any>();           // codex item id → item (for file-change paths)
+// A shell command still running: what the Terminal tab shows after a reload. Capped at OUT_CAP; dropped on item/completed.
+export interface LiveCommand { itemId: string; threadId: string; command: string; cwd: string | null; startedAt: number; output: string }
+export const liveCommands = new Map<string, LiveCommand>(); // codex item id → its command so far
+export const OUT_CAP = 64_000;
 export const turnWaiters = new Map<string, ((r: TurnEnd) => void)[]>(); // our thread id → [resolve] for the next finished turn (delegation)
 export const usage = new Map<string, TokenUsage>();    // codex thread id → last total usage
 export const snapshots = new Map<string, Seen>();      // codex thread id → { url, text, lines } from the last browser snapshot the agent saw (noteSnapshot)

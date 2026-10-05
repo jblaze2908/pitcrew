@@ -9,6 +9,7 @@ import { allComputers, allBrains } from "../computer.js";
 import { linked, engramUrl } from "../engramStore.js";
 import type { Bot, BotCard, Mood, PitStop, ProviderId, State, ThreadSummary, ThreadView, ThreadEvent } from "../../shared/types.js";
 import type { PitstopRow, EventRow, LearnedRow, SurfaceRow } from "../models.js";
+import { liveCommands } from "../runtime/state.js";
 
 // An Engram proposal waits on the driver, not on the member it's filed under, so it doesn't make that member "needs".
 function mood(b: Bot, threads: ThreadSummary[], pending: { bot_id: string; kind?: string }[], up: boolean): Mood {
@@ -52,7 +53,8 @@ export async function threadView(id: string): Promise<ThreadView> {
   // Bound dashboards run their queries here (cached per ledger version; ledger.ts), once per thread load.
   const surfaces = surfIds.length ? await Promise.all(all<Pick<SurfaceRow, "id" | "title" | "spec" | "saved" | "bot_id">>(`SELECT id,title,spec,saved,bot_id FROM surfaces WHERE id IN (${surfIds.map(() => "?").join(",")})`, ...surfIds)
     .map(({ bot_id, ...s }) => resolveSurface({ ...s, spec: json(s.spec) }, bot_id))) : [];
-  return { thread: { ...t, running: R.isRunning(id) }, bot: getBot(t.bot_id)!, events, pitstops: pits, surfaces, queued: R.listQueued(id), painting: R.paintings(id) };
+  return { thread: { ...t, running: R.isRunning(id) }, bot: getBot(t.bot_id)!, events, pitstops: pits, surfaces, queued: R.listQueued(id), painting: R.paintings(id),
+    commands: [...liveCommands.values()].filter((c) => c.threadId === id).map(({ threadId: _, ...c }) => c) };
 }
 export function telemetry() {
   const ws = R.weekStart();
