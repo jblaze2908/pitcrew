@@ -2,18 +2,16 @@
 // member, effect and who allowed it; "Older" pages back by cursor.
 import { useEffect, useState } from "react";
 import type { ActivityPage, ActivityRow } from "../../../../shared/types";
-import { Face } from "../../components/ui";
+import { EffectChip, Face } from "../../components/ui";
 import { api } from "../../lib/api";
-import { stamp } from "../../lib/format";
+import { plainWords, stamp } from "../../lib/format";
 import { useLiveReload } from "../../lib/live";
 import { useStore } from "../../lib/store";
 import { useFetch } from "../../lib/useFetch";
 
 // The gate's effect classes (jev.ts DEFAULT_POLICY); there is no "publish" class, so sharing stands for it.
 const EFFECTS = [["send", "Sent"], ["pay", "Paid"], ["signin", "Signed in"], ["delete", "Deleted"], ["share", "Shared"], ["install", "Installed"]] as const;
-const BY = [["", "Allowed by anyone"], ["once", "You · once"], ["always", "You · always"], ["autonomy", "Hands-free or YOLO"], ["learned", "Learned from you"], ["jev", "jev"], ["rules", "Policy or site list"]] as const;
-const LABEL: Record<string, string> = { send: "Send", pay: "Pay", signin: "Sign in", delete: "Delete", share: "Share", install: "Install", browse: "Browse", read: "Read", draft: "Draft",
-  write_workspace: "Write", write: "Write", exec_untrusted: "Run", hire: "Hire", member: "Member", soul: "Soul", retire: "Retire", plan_limit: "Plan", ask: "Ask", unknown: "Other" };
+const BY = [["", "Allowed by anyone"], ["once", "You · once"], ["always", "You · always"], ["autonomy", "Hands-free or Full auto"], ["learned", "Learned from you"], ["jev", "Safety check"], ["rules", "Policy or site list"]] as const;
 const PAGE = 30;
 
 export function Activity() {
@@ -46,8 +44,8 @@ export function Activity() {
           {rows.map((r) => {
             const b = bot(r.botId), body = (
               <><span className="tm">{stamp(r.at)}</span><span className="who"><Face b={b} size="xs" mood="idle" /><span className="nm">{b?.name || "A former member"}</span></span>
-                <span><pc-effect key={r.effect} kind={r.effect}>{LABEL[r.effect] || r.effect.replace(/_/g, " ")}</pc-effect></span>
-                <span className="w" title={r.what}>{r.what}</span><span className="by"><b>{r.by.who}</b>{r.by.how ? ` · ${r.by.how}` : ""}</span></>);
+                <span><EffectChip kind={r.effect} /></span>
+                <span className="w" title={plainWords(r.what)}>{plainWords(r.what)}</span><span className="by"><b>{plainWords(r.by.who)}</b>{r.by.how ? ` · ${plainWords(r.by.how)}` : ""}</span></>);
             return r.threadId ? <a key={r.id} className="lr" href={`#/t/${r.threadId}`}>{body}</a> : <div key={r.id} className="lr">{body}</div>;
           })}
         </div>) : <p className="empty">{filtered ? "Nothing matches these filters." : "Nothing done on your behalf yet."}</p>)}

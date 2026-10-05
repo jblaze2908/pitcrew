@@ -60,7 +60,7 @@ function Screen({ d }: { d: BotDetail }) {
       <header>
         <Face b={b} size="sm" /><b className="pc-h3">{`${b.name}'s computer`}</b><span className="small faint">{status}</span><span style={{ flex: 1 }} />
         {held && <input placeholder="What changed? (sent to the crew when you hand back)" className="small" style={{ maxWidth: 380 }} value={note} onChange={(e) => setNote(e.target.value)} />}
-        <button className="pc-pill sig s" onClick={toggleLease}>{held ? "Hand back" : "Take control"}</button>
+        <button className="pc-pill s" onClick={toggleLease}>{held ? "Hand back" : "Take control"}</button>
         <button className="pc-pill o s" title="Keep watching in a corner" onClick={() => { go(back); openDock(b); }}>Minimize</button>
         <a className="pc-pill o s" href={back}>{back.startsWith("#/t/") ? "Back to chat" : "Back"}</a>
       </header>

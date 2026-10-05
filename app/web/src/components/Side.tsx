@@ -1,4 +1,4 @@
-// The sidebar lists threads, not members: what needs you, what's on track, then pinned and recent. It folds to a rail.
+// The sidebar lists threads, not members: what needs you, what's working, then pinned and recent. It folds to a rail.
 import { useState } from "react";
 import type { BotCard, ThreadSummary } from "../../../shared/types";
 import { usd } from "../lib/format";
@@ -71,7 +71,7 @@ export function Side({ route }: { route: Route }) {
   return (
     <aside className="side">
       <div className="top"><a href="#/" className="logo"><pc-logo size="sm" /></a><button className="ib" title="Fold the sidebar" onClick={toggle}><Icon name="rail" /></button></div>
-      {S.paused && <a className="stopped" href="#/">Crew stopped · resume</a>}
+      {S.paused && <a className="stopped" href="#/">The crew is stopped · Resume</a>}
       <a className={`newt ${route.name === "new" ? "on" : ""}`} href="#/new"><Icon name="plus" />New thread</a>
       <nav>
         {nav("wall", "home", "Home", "#/", pending.length, undefined, S.unread)}
@@ -83,19 +83,19 @@ export function Side({ route }: { route: Route }) {
       </nav>
       <div className="tl">
         {group("Needs you", g.needs, "sig")}
-        {group("On track", g.track, "on")}
+        {group("Working", g.track, "on")}
         {group("Pinned", g.pinned)}
         {group("Today", g.today)}
         {group("Earlier", g.earlier)}
       </div>
       <div className="crew">
         {faces.map((b) => <a key={b.id} href={`#/crew/${b.id}`} title={b.name}><Face b={b} size="sm" /></a>)}
-        {more > 0 && <span className="more" title={`${more} more in the garage`}>{`+${more}`}</span>}
+        {more > 0 && <span className="more" title={`${more} more, idle`}>{`+${more}`}</span>}
         <a className="add" href="#/hire" title="New crew member"><Icon name="plus" size={14} /></a>
         <span style={{ flex: 1 }} />
         <a className="ib" href="#/telemetry" title="Telemetry"><Icon name="chart" /></a>
         <a className="ib" href="#/settings" title="Settings"><Icon name="gear" /></a>
       </div>
-      <div className="stat"><span>{shells || screens ? `${shells} shell${shells === 1 ? "" : "s"} · ${screens} screen${screens === 1 ? "" : "s"}` : "all in the garage"}</span><span>{`wk ${usd(S.week.usd)} / ${usd(S.weekCap)}`}</span></div>
+      <div className="stat"><span>{shells || screens ? `${shells} shell${shells === 1 ? "" : "s"} · ${screens} screen${screens === 1 ? "" : "s"}` : "All idle"}</span><span>{`${usd(S.week.usd)} of ${usd(S.weekCap)} this week`}</span></div>
     </aside>);
 }

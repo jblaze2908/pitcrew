@@ -1,4 +1,4 @@
-// Settings: general, model providers and keys, the Engram link, crew-wide sites, the vault, safety (the kill switch), account.
+// Settings: general, model providers and keys, the memory (Engram) link, crew-wide sites, the vault, safety (the kill switch), account.
 import { useEffect, useState } from "react";
 import type { ProviderId, ProviderStatus, State } from "../../../shared/types";
 import { EngramSettings } from "../components/Engram";
@@ -22,7 +22,7 @@ export function Settings({ tab: asked, item }: { tab: string; item?: string }) {
   const p = prov.data;
   const tab = (TAB_IDS as readonly string[]).includes(asked) ? asked : "general";
   const anyKey = Object.values(p).some((x) => x.connected);
-  const tabs: [string, string, boolean][] = [["general", "General", false], ["models", "Models and keys", !anyKey], ["phone", "Phone", false], ["email", "Email", false], ["engram", "Engram", false], ["sites", "Sites", false], ["vault", "Vault", false], ["safety", "Safety", S.paused], ["account", "Account", false]];
+  const tabs: [string, string, boolean][] = [["general", "General", false], ["models", "Models and keys", !anyKey], ["phone", "Phone", false], ["email", "Email", false], ["engram", "Memory", false], ["sites", "Sites", false], ["vault", "Vault", false], ["safety", "Safety", S.paused], ["account", "Account", false]];
   return (
     <div className="page">
       <h1 className="pc-h2">Settings</h1>
@@ -30,14 +30,14 @@ export function Settings({ tab: asked, item }: { tab: string; item?: string }) {
       {tab === "general" && <General prov={p} />}
       {tab === "models" && <div className="col">
         <div className="grid3"><KeyCard id="openrouter" hint="sk-or-…" p={p.openrouter} reload={prov.reload} /><KeyCard id="aigateway" hint="AI Gateway key" p={p.aigateway} reload={prov.reload} /><ChatGpt p={p.openai} reload={prov.reload} /></div>
-        <p className="small faint">jev (the pit-stop decider) runs on TypeSafe Jev through your OpenRouter key. Without one, every consequential action becomes a pit stop.</p>
+        <p className="small faint">The safety check that decides what needs a pit stop runs through your OpenRouter key. Without one, every consequential action becomes a pit stop.</p>
       </div>}
       {tab === "phone" && <Phone />}
       {tab === "email" && <Email />}
       {tab === "engram" && <EngramSettings />}
       {tab === "sites" &&<SitesEditor scope="global" help="Every crew member gets these. A member's own entry wins, except a crew-wide block. Loopback (the crew's own file server) is always allowed; private network addresses never are." />}
       {tab === "vault" && <VaultSettings item={item} />}
-      {tab === "safety" && <Safety jev={!!p.openrouter?.connected} />}
+      {tab === "safety" && <Safety check={!!p.openrouter?.connected} />}
       {tab === "account" && <Account />}
     </div>
   );
@@ -71,7 +71,7 @@ function Email() {
   return (
     <div className="col" style={{ maxWidth: 760, gap: 16 }}>
       <div className="pc-card col">
-        <p className="small muted">{`Each member can have an address at ${f.data.domain}. Forward or CC bills there and the member wakes on its own. Email text reaches it as untrusted data; mail from someone not listed waits for you.`}</p>
+        <p className="small muted">{`Each member can have an address at ${f.data.domain}. Forward or CC bills there and the member wakes on its own. It reads email as information, never as instructions; mail from someone not listed waits for you.`}</p>
         <Field label="Your addresses (mail from these always wakes a member)"><input placeholder="you@gmail.com, you@work.com" value={mine ?? f.data.driverEmails.join(", ")} onChange={(e) => setMine(e.target.value)} onBlur={saveMine} /></Field>
         {hook ? <div className="col" style={{ gap: 4 }}><span className="small faint">Cloudflare Email Worker settings (integrations/cloudflare-email):</span><code className="small">{`PITCREW_MAIL_URL=${hook.url}`}</code><code className="small">{`PITCREW_MAIL_SECRET=${hook.secret}`}</code></div>
           : <div className="row"><BusyButton className="pc-pill o s" onClick={async () => setHook(await api.get("/api/mail/secret"))}>Show worker settings</BusyButton></div>}
@@ -89,7 +89,7 @@ function MailboxCard({ botId, name, domain, onSaved }: { botId: string; name: st
   const off = async () => { await api.put(`/api/bots/${botId}/mailbox`, { off: true }); f.reload(); onSaved(); };
   return (
     <div className="pc-card col">
-      <div className="spread"><b className="pc-h3">{name}</b><span className={`pc-chip ${box ? "ok" : ""}`}>{box ? `${box.handle}@${domain}` : "no address"}</span></div>
+      <div className="spread"><b className="pc-h3">{name}</b><span className={`pc-chip ${box ? "ok" : ""}`}>{box ? `${box.handle}@${domain}` : "No address"}</span></div>
       <div className="row" style={{ alignItems: "flex-end" }}><Field label="Address"><input value={h} onChange={(e) => setHandle(e.target.value)} /></Field><span className="small faint" style={{ paddingBottom: 10 }}>{`@${domain}`}</span></div>
       <Field label="Who else may wake it" help="Addresses, or a whole domain as @bescom.co.in"><input placeholder="@bescom.co.in, billing@airtel.in" value={snd} onChange={(e) => setSenders(e.target.value)} /></Field>
       <Field label="Anyone else"><Seg options={[["hold", "Hold for me"], ["drop", "Drop"]] as const} value={oth} onChange={setOthers} /></Field>
@@ -116,7 +116,7 @@ function General({ prov }: { prov: Providers }) {
         <input type="checkbox" checked={S.plans} onChange={(e) => save({ plans: e.target.checked })} />
         <span className="col" style={{ gap: 2 }}>Crew plans<span className="faint">When a message needs several members, the Crew Chief runs it as a todo list. New Chief threads pick this up.</span></span>
       </label>
-      <div className="field"><label>Theme</label><Seg options={[["dark", "dark"], ["light", "light"]] as const} value={theme} onChange={pickTheme} /></div>
+      <div className="field"><label>Theme</label><Seg options={[["dark", "Dark"], ["light", "Light"]] as const} value={theme} onChange={pickTheme} /></div>
     </div>
   );
 }
@@ -126,7 +126,7 @@ function KeyCard({ id, hint, p, reload }: { id: ProviderId; hint: string; p: Pro
   const save = async () => { const r = await api.put<{ ok: boolean; detail: string }>(`/api/providers/${id}/key`, { key }); setKey(""); toast(r.detail, !r.ok); reload(); };
   return (
     <div className="pc-card col">
-      <div className="spread"><b className="pc-h3">{p.label}</b><span className={`pc-chip ${p.connected ? "ok" : ""}`}>{p.connected ? "connected" : "off"}</span></div>
+      <div className="spread"><b className="pc-h3">{p.label}</b><span className={`pc-chip ${p.connected ? "ok" : ""}`}>{p.connected ? "Connected" : "Off"}</span></div>
       <p className={`small ${p.test?.ok === false ? "badc" : "muted"}`}>{p.connected ? `Connected · saved ${when(p.updatedAt)}${p.test ? ` · ${p.test.detail}` : ""}` : "Not connected"}</p>
       <input type="password" autoComplete="off" placeholder={p.connected ? "Replace key" : hint} value={key} onChange={(e) => setKey(e.target.value)} />
       <div className="row">
@@ -155,7 +155,7 @@ function ChatGpt({ p, reload }: { p: ProviderStatus; reload: () => void }) {
   }, [inProgress, login.status, reload]);
   return (
     <div className="pc-card col">
-      <div className="spread"><b className="pc-h3">Sign in with ChatGPT</b><span className={`pc-chip ${p.connected ? "ok" : ""}`}>{p.connected ? "connected" : "off"}</span></div>
+      <div className="spread"><b className="pc-h3">Sign in with ChatGPT</b><span className={`pc-chip ${p.connected ? "ok" : ""}`}>{p.connected ? "Connected" : "Off"}</span></div>
       <p className="small muted">Use your ChatGPT plan for crew members set to the ChatGPT provider. Runs cost nothing extra; they count against the plan's limits.</p>
       {login.status === "waiting" ? (
         <div className="col">
@@ -177,7 +177,7 @@ function ChatGpt({ p, reload }: { p: ProviderStatus; reload: () => void }) {
   );
 }
 
-function Safety({ jev }: { jev: boolean }) {
+function Safety({ check }: { check: boolean }) {
   const { S, setS, refresh } = useStore();
   return (
     <div className="col">
@@ -187,15 +187,15 @@ function Safety({ jev }: { jev: boolean }) {
           <p className="small muted">Interrupts every run, denies every pending pit stop, stops every computer and pauses schedules until you resume.</p>
         </div>
         {S.paused ? <button className="pc-pill" onClick={async () => setS(await api.post("/api/resume"))}>Resume the crew</button>
-          : <ConfirmButton className="pc-pill sig" ask="Stop everything?" onConfirm={async () => {
+          : <ConfirmButton className="pc-pill o" armedClass="danger" ask="Stop everything?" onConfirm={async () => {
               const r = await api.post<{ inFlight: unknown[] }>("/api/kill");
               toast(`Stopped. ${r.inFlight.length} run${r.inFlight.length === 1 ? " was" : "s were"} mid-flight.`);
               await refresh();
             }}>Stop the crew</ConfirmButton>}
       </div>
       <div className="pc-card col">
-        <p className="pc-lab">Pit-stop decider</p>
-        <p className="small">{jev ? "jev is checking consequential actions through your OpenRouter key." : "jev is off: no OpenRouter key. Every consequential action becomes a pit stop."}</p>
+        <p className="pc-lab">Safety check</p>
+        <p className="small">{check ? "The safety check is judging consequential actions through your OpenRouter key." : "The safety check is off: no OpenRouter key. Every consequential action becomes a pit stop."}</p>
         <p className="small faint">What each crew member may do without asking lives on its Profile tab; per-site rules on Sites.</p>
       </div>
     </div>

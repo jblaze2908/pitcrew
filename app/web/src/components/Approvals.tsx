@@ -3,6 +3,7 @@ import type { Learned, Rule } from "../../../shared/types";
 import { api } from "../lib/api";
 import { when } from "../lib/format";
 import { toast } from "../lib/toast";
+import { EffectChip } from "./ui";
 
 export function RulesList({ rules, after }: { rules: Rule[]; after: () => void }) {
   return (
@@ -12,8 +13,8 @@ export function RulesList({ rules, after }: { rules: Rule[]; after: () => void }
           <thead><tr><th>Standing approval</th><th>Effect</th><th>Crew</th><th>Since</th><th /></tr></thead>
           <tbody>{rules.map((r) => (
             <tr key={r.id}>
-              <td className="pc-m">{r.label}</td><td><pc-effect key={r.effect} kind={r.effect}>{r.effect}</pc-effect></td><td>{r.bot_name || r.bot_id}</td><td className="small faint">{when(r.created_at)}</td>
-              <td className="num"><button className="small sig" onClick={async () => { await api.post(`/api/rules/${r.id}/revoke`); toast("Revoked"); after(); }}>Revoke</button></td>
+              <td className="pc-m">{r.label}</td><td><EffectChip kind={r.effect} /></td><td>{r.bot_name || r.bot_id}</td><td className="small faint">{when(r.created_at)}</td>
+              <td className="num"><button className="small faint" onClick={async () => { await api.post(`/api/rules/${r.id}/revoke`); toast("Revoked"); after(); }}>Revoke</button></td>
             </tr>))}
           </tbody>
         </table>
@@ -32,10 +33,10 @@ export function LearnedList({ items, after }: { items: Learned[]; after: () => v
             const on = l.streak >= l.need;
             return (
               <tr key={l.id}>
-                <td>{l.label}</td><td><pc-effect key={l.effect} kind={l.effect}>{l.effect.replace("_", " ")}</pc-effect></td><td>{l.bot_name || l.bot_id}</td>
+                <td>{l.label}</td><td><EffectChip kind={l.effect} /></td><td>{l.bot_name || l.bot_id}</td>
                 <td className="num pc-m small">{`${l.approvals}${l.denials ? ` · ${l.denials} denied` : ""}`}</td>
-                <td><span className={`pc-chip ${on ? "ok" : ""}`}>{on ? "no longer asks" : `${l.streak} of ${l.need}`}</span></td>
-                <td className="num">{on && <button className="small sig" onClick={async () => { await api.post(`/api/learned/${l.id}/reset`); toast("It will ask again"); after(); }}>Ask again</button>}</td>
+                <td><span className={`pc-chip ${on ? "ok" : ""}`}>{on ? "No longer asks" : `${l.streak} of ${l.need}`}</span></td>
+                <td className="num">{on && <button className="small faint" onClick={async () => { await api.post(`/api/learned/${l.id}/reset`); toast("It will ask again"); after(); }}>Ask again</button>}</td>
               </tr>);
           })}</tbody>
         </table>

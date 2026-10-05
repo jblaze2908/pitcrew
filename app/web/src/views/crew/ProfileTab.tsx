@@ -2,7 +2,7 @@
 import { useState } from "react";
 import type { BotCard, Decision, EngramScope, Hue, Shape } from "../../../../shared/types";
 import { ModelPicker } from "../../components/ModelPicker";
-import { ConfirmButton, Face, Field, hueStyle } from "../../components/ui";
+import { ConfirmButton, EffectChip, Face, Field, hueStyle } from "../../components/ui";
 import { api } from "../../lib/api";
 import { go } from "../../lib/router";
 import { useStore } from "../../lib/store";
@@ -23,7 +23,7 @@ function FacePicker({ b: page }: { b: BotCard }) {
     <div className="row" style={{ gap: 18, flexWrap: "nowrap", alignItems: "center" }}>
       <Face b={b} size="lg" />
       <div className="col" style={{ gap: 8 }}>
-        <p className="pc-lab">Face <span className="faint" style={{ textTransform: "none", letterSpacing: 0 }}>· saves as you pick</span></p>
+        <p className="pc-lab">Face <span className="faint">· saves as you pick</span></p>
         <div className="swatches">{HUES.map((c) => <button key={c} className={`swatch ${c === b.hue ? "on" : ""}`} style={hueStyle(c)} title={c} aria-pressed={c === b.hue} onClick={() => set({ hue: c })} />)}</div>
         <div className="shapes">{SHAPES.map((sh) => <button key={sh} className={sh === b.shape ? "on" : ""} title={sh} aria-pressed={sh === b.shape} onClick={() => set({ shape: sh })}><Face b={{ hue: b.hue, shape: sh }} size="sm" /></button>)}</div>
       </div>
@@ -62,7 +62,7 @@ export function ProfileTab({ b }: { b: BotCard }) {
             <input type="checkbox" checked={f.priv} onChange={(e) => set("priv", e.target.checked)} />
             <span className="col" style={{ gap: 2 }}><b className="small">Private</b><span className="small faint">Only you talk to it. The Crew Chief can't ask it anything, so nothing it knows reaches other members.</span></span>
           </label>)}
-        <Field label="Memories in Engram" help={f.priv && f.scope === "personal" ? "A private member stays out of Engram until its memories go under Money or Health, which other members can't read." : "Other members read Personal; Money and Health only with a grant you give in Engram."}>
+        <Field label="Shared memory" help={f.priv && f.scope === "personal" ? "A private member stays out of shared memory until its memories go under Money or Health, which other members can't read." : "Other members read Personal; Money and Health only with a grant you give in the memory app."}>
           <select value={f.scope} onChange={(e) => set("scope", e.target.value as EngramScope)}>
             {(Object.keys(SCOPE_LABEL) as EngramScope[]).map((k) => <option key={k} value={k}>{SCOPE_LABEL[k]}</option>)}
           </select>
@@ -80,7 +80,7 @@ export function ProfileTab({ b }: { b: BotCard }) {
         <Field label="Sign-off"><input value={f.signoff} onChange={(e) => set("signoff", e.target.value)} /></Field>
         <Field label="Calls you"><input value={f.callMe} onChange={(e) => set("callMe", e.target.value)} /></Field>
         <label className="row small"><input type="checkbox" checked={f.plain} onChange={(e) => set("plain", e.target.checked)} />Plain voice</label>
-        <p className="small faint">Personality never changes permissions, caps or jev. Pit stops and money always use a plain voice.</p>
+        <p className="small faint">Personality never changes permissions, caps or the safety check. Pit stops and money always use a plain voice.</p>
       </div>
       <Permissions b={b} />
       <Soul b={b} />
@@ -95,7 +95,7 @@ export function HouseholdBox({ checked, onChange }: { checked: boolean; onChange
   return (
     <label className="row" style={{ gap: 8, alignItems: "flex-start" }}>
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      <span className="col" style={{ gap: 2 }}><b className="small">Household facts</b><span className="small faint">Reads Engram's household facts: addresses, account last-4s, family. Off unless you tick it.</span></span>
+      <span className="col" style={{ gap: 2 }}><b className="small">Household facts</b><span className="small faint">Reads the household facts in shared memory: addresses, account last-4s, family. Off unless you tick it.</span></span>
     </label>
   );
 }
@@ -106,14 +106,14 @@ const EFFECTS: [string, string][] = [["read", "Look at files and data"], ["brows
   ["share", "Send your private data somewhere new"], ["pay", "Spend money"]];
 const LOCKED = ["delete", "share", "pay"];
 
-// The member's SOUL: who it is, its job, voice, priorities and how it should use the harness for its job. It sits right
-// after the shared HARNESS core in every thread's instructions; empty means "made from the job and voice below".
+// The member's SOUL (shown as "Instructions"): who it is, its job, voice, priorities and how it should use the harness. It
+// sits right after the shared HARNESS core in every thread's instructions; empty means "made from the job and voice below".
 function Soul({ b }: { b: BotCard }) {
   const [text, setText] = useState(b.soul || ""), [saved, setSaved] = useState(b.soul || "");
-  const save = async () => { await api.patch(`/api/bots/${b.id}`, { soul: text }); setSaved(text); toast("SOUL saved: new threads use it"); };
+  const save = async () => { await api.patch(`/api/bots/${b.id}`, { soul: text }); setSaved(text); toast("Instructions saved: new threads use them"); };
   return (
     <div className="pc-card col">
-      <div className="spread"><p className="pc-lab">SOUL</p><span className={`small ${text.length > 1500 ? "badc" : "faint"}`}>{`${text.length} / 1,500`}</span></div>
+      <div className="spread"><p className="pc-lab">Instructions</p><span className={`small ${text.length > 1500 ? "badc" : "faint"}`}>{`${text.length} / 1,500`}</span></div>
       <textarea rows={7} value={text} maxLength={1500} onChange={(e) => setText(e.target.value)}
         placeholder={`Who ${b.name} is and how it works. e.g.\nYou track Jai's Blinkit purchases. Be brief: numbers first.\nDaily runs stay quiet unless an alert fires; Sunday digest only.\nPrefer the site's own API over clicking; never touch the cart.\n\nLeave empty to use the job and voice settings.`} />
       <div className="spread"><p className="small faint">Goes in every new thread right after Pitcrew's shared rules. Keep it short: it's paid on every turn.</p>
@@ -122,7 +122,7 @@ function Soul({ b }: { b: BotCard }) {
   );
 }
 
-// Prose rules jev reads on every call it judges. "Never" lines block even in YOLO; "fine to" lines pre-approve that action
+// Prose rules jev (the safety check) reads on every call it judges. "Never" lines block even in yolo (Full auto); "fine to" lines pre-approve that action
 // (except paying and signing in). Saved as typed, one rule per line.
 function HouseRules({ b }: { b: BotCard }) {
   const [text, setText] = useState(b.house_rules || "");
@@ -131,8 +131,8 @@ function HouseRules({ b }: { b: BotCard }) {
   return (
     <div className="pc-card col">
       <p className="pc-lab">House rules</p>
-      <textarea rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder={"Never place, change or cancel orders on Blinkit.\nUploading my own files from /bot/work/out to Canva is fine."} />
-      <div className="spread"><p className="small faint">One per line. jev checks them on every action it judges: a “never” rule stops the action even in YOLO; a “fine to” rule saves a pit stop (paying and signing in still ask).</p>
+      <textarea rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder={"Never place, change or cancel orders on Blinkit.\nUploading my own finished files to Canva is fine."} />
+      <div className="spread"><p className="small faint">One per line. The safety check reads them on every action it judges: a “never” rule stops the action even in Full auto; a “fine to” rule saves a pit stop (paying and signing in still ask).</p>
         <button className="pc-pill s" disabled={text === saved} onClick={save}>Save</button></div>
     </div>
   );
@@ -153,7 +153,7 @@ function Permissions({ b }: { b: BotCard }) {
       <p className="pc-lab">{`What ${b.name} may do without asking`}</p>
       <div className="perms">{rows.map(([k, what]) => (
         <div key={k} className="perm">
-          <pc-effect kind={k}>{k.replace(/_/g, " ")}</pc-effect><span className="what">{what}</span>
+          <EffectChip kind={k} /><span className="what">{what}</span>
           {LOCKED.includes(k) ? <span className="lock small faint" title="Can't be changed">Always asks</span>
             : <div className="seg">{(["allow", "ask"] as const).map((v) => <button key={v} className={policy[k] === v ? "on" : ""} onClick={() => change(k, what, v)}>{v === "allow" ? "Allow" : "Ask"}</button>)}</div>}
         </div>))}

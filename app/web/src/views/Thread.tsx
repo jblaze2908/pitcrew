@@ -98,7 +98,7 @@ function LiveThread({ d }: { d: ThreadView }) {
   const [autonomy, setAutonomy] = useState(d.thread.autonomy || "ask");
   const [pinned, setPinned] = useState(!!d.thread.pinned);
   const [ctx, setCtx] = useState({ tokens: d.thread.ctx_tokens, window: d.thread.ctx_window });
-  const [activity, setActivity] = useState("On track");
+  const [activity, setActivity] = useState("Working");
   const [streaming, setStreaming] = useState<{ itemId: string; text: string } | null>(null);
   const [lease, setLease] = useState(!!b.computer?.lease);
   const [closeSteps, setCloseSteps] = useState(0);
@@ -257,7 +257,7 @@ function LiveThread({ d }: { d: ThreadView }) {
           <TitleMenu id={id} title={title} onRenamed={setTitle} b={card} pinned={pinned} onPinned={setPinned} />
           {origin ? <OriginChip origin={origin} threadId={id} b={b} /> : <a className="who" style={hueStyle(b.hue)} href={`#/crew/${b.id}`} title={`${b.name}'s profile`}><Face b={b} size="xs" mood={running ? "working" : undefined} />{b.name}</a>}
           <span style={{ flex: 1 }} />
-          {lease && <button className="pc-pill sig s" onClick={handBack}>Hand back</button>}
+          {lease && <button className="pc-pill s" onClick={handBack}>Hand back</button>}
           <Power b={card} />
           {!showPanel && !side && tabs.length > 0 && <button className="reo" title="Open the work panel" onClick={() => setOpen(true)}><Icon name="panel" size={14} />{TAB_LABEL[cur!]}</button>}
         </header>
@@ -321,8 +321,8 @@ function TitleMenu({ id, title, onRenamed, b, pinned, onPinned }: { id: string; 
 /** What's awake on the member's computer: the shell (stage 1) and the screen (stage 2) wake and sleep on their own. */
 function Power({ b }: { b: BotCard }) {
   const { up, desktop } = b.computer;
-  const tip = !up ? "Computer in the garage: it wakes on the first command or page" : desktop ? "Shell and screen up · back in the garage after 10 idle minutes" : "Shell up, screen asleep · back in the garage after 10 idle minutes";
-  return <span className={`power ${up ? "up" : ""}`} title={tip}><i />{!up ? "In the garage" : desktop ? "Shell and screen up" : "Shell up"}</span>;
+  const tip = !up ? "The computer is idle: it wakes on the first command or page" : desktop ? "Shell and screen up · sleeps after 10 idle minutes" : "Shell up, screen asleep · sleeps after 10 idle minutes";
+  return <span className={`power ${up ? "up" : ""}`} title={tip}><i />{!up ? "Idle" : desktop ? "Shell and screen up" : "Shell up"}</span>;
 }
 
 // Where a thread came from: routed by the front door (its pill changes who takes it) or asked by another member.
@@ -345,7 +345,7 @@ function OriginChip({ origin: o, threadId, b }: { origin: Origin; threadId: stri
   const tip = o.confidence != null ? `Routed with ${(o.confidence * 100).toFixed(0)}% confidence. Pick someone else to move this message.` : "Pick someone else to move this message";
   return (
     <span className="row" style={{ gap: 6, flex: "none" }}>
-      <span className="pc-lab">{o.by === "driver" ? "You picked" : o.by === "names" ? "You named several" : "Routed"}</span>
+      {o.by !== "driver" && <span className="small faint">{o.by === "names" ? "You named several" : "Picked for you"}</span>}
       <button ref={pill} className="to alt" style={hueStyle(b.hue)} title={tip} onClick={() => setMenu(true)}><Face b={b} size="xs" />{b.name}<Chev /></button>
       {menu && pill.current && <MemberMenu anchor={pill.current} auto={false} exclude={b.id} onClose={() => setMenu(false)} onPick={reroute} />}
     </span>
@@ -356,7 +356,7 @@ function ThreadSurface({ s }: { s: SurfaceRow }) {
   const [saved, setSaved] = useState(!!s.saved);
   const toggle = async () => { const next = !saved; setSaved(next); await api.post(`/api/surfaces/${s.id}/save`, { saved: next }); };
   return (
-    <Surface s={s} lockOnAction extra={<button className="small faint" onClick={toggle}>{s.data ? (saved ? "On the Wall" : "Pin to Wall") : saved ? "Saved to Library" : "Keep in Library"}</button>}
+    <Surface s={s} lockOnAction extra={<button className="small faint" onClick={toggle}>{s.data ? (saved ? "On Home" : "Pin to Home") : saved ? "Saved to Library" : "Keep in Library"}</button>}
       onAction={async (action, values) => { await api.post(`/api/surfaces/${s.id}/action`, { action, values }); toast("Sent to the crew"); }} />
   );
 }

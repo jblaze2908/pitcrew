@@ -1,4 +1,4 @@
-// Formatting shared by every view. Times show in IST, the driver's zone.
+// Formatting shared by every view. Times show in IST, the user's zone.
 const IST = "Asia/Kolkata";
 
 export const usd = (n: number | null | undefined) => { const v = n || 0; return `$${v.toFixed(v > 0 && v < 0.1 ? 3 : 2)}`; };
@@ -52,5 +52,12 @@ export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" :
 export const plainText = (t: string | null | undefined) => String(t || "").replace(/[*_#`>|]/g, "").replace(/\s+/g, " ").trim();
 // Older events carry the model-facing snapshot attributes; show role and name only.
 export const tidyTitle = (s: string | null | undefined) => String(s || "").replace(/\s*\[[a-z-]+(=[^\]]*)?\]/g, "").replace(/:(?=\s|$)/g, "");
-export const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
+export const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+/** "/bin/zsh -lc 'curl …'" → "curl …": the shell wrapper Codex puts around every command. */
+export const unwrapShell = (s: string) => s.replace(/^\/bin\/(ba|z)?sh -l?c /, "").replace(/^(["'])([\s\S]*)\1$/, "$2");
+// Stored notes, titles and reasons name internals ("jev", "YOLO", "the driver"); the UI says them in plain words.
+export const plainWords = (s: string | null | undefined) => String(s || "")
+  .replace(/\bYOLO\b/g, "Full auto").replace(/\bjev's\b/g, "the safety check's").replace(/\bjev\b/g, "the safety check")
+  .replace(/\b[Tt]he driver's\b/g, "your").replace(/\bThe driver\b/g, "You").replace(/\bthe driver\b/g, "you")
+  .replace(/\/bin\/(ba|z)?sh -l?c (["'])([\s\S]*?)\2/g, "$3").replace(/\/bin\/(ba|z)?sh -l?c /g, "");
 export const escRe = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

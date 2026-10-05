@@ -7,7 +7,7 @@ import { DelegationCard } from "../../components/DelegationCard";
 import { OUTCOME, PitCard } from "../../components/PitCard";
 import { PlanCard, PlanChip } from "../../components/PlanCard";
 import { BusyButton, Face, Md } from "../../components/ui";
-import { tidyTitle } from "../../lib/format";
+import { plainWords, tidyTitle } from "../../lib/format";
 import { pitLabel, runSummary, stepView } from "../../lib/steps";
 import { Icon } from "../../components/Icon";
 import { StepIcon } from "../../components/StepIcon";
@@ -21,7 +21,7 @@ const isImg = (p: string) => /\.(png|jpe?g|webp|gif)$/i.test(p);
 
 export function UserMsg({ e, botId, fromName, images, onView }: { e: ThreadEvent; botId: string; fromName: string; images?: ImageIndex; onView?: (im: Img) => void }) {
   const d = e.data;
-  const via = d.via === "schedule" ? "scheduled · " : d.via === "delegation" ? `${fromName} asks · ` : d.via === "plan" || d.via === "resume" ? "Pitcrew · " : null;
+  const via = d.via === "schedule" ? "Scheduled" : d.via === "delegation" ? `${fromName} asks` : d.via === "plan" ? "Plan step" : d.via === "resume" ? "Picked up again" : null;
   const ed = editOf(d.text), loose = (p: string): Img => ({ id: `a:${p}`, path: p, parentId: null, botId, caption: "", at: e.ts });
   const atts = ((d.attachments || []) as string[]).filter((p) => p !== ed?.marked);
   return (
@@ -37,7 +37,7 @@ export function UserMsg({ e, botId, fromName, images, onView }: { e: ThreadEvent
   );
 }
 
-/** The version an edit asks about, drawn with the driver's marks (the marked copy when there is one), then the words. */
+/** The version an edit asks about, drawn with your marks (the marked copy when there is one), then the words. */
 function EditAskView({ ed, botId, at, images, onView }: { ed: EditAsk; botId: string; at: number; images?: ImageIndex; onView?: (im: Img) => void }) {
   const im = images?.all.filter((x) => x.path === ed.image && x.at <= at).pop();
   const ver = im ? images!.chain(im.id).length : 0;
@@ -168,7 +168,7 @@ export function Tool({ e, results, pit }: { e: ThreadEvent; results?: Map<string
   const v = stepView(tidyTitle(e.data.title), e.data.conn), j = pit?.jev || {};
   return <details className={`tool${e.data.viaScript ? " nested" : ""}`}><summary><StepIcon name={v.icon} /><span className="lbl">{v.label}</span>{v.detail && <span className={`det${v.icon === "terminal" ? " code" : ""}`}>{v.detail}</span>}
     {failed ? <span className="tag failed">Failed</span> : pit && <span className={`tag ${pit.status}`}>{pit.kind === "secret" && pit.status === "approved" ? SECRET_SCOPE[pit.scope || ""] || OUTCOME.approved : OUTCOME[pit.status]}</span>}</summary>
-    {j.reason && <p className="why">{`jev · ${j.by || ""} · ${j.reason}`}</p>}<Debug d={e.data} /></details>;
+    {j.reason && <p className="why">{`Safety check: ${plainWords(j.reason)}`}</p>}<Debug d={e.data} /></details>;
 }
 
 /** Each decided pit stop's gated call: the next tool call within 4 steps with the same label (an approved call runs
@@ -235,7 +235,7 @@ export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
   const d = e.data;
   switch (e.kind) {
     // A scheduled run's prompt is the same every time: one line, not a message bubble.
-    case "user": return d.via === "check" ? <p className="sys bad">{d.display || "Done-check"}</p> : d.via === "retro" ? <p className="sys">{d.display || "Retro"}</p> : d.via === "teach" ? <p className="sys">{d.display || "Save as skill"}</p> : d.via === "resume" ? <p className="sys">{/^Pitcrew restarted/.test(d.text || "") ? "Picked up again after the restart" : "Picked up again after the usage limit reset"}</p> : d.via === "email" ? <p className="sys">{d.display || "Email"}</p> : d.via === "schedule" ? <p className="sys">{/^\[Event\]/.test(d.text || "") ? d.display || "Event" : `Scheduled run · ${String(d.text || "").replace(/^\[Scheduled: ([^\]]+)\][\s\S]*/, "$1")}`}</p> : <UserMsg e={e} botId={c.b.id} fromName={c.fromName} images={c.images} onView={c.onView} />;
+    case "user": return d.via === "check" ? <p className="sys bad">{d.display || "Done-check"}</p> : d.via === "retro" ? <p className="sys">{String(d.display || "Retro").replace(/^Retro\b/, "Looked back at the run")}</p> : d.via === "teach" ? <p className="sys">{d.display || "Save as skill"}</p> : d.via === "resume" ? <p className="sys">{/^Pitcrew restarted/.test(d.text || "") ? "Picked up again after the restart" : "Picked up again after the usage limit reset"}</p> : d.via === "email" ? <p className="sys">{d.display || "Email"}</p> : d.via === "schedule" ? <p className="sys">{/^\[Event\]/.test(d.text || "") ? d.display || "Event" : `Scheduled run · ${String(d.text || "").replace(/^\[Scheduled: ([^\]]+)\][\s\S]*/, "$1")}`}</p> : <UserMsg e={e} botId={c.b.id} fromName={c.fromName} images={c.images} onView={c.onView} />;
     // A follow-on message from the same member (only steps between) drops the face; the column stays for alignment.
     // A scheduled run with nothing notable (runtime/turns.ts isQuiet): one faint line.
     case "agent": if (/^\s*QUIET\b/.test(d.text || "")) return <p className="sys faint">{`Nothing new · ${String(d.text).replace(/^\s*QUIET:?\s*/, "")}`}</p>;
@@ -248,7 +248,8 @@ export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
     // A restart cut the run (runtime/lifecycle.ts): a divider, since nothing broke on the member's side.
     case "system": return /^Pitcrew restarted/.test(d.text || "") ? <p className="sys rule"><span>{d.text}</span></p>
       : d.text === "Say continue to pick it up." ? (c.onContinue ? <p className="sys rule"><button className="pc-pill o s" onClick={c.onContinue}>Pick up where it left off</button></p> : null)
-      : <p className={`sys ${d.tone === "bad" ? "bad" : ""}`}>{d.text}</p>;
+      // A mode change isn't a failure: older Full auto notes were stored with the bad tone.
+      : <p className={`sys ${d.tone === "bad" && !/^YOLO:/.test(d.text || "") ? "bad" : ""}`}>{plainWords(d.text)}</p>;
     case "error": return <p className="err">{d.text}</p>;
     // Older runs recorded a changed-files card; threads no longer draw it (Crew → Files keeps the history).
     case "changes": return null;

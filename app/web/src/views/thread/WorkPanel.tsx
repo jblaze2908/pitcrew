@@ -6,7 +6,7 @@ import { useDock } from "../../components/Dock";
 import { Icon } from "../../components/Icon";
 import { PlanCard } from "../../components/PlanCard";
 import { StepIcon } from "../../components/StepIcon";
-import { Loader } from "../../components/ui";
+import { effectLabel, Loader } from "../../components/ui";
 import { tidyTitle } from "../../lib/format";
 import { stepView } from "../../lib/steps";
 import { api } from "../../lib/api";
@@ -69,7 +69,7 @@ function ScreenActions({ b, lease, onHandBack }: { b: BotCard; lease: boolean; o
   const { openDock } = useDock();
   const up = b.computer.desktop;
   return <>
-    {lease ? <button className="pc-pill sig s" onClick={onHandBack}>Hand back</button>
+    {lease ? <button className="pc-pill s" onClick={onHandBack}>Hand back</button>
       : <a className="pc-pill s" href={`#/live/${b.id}`} title={up ? `Taking over pauses ${b.name} until you hand back` : undefined}>{up ? "Take over" : "Watch live"}</a>}
     {up && <button className="ib ol" title="Watch in a corner" onClick={() => openDock(b)}><Icon name="corner" size={14} /></button>}
     {up && <a className="ib ol" title="Full screen" href={`#/live/${b.id}`}><Icon name="expand" size={14} /></a>}
@@ -100,15 +100,15 @@ function ScreenTab({ b, events, running }: { b: BotCard; events: ThreadEvent[]; 
         {recent.map((e, i) => { const v = stepView(tidyTitle(e.data.title), e.data.conn); return (
           <div key={e.id} className={`osr ${i === 0 && running ? "now" : ""}`}>{i === 0 && running ? <Loader /> : <StepIcon name={v.icon} />}<span>{v.detail ? `${v.label} · ${v.detail}` : v.label}</span><small>{hm(e.ts)}</small></div>); })}
       </div>}
-      {up && <p className="note" style={{ marginTop: "auto" }}>Back in the garage after 10 idle minutes</p>}
+      {up && <p className="note" style={{ marginTop: "auto" }}>Sleeps after 10 idle minutes</p>}
     </div>);
 }
 
-/** jev's call on the line: what kind of action it was and whether it ran without asking. */
+/** The safety check's call on the line: what kind of action it was and whether it ran without asking. */
 function Gate({ g }: { g?: { effect: string; decision: string } | null }) {
   if (!g) return null;
-  const label = g.decision === "allow" ? "allowed" : g.decision === "ask" ? "pit stop" : g.decision === "block" ? "blocked" : g.decision;
-  return <span className={`gate ${g.decision === "allow" ? "" : "sig"}`} title="jev's call on this command">{`${g.effect.replace(/_/g, " ")} · ${label}`}</span>;
+  const label = g.decision === "allow" ? "allowed" : g.decision === "ask" ? "asked you" : g.decision === "block" ? "blocked" : g.decision;
+  return <span className={`gate ${g.decision === "block" ? "bad" : ""}`} title="The safety check's call on this command">{`${effectLabel(g.effect)} · ${label}`}</span>;
 }
 
 const cwdName = (cwd: string | null | undefined) => (cwd ? cwd.replace(/^\/bot\/work\/?/, "~/work/").replace(/\/$/, "") || "~/work" : "~/work");
@@ -156,7 +156,7 @@ function FilesTab({ b, runs }: { b: BotCard; runs: ChangeRun[] }) {
     <div className="col" style={{ gap: 14 }}>
       {runs.map((r) => (
         <section key={r.id} className="col" style={{ gap: 6 }}>
-          <p className="pc-lab">{`run ${hm(r.started_at)} · ${r.changes.length} file${r.changes.length === 1 ? "" : "s"} `}<Tally cs={r.changes} /></p>
+          <p className="pc-lab">{`Run at ${hm(r.started_at)} ·${r.changes.length} file${r.changes.length === 1 ? "" : "s"} `}<Tally cs={r.changes} /></p>
           {r.changes.map((c) => { const k = `${r.id}:${c.path}`; return <FileBlock key={k} b={b} turnId={r.id} c={c} open={open === k} focus={false} split={false} onToggle={() => setOpen(open === k ? null : k)} />; })}
         </section>))}
       <a className="small" href={`#/crew/${b.id}/files/workspace`}>{`All of ${b.name}'s files ›`}</a>

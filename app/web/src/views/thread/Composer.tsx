@@ -13,13 +13,13 @@ const isImg = (n: string) => /\.(png|jpe?g|webp|gif)$/i.test(n);
 // Typed alone in the composer, these act on the thread instead of being sent to the crew member.
 interface Command { name: string; hint: string; when: "idle" | "running" | "any"; run: (threadId: string) => Promise<unknown> }
 const COMMANDS: Command[] = [
-  { name: "refresh", hint: "Reload tools and skills from Engram with your next message. That message misses the prompt cache.", when: "idle", run: (id) => api.post(`/api/threads/${id}/refresh`) },
+  { name: "refresh", hint: "Reload tools and skills with your next message. That message costs a little more.", when: "idle", run: (id) => api.post(`/api/threads/${id}/refresh`) },
   { name: "compact", hint: "Summarise this thread to free up context.", when: "idle", run: (id) => api.post(`/api/threads/${id}/compact`) },
   { name: "fresh", hint: "Start a new thread from this one's last reply.", when: "any", run: async (id) => { const r = await api.post<{ id: string }>(`/api/threads/${id}/fresh`); go(`#/t/${r.id}`); } },
   { name: "stop", hint: "Stop the run in progress.", when: "running", run: (id) => api.post(`/api/threads/${id}/interrupt`) },
 ];
 
-const viaLabel = (via: string, fromName: string) => via === "schedule" ? "Scheduled" : via === "plan" || via === "resume" ? "Pitcrew" : via === "delegation" ? `${fromName} asks` : "Queued";
+const viaLabel = (via: string, fromName: string) => via === "schedule" ? "Scheduled" : via === "plan" ? "Plan step" : via === "resume" ? "Pick up" : via === "retro" ? "Review" : via === "delegation" ? `${fromName} asks` : "Queued";
 const fileName = (p: string) => p.split("/").pop()!.replace(/^[a-z0-9]+-/, "");
 
 /** Messages waiting for the run to end, Claude Code style: they join the transcript only when they go to the member. */
@@ -42,12 +42,11 @@ function QueuedStack({ threadId, queued, fromName, onEdit }: { threadId: string;
   );
 }
 
-// How much this thread runs without pit stops (server: runtime/autonomy.ts). YOLO is drawn in the bad tone so it's
-// never on by accident or forgotten.
+// How much this thread runs without pit stops (server: runtime/autonomy.ts). Labels only; the API keeps ask/handsfree/yolo.
 export const AUTONOMY = [
-  ["ask", "Ask me", "Asks before sending, paying, signing in, installing, sharing, deleting or a new site."],
+  ["ask", "Ask first", "Asks before sending, paying, signing in, installing, sharing, deleting or a new site."],
   ["handsfree", "Hands-free", "Stops only for paying, signing in, sending, sharing, deleting, look-alike or non-https sites, and house rules."],
-  ["yolo", "YOLO", "No pit stops, paying and sending included. Only hard blocks, blocked sites and house rules stop it."],
+  ["yolo", "Full auto", "No pit stops, paying and sending included. Only hard blocks, blocked sites and house rules stop it."],
 ] as const;
 
 function ModePicker({ threadId, value, onChange }: { threadId: string; value: string; onChange: (a: string) => void }) {

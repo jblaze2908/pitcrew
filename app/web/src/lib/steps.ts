@@ -1,6 +1,8 @@
 // A tool step's title (notify.ts toolTitle) as an icon, a plain label and the detail. Parsed from the title, so old
 // threads read the same: "engram.google__gmail_search query=x" → mail · "Search mail" · "x".
-export type StepIcon = "mail" | "calendar" | "drive" | "engram" | "ledger" | "web" | "browser" | "terminal" | "file" | "tool"
+import { plainWords, unwrapShell } from "./format";
+
+export type StepIcon ="mail" | "calendar" | "drive" | "engram" | "ledger" | "web" | "browser" | "terminal" | "file" | "tool"
   | "search" | "read" | "add" | "edit" | "remove" | "send" | "code" | "lock";
 export interface StepView { icon: StepIcon; label: string; detail: string }
 
@@ -10,7 +12,7 @@ const GOOGLE: Record<string, [StepIcon, string]> = {
   calendar_create_event: ["calendar", "Block calendar"], calendar_delete_event: ["calendar", "Remove calendar block"],
   drive_search: ["drive", "Search Drive"], drive_read: ["drive", "Read Drive file"], drive_save_file: ["drive", "Save to Drive"],
 };
-const ENGRAM: Record<string, string> = { search: "Search Engram", get: "Open from Engram", propose: "Save to Engram", profile: "Read profile" };
+const ENGRAM: Record<string, string> = { search: "Search memory", get: "Read from memory", propose: "Save to memory", profile: "Read profile" };
 const CONN: Record<string, [StepIcon, string]> = { tijori: ["ledger", "Tijori"], exa: ["web", "Web"] };
 const EXA: Record<string, string> = { web_search_exa: "Search the web", web_fetch_exa: "Read web page" };
 const BROWSER = /^(browser_)?(navigate|navigate_back|click|type|fill_form|select_option|press_key|hover|drag|snapshot|read|tabs|wait_for|file_upload|handle_dialog|take_screenshot|evaluate|close|resize)\b/;
@@ -54,7 +56,7 @@ export function stepView(title: string, connLabel?: string | null): StepView {
   const t = title.trim();
   if (t === "Ran a script") return { icon: "code", label: "Ran a script", detail: "" };
   // Codex titles a shell call with its wrapper: /bin/zsh -lc "curl …" reads as curl ….
-  if (t.startsWith("$ ")) return { icon: "terminal", label: "Run", detail: t.slice(2).replace(/^\/bin\/(ba|z)?sh -l?c /, "").replace(/^(["'])([\s\S]*)\1$/, "$2") };
+  if (t.startsWith("$ ")) return { icon: "terminal", label: "Run", detail: unwrapShell(t.slice(2)) };
   if (t.startsWith("Edited ")) return { icon: "file", label: "Edit", detail: t.slice(7) };
   if (t.startsWith("Searched ")) return { icon: "web", label: "Search the web", detail: t.slice(9) };
   // Vault fills (runtime/browser.ts fillSecret) name the secret, never its value.
@@ -73,7 +75,7 @@ export function stepView(title: string, connLabel?: string | null): StepView {
       const [icon, brand] = CONN[conn.split("-")[0]] || [verbIcon(name), words(conn)];
       return { icon, label: `${connLabel || brand} · ${words(name).toLowerCase()}`, detail: rest };
     }
-    if (server === "engram") return { icon: "engram", label: ENGRAM[tool] || `Engram · ${words(tool).toLowerCase()}`, detail: rest };
+    if (server === "engram") return { icon: "engram", label: ENGRAM[tool] || `Memory · ${words(tool).toLowerCase()}`, detail: rest };
     if (server === "computer") return { icon: "browser", label: `Computer · ${words(tool).toLowerCase()}`, detail: rest };
     return { icon: verbIcon(tool), label: `${words(server)} · ${words(tool).toLowerCase()}`, detail: rest };
   }
@@ -88,7 +90,7 @@ const hostOf = (u: unknown) => { try { return typeof u === "string" ? new URL(u)
 /** A pit stop as a step line: what it would do, in words, for the folded row and the card heading. */
 export function pitLabel(p: { kind: string; title: string; detail?: Record<string, any> }): StepView {
   const d = p.detail || {}, tool = String(d.tool || "");
-  if (p.kind === "command") return { icon: "terminal", label: "Run", detail: String(d.command || p.title.replace(/^Run: /, "")).replace(/^\/bin\/(ba)?sh -l?c /, "") };
+  if (p.kind === "command") return { icon: "terminal", label: "Run", detail: unwrapShell(String(d.command || p.title.replace(/^Run: /, ""))) };
   if (p.kind === "mcp" && (d.server === "browser" || d.server === "computer")) {
     const host = hostOf(d.args?.page_url), on = host ? `on ${host}` : "";
     if (PAGE_CODE[tool]) return { icon: "code", label: PAGE_CODE[tool], detail: on };
@@ -99,7 +101,7 @@ export function pitLabel(p: { kind: string; title: string; detail?: Record<strin
   // Worded like the fill's own step, so an approved ask folds into the row it allowed (Events gatedCalls).
   if (p.kind === "secret") return d.secret?.kind === "card" ? { icon: "lock", label: "Used card", detail: `${d.secret?.name} on ${d.site?.host}` } : { icon: "lock", label: "Signed in to", detail: `${d.site?.host} with ${d.secret?.name}` };
   if (p.kind === "vault") return { icon: "lock", label: `${d.secret?.name || "A secret"} failed`, detail: "update it in Vault" };
-  return { icon: "tool", label: p.title, detail: "" };
+  return { icon: "tool", label: plainWords(p.title), detail: "" };
 }
 
 export type SummaryPart = string | { em: string };

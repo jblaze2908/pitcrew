@@ -10,7 +10,7 @@ import { useLiveReload } from "../lib/live";
 import { useStore } from "../lib/store";
 
 type State = "all" | "needs" | "running" | "pinned" | "archived";
-const STATES: [State, string][] = [["all", "All"], ["needs", "Needs you"], ["running", "On track"], ["pinned", "Pinned"], ["archived", "Archived"]];
+const STATES: [State, string][] = [["all", "All"], ["needs", "Needs you"], ["running", "Working"], ["pinned", "Pinned"], ["archived", "Archived"]];
 
 function dayLabel(t: number) {
   const d = new Date(t), today = new Date(); today.setHours(0, 0, 0, 0);
@@ -50,7 +50,7 @@ export function Threads() {
 
   return (
     <div className="page threads-page">
-      <div className="row"><h1 className="pc-h2">Threads</h1><span className="pc-m small faint">{`${total}${nNeeds ? ` · ${nNeeds} need you` : ""}${nRun ? ` · ${nRun} on track` : ""}`}</span><span style={{ flex: 1 }} /><a className="pc-pill s" href={member ? `#/new/${member}` : "#/new"}>+ New thread</a></div>
+      <div className="row"><h1 className="pc-h2">Threads</h1><span className="small faint">{`${total}${nNeeds ? ` · ${nNeeds} need you` : ""}${nRun ? ` · ${nRun} working` : ""}`}</span><span style={{ flex: 1 }} /><a className="pc-pill s" href={member ? `#/new/${member}` : "#/new"}>+ New thread</a></div>
       <label className="tsearch"><Icon name="search" /><input type="search" placeholder="Find a thread by its title or anything said in it" value={q} onChange={(e) => setQ(e.target.value)} /></label>
       <div className="row">
         <button ref={pill} className={`fl ${member ? "" : "on"}`} onClick={() => setMenu(true)}>{who ? <><Face b={who} size="xs" />{who.name}</> : "Everyone"}<Icon name="chev" size={13} /></button>
@@ -67,7 +67,7 @@ export function Threads() {
                   <Face b={b} size="sm" mood={needs(r) ? "needs" : r.status === "running" ? "working" : "idle"} />
                   <span className="tt"><b>{r.title}</b>{r.snippet ? <small>{r.snippet}</small> : null}</span>
                   <span className="tm">{b?.name || r.bot_id}</span>
-                  <span className="ts">{needs(r) ? <span className="pc-chip hot">Pit stop</span> : r.status === "running" ? <span className="pc-chip blue"><Loader />On track</span> : r.pinned ? <span className="pc-chip">Pinned</span> : null}</span>
+                  <span className="ts">{needs(r) ? <span className="pc-chip hot">Pit stop</span> : r.status === "running" ? <span className="pc-chip blue"><Loader />Working</span> : r.pinned ? <span className="pc-chip">Pinned</span> : null}</span>
                   <span className="tw">{ago(r.updated_at)}</span>
                 </a>); })}
             </section>))}

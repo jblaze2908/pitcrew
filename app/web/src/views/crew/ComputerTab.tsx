@@ -11,10 +11,10 @@ export function ComputerTab({ b, reload }: { b: BotCard; reload: () => void }) {
     <div className="pc-card col">
       <div className="spread">
         <div className="col" style={{ gap: 4 }}>
-          <div className="row"><b className="pc-h3">{`${b.name}'s computer`}</b><span className={`pc-chip ${c.desktop ? "ok" : c.up ? "blue" : ""}`}>{c.desktop ? "desktop live" : c.up ? "runtime up" : "off"}</span></div>
+          <div className="row"><b className="pc-h3">{`${b.name}'s computer`}</b><span className={`pc-chip ${c.desktop ? "ok" : c.up ? "blue" : ""}`}>{c.desktop ? "Screen up" : c.up ? "Shell up" : "Idle"}</span></div>
           <p className="small muted">{c.desktop ? `Up since ${when(c.startedAt)} with its desktop and browser.`
             : c.up ? `Up since ${when(c.startedAt)} for commands; the desktop starts on the first browser action.`
-            : "In the garage. Chat needs no computer: it starts on the first command or browser action, or when you want to look."}</p>
+            : "Chat needs no computer: it starts on the first command or browser action, or when you want to look."}</p>
         </div>
         <div className="row">
           {c.desktop ? <a className="pc-pill s" href={`#/live/${b.id}`}>Live view</a>

@@ -49,18 +49,18 @@ export function Wall() {
         </div>)}
       {S.paused && (
         <div className="pc-card row">
-          <b className="sig" style={{ flex: 1 }}>The crew is stopped. Nothing runs until you resume.</b>
+          <b style={{ flex: 1 }}>The crew is stopped. Nothing runs until you resume.</b>
           <button className="pc-pill s" onClick={async () => setS(await api.post("/api/resume"))}>Resume the crew</button>
         </div>)}
       {n > 0 && (
         <section className="col">
-          <div className="spread"><p className="pc-lab sig">Box, box · waiting on you</p>{n > 1 && <a className="small faint" href="#/pitstops">Decide all ›</a>}</div>
+          <div className="spread"><p className="pc-lab sig">Waiting on you</p>{n > 1 && <a className="small faint" href="#/pitstops">Decide all ›</a>}</div>
           <div className="grid2">{pits.slice(0, 6).map((p) => <PitCard key={p.id} p={p} />)}</div>
         </section>)}
       <div className="home2"><Since /><Activity /></div>
       {track.length > 0 && (
         <section className="col">
-          <p className="pc-lab">On track</p>
+          <p className="pc-lab">Working now</p>
           <div className="pc-card tight">{track.map((t) => (
             <a key={t.id} className="hrow" href={`#/t/${t.id}`}><Face b={t.b} size="sm" mood="working" /><b className="trunc">{t.title}</b><span className="small faint">{t.b.name}</span><Loader /></a>))}</div>
         </section>)}
@@ -73,12 +73,12 @@ export function Wall() {
       <div className="hfoot">
         <span>Today <b>{usd(S.today.usd)}</b>{` · ${plural(S.today.runs, "run")}`}</span>
         <span>Week <b>{usd(S.week.usd)}</b>{` of ${usd(S.weekCap)}`}</span>
-        <span>{shells || screens ? `${shells} shell${shells === 1 ? "" : "s"} · ${screens} screen${screens === 1 ? "" : "s"} up` : "all in the garage"}</span>
+        <span>{shells || screens ? `${shells} shell${shells === 1 ? "" : "s"} · ${screens} screen${screens === 1 ? "" : "s"} up` : "All computers idle"}</span>
         <span style={{ flex: 1 }} /><a href="#/telemetry">Telemetry ›</a>
       </div>
       {notes.length > 0 && (
         <details className="col">
-          <summary className="pc-lab">{`Notes for Engram · ${notes.length} to review`}</summary>
+          <summary className="pc-lab">{`Memory notes · ${notes.length} to review`}</summary>
           <div className="grid2">{notes.slice(0, 8).map((p) => <PitCard key={p.id} p={p} />)}</div>
         </details>)}
       {!!boards.data?.length && (
@@ -94,10 +94,10 @@ export function Wall() {
             <div key={i.id} className="pc-card col" style={{ gap: 6 }}>
               <div className="spread"><b>{i.title}</b><span className="small faint">{`${i.bot_name} · ${i.area}${i.votes > 1 ? ` · ${i.votes}×` : ""}`}</span></div>
               <p className="small">{i.proposal}</p><p className="small muted">{i.evidence.slice(0, 400)}</p>
-              <div className="acts"><button className="pc-pill sig s" onClick={() => decideIdea(i.id, "accepted")}>Accept</button><button className="pc-pill o s" onClick={() => decideIdea(i.id, "dismissed")}>Dismiss</button></div>
+              <div className="acts"><button className="pc-pill s" onClick={() => decideIdea(i.id, "accepted")}>Accept</button><button className="pc-pill o s" onClick={() => decideIdea(i.id, "dismissed")}>Dismiss</button></div>
             </div>))}</div>
         </details>)}
-      {S.engram.linked && <details className="col"><summary className="pc-lab">Engram digest</summary><DigestCard /></details>}
+      {S.engram.linked && <details className="col"><summary className="pc-lab">This week in memory</summary><DigestCard /></details>}
     </div>
   );
 }
