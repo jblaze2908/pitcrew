@@ -6,6 +6,7 @@
 import { lstatSync, readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, statSync, unlinkSync, chownSync, chmodSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { botDir, ROOT, CREW_UID } from "./computer.js";
+import { textLines } from "../shared/text.js";
 
 // mode: permission bits, recorded when the file is hashed (manifests from before it have none).
 export interface FileState { size: number; mtime: number; hash: string | null; text: boolean; mode?: number }
@@ -65,7 +66,8 @@ export function snapshot(id: string): Snapshot {
   return { files, truncated };
 }
 
-const lines = (id: string, hash: string | null) => { try { return readFileSync(`${shadow(id)}/objects/${hash}`, "utf8").split("\n").length; } catch { return 0; } };
+// Counted the way the diff view splits lines, so a run's "+17" matches its file's diff.
+const lines = (id: string, hash: string | null) => { try { return textLines(readFileSync(`${shadow(id)}/objects/${hash}`, "utf8")).length; } catch { return 0; } };
 
 // Compares two snapshots. Line counts are a cheap size signal for the summary; the real diff happens in the browser.
 export function changes(id: string, before: Snapshot, after: Snapshot) {
