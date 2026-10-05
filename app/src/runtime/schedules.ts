@@ -47,16 +47,21 @@ export function nextRun(spec: string, from = now()): number | null {
   }
   throw new Error(`Use "daily HH:MM", "weekdays HH:MM", "weekly mon HH:MM", "monthly 1 HH:MM" (day 1–28), "every N minutes|hours" or "${EVENT_SPEC}"`);
 }
-/** A schedule's name from its prompt: the first line, cut to 60 characters on a word. No model call. */
+const firstLine = (prompt: string) => String(prompt || "").split("\n").map((l) => l.replace(/^\s*\[[^\]]{0,40}\]\s*/, "").trim()).find(Boolean) || "";
+// Prompts often open with their own timing ("Every day at 22:00 Asia/Kolkata, run …"); the schedule already says when.
+const WHEN_LEAD = /^(?:(?:every|each|on)\s+[^,.:]{0,40}?\b(?:at\s+)?\d{1,2}[:.]\d{2}(?:\s*(?:am|pm))?(?:\s+[A-Za-z_]+\/[A-Za-z_]+|\s+IST)?|at\s+\d{1,2}[:.]\d{2}[^,.:]{0,20})[,.:\s-]+(?:(?:please|run|do)\s+)?/i;
+/** A schedule's name from its prompt: the first line minus any timing lead, cut to 60 characters on a word. No model call. */
 export function scheduleTitle(prompt: string) {
-  const line = String(prompt || "").split("\n").map((l) => l.replace(/^\s*\[[^\]]{0,40}\]\s*/, "").trim()).find(Boolean) || "";
-  const t = titleFrom(line);
+  const line = firstLine(prompt), rest = line.replace(WHEN_LEAD, "");
+  const t = titleFrom(rest ? rest[0].toUpperCase() + rest.slice(1) : line);
   return t === UNTITLED ? "Untitled schedule" : t;
 }
 const cleanTitle = (t: string | null | undefined) => String(t || "").replace(/\s+/g, " ").trim().slice(0, 80);
-/** Names schedules saved before titles existed; bootRuntime runs it once and it touches only untitled rows. */
+/** Names schedules saved before titles existed; bootRuntime runs it at start (one small table scan). */
 export function backfillScheduleTitles() {
-  const rows = all<{ id: string; prompt: string }>("SELECT id,prompt FROM schedules WHERE title IS NULL OR title=''");
+  // Also renames titles the first backfill took verbatim from a timing-led first line; titles someone set are kept.
+  const rows = all<{ id: string; prompt: string; title: string | null }>("SELECT id,prompt,title FROM schedules")
+    .filter((r) => !r.title || (r.title === titleFrom(firstLine(r.prompt)) && scheduleTitle(r.prompt) !== r.title));
   for (const r of rows) run("UPDATE schedules SET title=? WHERE id=?", scheduleTitle(r.prompt), r.id);
   return rows.length;
 }
