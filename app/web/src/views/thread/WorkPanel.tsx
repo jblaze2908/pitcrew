@@ -1,16 +1,15 @@
 // The work panel: what the member is planning, looking at, running and changing in this thread. A tab exists only once
 // there's something in it; the order never changes. Tabs map onto what's awake: Screen = the desktop, Terminal = the shell.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { BotCard, ChangeRun, LiveCommandView, PlanSnapshot, ThreadEvent } from "../../../../shared/types";
 import { useDock } from "../../components/Dock";
 import { Icon } from "../../components/Icon";
 import { PlanCard } from "../../components/PlanCard";
 import { StepIcon } from "../../components/StepIcon";
-import { effectLabel, Loader } from "../../components/ui";
-import { tidyTitle, unwrapShell } from "../../lib/format";
+import { Loader } from "../../components/ui";
+import { hm, tidyTitle, unwrapShell } from "../../lib/format";
 import { stepView } from "../../lib/steps";
 import { api } from "../../lib/api";
-import { hm } from "../../lib/format";
 import { openScreen } from "../../lib/novnc";
 import { FileBlock, Tally } from "../crew/FilesTab";
 
@@ -50,13 +49,15 @@ export function WorkPanel(p: Props) {
         </div>
         {!p.follow && p.running && <button className="chipb follow" onClick={p.onFollow}>Follow live</button>}
         <span style={{ flex: 1 }} />
+        {/* One wording for a resting member, whichever tab is open. */}
+        <span className="wstate">{p.running ? "Working" : p.events.length ? `Idle since ${hm(p.events[p.events.length - 1].ts)}` : "Idle"}</span>
         {p.tab === "screen" && <ScreenActions b={p.b} lease={p.lease} onHandBack={p.onHandBack} />}
         <button className="ib" title="Close the panel" onClick={p.onClose}><Icon name="close" /></button>
       </div>
       <div className="wbody">
         {p.tab === "plan" && p.plan && <PlanCard P={p.plan} flat />}
         {p.tab === "screen" && <ScreenTab b={p.b} events={p.events} running={p.running} />}
-        {p.tab === "terminal" && <TerminalTab b={p.b} events={p.events} live={p.live} />}
+        {p.tab === "terminal" && <TerminalTab events={p.events} live={p.live} />}
         {p.tab === "files" && <FilesTab b={p.b} runs={p.runs} />}
       </div>
     </aside>);
@@ -70,7 +71,7 @@ function ScreenActions({ b, lease, onHandBack }: { b: BotCard; lease: boolean; o
   const up = b.computer.desktop;
   return <>
     {lease ? <button className="pc-pill s" onClick={onHandBack}>Hand back</button>
-      : <a className="pc-pill s" href={`#/live/${b.id}`} title={up ? `Taking over pauses ${b.name} until you hand back` : undefined}>{up ? "Take over" : "Watch live"}</a>}
+      : up && <a className="pc-pill s" href={`#/live/${b.id}`} title={`Taking over pauses ${b.name} until you hand back`}>Take over</a>}
     {up && <button className="ib ol" title="Watch in a corner" onClick={() => openDock(b)}><Icon name="corner" size={14} /></button>}
     {up && <a className="ib ol" title="Full screen" href={`#/live/${b.id}`}><Icon name="expand" size={14} /></a>}
   </>;
@@ -91,10 +92,15 @@ function ScreenTab({ b, events, running }: { b: BotCard; events: ThreadEvent[]; 
   }, [b.id, up]);
   // The newest screen steps, so the space under a landscape screen says what just happened on it.
   const recent = useMemo(() => events.filter(isScreenTool).slice(-8).reverse(), [events]);
+  const shot = useMemo(() => events.findLast((e) => e.kind === "shot"), [events]);
   return (
     <div className="col" style={{ gap: 14, flex: 1 }}>
       {up ? <div className="wscreen"><div ref={el} className="vnc" /><span className="st">{status}</span></div>
-        : <div className="asleep"><b>The screen is asleep.</b><p>It wakes on the member's next page, or when you watch live.</p></div>}
+        : <div className="wrest">
+            {shot && <img src={`/shots/${shot.data.botId}/${shot.data.file}`} alt={shot.data.caption || "Last screenshot"} loading="lazy" onError={(e) => { e.currentTarget.hidden = true; }} />}
+            <p>{`${shot ? `Last screenshot, ${hm(shot.ts)}. ` : ""}The screen wakes when ${b.name} next opens a page.`}</p>
+            <a className="pc-pill o s" href={`#/live/${b.id}`}>Watch live</a>
+          </div>}
       {recent.length > 0 && <div className="onscreen">
         <p className="pc-lab">On screen</p>
         {recent.map((e, i) => { const v = stepView(tidyTitle(e.data.title), e.data.conn); return (
@@ -104,54 +110,72 @@ function ScreenTab({ b, events, running }: { b: BotCard; events: ThreadEvent[]; 
     </div>);
 }
 
-/** The safety check's call on the line: what kind of action it was and whether it ran without asking. */
-function Gate({ g }: { g?: { effect: string; decision: string } | null }) {
-  if (!g) return null;
-  const label = g.decision === "allow" ? "allowed" : g.decision === "ask" ? "asked you" : g.decision === "block" ? "blocked" : g.decision;
-  return <span className={`gate ${g.decision === "block" ? "bad" : ""}`} title="The safety check's call on this command">{`${effectLabel(g.effect)} · ${label}`}</span>;
+const shownCmd = (s: string) => unwrapShell(s.replace(/^\$ /, ""));
+// Sub-second times say nothing worth reading, so they stay hidden.
+const secs = (ms: number | null | undefined) => (ms == null || ms < 1000 ? "" : ms < 10000 ? `${(ms / 1000).toFixed(1)} s` : ms < 60000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60000)} min`);
+const lineList = (out: string) => out.replace(/\s+$/, "").split("\n");
+interface Cmd { key: string; cmd: string; output: string; at: number; ms: number | null; failed: boolean; why: string; live: boolean }
+
+/** A saved command as a row: failed when it exited non-zero, failed outright or the safety check blocked it. An approved
+ * command says it needed your OK; exit 0 says nothing. */
+function savedCmd(e: ThreadEvent): Cmd {
+  const d = e.data, code = d.exitCode as number | null, g = d.gate as { decision?: string } | null;
+  const failed = d.status === "failed" || (code != null && code !== 0) || g?.decision === "block";
+  const why = failed ? (g?.decision === "block" ? "Blocked" : "Failed") : d.status === "declined" ? "Declined" : g?.decision === "ask" ? "Needed your OK" : "";
+  return { key: String(e.id), cmd: shownCmd(String(d.input || d.title || "")), output: String(d.output || ""), at: e.ts, ms: d.durationMs ?? null, failed, why, live: false };
 }
 
-const cwdName = (cwd: string | null | undefined) => (cwd ? cwd.replace(/^\/bot\/work\/?/, "~/work/").replace(/\/$/, "") || "~/work" : "~/work");
-const shownCmd = (s: string) => unwrapShell(s.replace(/^\$ /, ""));
-const secs = (ms: number | null | undefined) => (ms == null ? "" : ms < 1000 ? `${(ms / 1000).toFixed(1)} s` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms / 60000)} min`);
-const TAIL = 12;
-
-/** One command: its status on a line above so the command keeps the full width (one line until clicked); long output shows its tail. */
-function CmdBlock({ cwd, cmd, meta, output, live }: { cwd?: string | null; cmd: string; meta: ReactNode; output: string; live?: boolean }) {
-  const [wrap, setWrap] = useState(false), [all, setAll] = useState(false);
-  const lines = output.replace(/\n$/, "").split("\n"), cut = !all && lines.length > TAIL;
+/** One command on one line. Failures open by default with their last line; others open on click with the last 3. */
+function CmdRow({ c }: { c: Cmd }) {
+  const [open, setOpen] = useState(c.failed || c.live), [all, setAll] = useState(false);
+  const lines = c.output.trim() ? lineList(c.output) : [];
+  const tail = c.failed ? lines.filter((l) => l.trim()).slice(-1) : lines.slice(-3);
+  const head = c.live ? "Live, last 3 lines" : c.failed ? "Last line" : lines.length > 3 ? `Last 3 of ${lines.length} lines` : "Output";
+  const meta = [c.failed ? "" : c.why, c.live ? secs(Date.now() - c.at) : secs(c.ms)].filter(Boolean).join(" · ");
   return (
-    <div className={`blk${live ? " hl" : ""}`}>
-      <div className="meta">{meta}</div>
-      <button className={`pr${wrap ? " wrap" : ""}`} title={wrap ? undefined : cmd} onClick={() => setWrap(!wrap)}><span className="cwd">{cwdName(cwd)}</span><span className="cmd">{`$ ${cmd}`}</span></button>
-      {cut && <button className="more" onClick={() => setAll(true)}>{`Show all ${lines.length} lines`}</button>}
-      {(output || live) && <pre className="out">{cut ? lines.slice(-TAIL).join("\n") : output}{live && <span className="cur" />}</pre>}
+    <div className={`cmdrow${open ? " open" : ""}`}>
+      <button className="cmdline" aria-expanded={open} title={c.cmd} onClick={() => setOpen(!open)}>
+        {c.live ? <Loader /> : <Icon name="chev" size={12} className="cv" />}
+        <code>{c.cmd}</code>
+        {meta && <span className="m">{meta}</span>}
+        {c.failed && <span className="f">{c.why}</span>}
+        <span className="t">{hm(c.at)}</span>
+      </button>
+      {open && <div className="cmdout">
+        {c.cmd.length > 60 && <div className="full">{c.cmd}</div>}
+        {lines.length ? <>
+          <div className="oh"><span>{all ? `All ${lines.length} lines` : head}</span>{!c.live && lines.length > tail.length && <button className="lnk" onClick={() => setAll(!all)}>{all ? "Show less" : "Show all"}</button>}</div>
+          <pre className={c.failed && !all ? "bad" : ""}>{(all ? lines : tail).join("\n")}</pre>
+        </> : <div className="oh"><span>{c.live ? "No output yet" : "No output"}</span></div>}
+      </div>}
     </div>);
 }
 
-/** Every shell command in this thread as one read-only terminal: saved ones from events, running ones from the stream. */
-function TerminalTab({ b, events, live }: { b: BotCard; events: ThreadEvent[]; live: LiveCmd[] }) {
+/** Every shell command in this thread, one line each: saved ones from events, running ones from the stream. */
+function TerminalTab({ events, live }: { events: ThreadEvent[]; live: LiveCmd[] }) {
   const box = useRef<HTMLDivElement>(null);
-  const [q, setQ] = useState("");
-  const done = useMemo(() => events.filter(isCommand), [events]);
-  const failed = done.filter((e) => e.data.exitCode != null && e.data.exitCode !== 0).length;
-  const match = (c: string) => !q || c.toLowerCase().includes(q.toLowerCase());
+  const [q, setQ] = useState(""), [only, setOnly] = useState(false), [, tick] = useState(0);
+  const done = useMemo(() => events.filter(isCommand).map(savedCmd), [events]);
+  const running: Cmd[] = live.map((c) => ({ key: c.itemId, cmd: shownCmd(c.command), output: c.output, at: c.startedAt, ms: null, failed: false, why: "", live: true }));
+  const failed = done.filter((c) => c.failed).length;
+  const shown = [...done, ...running].filter((c) => (!only || c.failed) && (!q || c.cmd.toLowerCase().includes(q.toLowerCase())));
+  // A running command's elapsed time ticks once a second; nothing ticks while the shell is quiet.
+  useEffect(() => { if (!live.length) return; const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t); }, [live.length]);
   const lastLen = live.reduce((n, c) => n + c.output.length, 0) + done.length;
   useLayoutEffect(() => { const el = box.current; if (el) el.scrollTop = el.scrollHeight; }, [lastLen]);
   return (
-    <div className="term">
-      <div className="tbar"><i /><i /><i /><span>{`${b.name} · ~/work`}</span><span style={{ marginLeft: "auto" }}>{live.length ? "live · read-only" : b.computer.up ? "read-only" : "asleep · transcript"}</span></div>
-      <div ref={box} className="tbody">
-        {!done.length && !live.length && <p className="faint">No commands yet.</p>}
-        {done.filter((e) => match(String(e.data.input || e.data.title))).map((e) => {
-          const code = e.data.exitCode as number | null;
-          return <CmdBlock key={e.id} cwd={e.data.cwd} cmd={shownCmd(String(e.data.input || e.data.title || ""))} output={String(e.data.output || "")}
-            meta={<><Gate g={e.data.gate} />{e.data.status === "declined" ? <span className="bad">declined</span> : code != null && <span className={code === 0 ? "ok" : "bad"}>{code}</span>}<span>{secs(e.data.durationMs)}</span><span>{hm(e.ts)}</span></>} />;
-        })}
-        {live.filter((c) => match(c.command)).map((c) => <CmdBlock key={c.itemId} live cwd={c.cwd} cmd={shownCmd(c.command)} output={c.output} meta={<><Gate g={c.gate} /><Loader /></>} />)}
+    <div className="cmdlog">
+      <div className="cmdsum">
+        <div className="cmdseg" role="tablist">
+          <button role="tab" aria-selected={!only} className={only ? "" : "on"} onClick={() => setOnly(false)}>{`All ${done.length + running.length}`}</button>
+          <button role="tab" aria-selected={only} className={only ? "on" : ""} onClick={() => setOnly(true)}>Failed <b>{failed}</b></button>
+        </div>
+        <label className="cmdfind"><Icon name="search" size={13} /><input placeholder="Find a command" value={q} onChange={(e) => setQ(e.target.value)} /></label>
       </div>
-      <div className="tft"><Icon name="search" size={14} /><input placeholder="Filter commands" value={q} onChange={(e) => setQ(e.target.value)} />
-        <span>{`${done.length + live.length} command${done.length + live.length === 1 ? "" : "s"}${failed ? ` · ${failed} failed` : ""}`}</span></div>
+      <div ref={box} className="cmdlist">
+        {!shown.length && <p className="cmdnone">{done.length || running.length ? "No commands match." : "No commands yet."}</p>}
+        {shown.map((c) => <CmdRow key={c.key} c={c} />)}
+      </div>
     </div>);
 }
 

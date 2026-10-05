@@ -151,7 +151,7 @@ export async function startTurn(threadId: string, text: string, attachments: str
       await c.unload(old).catch(() => {}); byCodex.delete(old);
       codexId = null;
       run("UPDATE threads SET codex_id=NULL, carry=? WHERE id=?", recap(threadId, t.carry, text), threadId);
-      addEvent(threadId, null, "system", { text: `${b.name}'s tools changed since this thread started, so ${b.name} picks it up fresh with a recap of the conversation.` });
+      addEvent(threadId, null, "system", { text: `${b.name}'s tools changed, so it started fresh with a recap of this thread.` });
     }
     const refreshNow = refreshing.delete(threadId) && !!codexId;
     // Engram context only where instructions are sent (start/resume) or on /refresh, so a normal turn makes no Engram
