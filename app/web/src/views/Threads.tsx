@@ -50,7 +50,7 @@ export function Threads() {
 
   return (
     <div className="page threads-page">
-      <div className="row"><h1 className="pc-h2">Threads</h1><span className="pc-m small faint">{`${total}${nNeeds ? ` · ${nNeeds} need you` : ""}${nRun ? ` · ${nRun} on track` : ""}`}</span><span style={{ flex: 1 }} /><a className="pc-pill s" href="#/">+ New thread</a></div>
+      <div className="row"><h1 className="pc-h2">Threads</h1><span className="pc-m small faint">{`${total}${nNeeds ? ` · ${nNeeds} need you` : ""}${nRun ? ` · ${nRun} on track` : ""}`}</span><span style={{ flex: 1 }} /><a className="pc-pill s" href={member ? `#/new/${member}` : "#/new"}>+ New thread</a></div>
       <label className="tsearch"><Icon name="search" /><input type="search" placeholder="Find a thread by its title or anything said in it" value={q} onChange={(e) => setQ(e.target.value)} /></label>
       <div className="row">
         <button ref={pill} className={`fl ${member ? "" : "on"}`} onClick={() => setMenu(true)}>{who ? <><Face b={who} size="xs" />{who.name}</> : "Everyone"}<Icon name="chev" size={13} /></button>

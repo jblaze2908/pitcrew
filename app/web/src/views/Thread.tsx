@@ -134,7 +134,7 @@ function LiveThread({ d }: { d: ThreadView }) {
       case "activity": setActivity(e.data.text); return;
       case "output": {
         const x = e.data;
-        if (x.command !== undefined) { setLive((l) => [...l.filter((c) => c.itemId !== x.itemId), { itemId: x.itemId, command: x.command!, cwd: x.cwd ?? null, startedAt: Date.now(), output: "" }]); show("terminal"); return; }
+        if (x.command !== undefined) { setLive((l) => [...l.filter((c) => c.itemId !== x.itemId), { itemId: x.itemId, command: x.command!, cwd: x.cwd ?? null, startedAt: Date.now(), output: "", gate: x.gate ?? null }]); show("terminal"); return; }
         // Output can arrive many times a frame: collect chunks and apply them once per animation frame.
         chunks.current.set(x.itemId, (chunks.current.get(x.itemId) || "") + (x.chunk || ""));
         chunkFrame.current ||= requestAnimationFrame(() => {

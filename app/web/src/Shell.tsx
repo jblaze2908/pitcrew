@@ -8,6 +8,7 @@ import { CrewIndex } from "./views/CrewIndex";
 import { Hire } from "./views/Hire";
 import { Library } from "./views/Library";
 import { Live } from "./views/Live";
+import { NewThread } from "./views/NewThread";
 import { PitStops } from "./views/PitStops";
 import { Settings } from "./views/Settings";
 import { Telemetry } from "./views/Telemetry";
@@ -20,6 +21,7 @@ function View({ route }: { route: Route }) {
   switch (route.name) {
     case "crew": return a ? <Crew key={a} id={a} tab={b || "threads"} rest={[c, d]} /> : <CrewIndex />;
     case "threads": return <Threads />;
+    case "new": return <NewThread key={a || ""} to={a} />;
     case "t": return <Thread key={a} id={a} />;
     case "pitstops": return <PitStops />;
     case "telemetry": return <Telemetry />;

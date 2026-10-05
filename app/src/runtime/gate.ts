@@ -9,7 +9,7 @@ import { jev, redact, jevSystemOne, secretKind, PAGE_CODE, type Call, type JevCo
 import { siteTag } from "../domains.js";
 import { botDir, type Brain } from "../computer.js";
 import { bus } from "./bus.js";
-import { active } from "./state.js";
+import { active, shellVerdicts } from "./state.js";
 import { addEvent } from "./threads.js";
 import { signature, pattern, standingRule, learnedTrust } from "./rules.js";
 import { siteStep, noteRefusal } from "./sitegate.js";
@@ -148,6 +148,7 @@ export function logDecision(threadId: string | null, botId: string, v: Verdict, 
   run("INSERT INTO jev_labels(id,ts,bot_id,thread_id,source,call,verdict,decision,pitstop_id) VALUES(?,?,?,?,?,?,?,?,?)", id, now(), botId, threadId ?? null, source,
     JSON.stringify({ ...safe, host: hostOf(call.arguments?.page_url) || null }), JSON.stringify(verdict), decision, pitstop);
   if (decision === "allow") bus.emit("jev", { threadId, effect: v.effect, by, ms: v.ms ?? null });
+  if (call.kind === "shell" && threadId) { if (shellVerdicts.size > 500) shellVerdicts.clear(); shellVerdicts.set(`${threadId}\n${call.command}`, { effect: String(v.effect || "unknown"), decision }); }
   return decision === "allow";
 }
 const gateSummary = (c: Call) => (c.kind === "shell" ? { kind: "shell", command: String(c.command).slice(0, 300) } : { kind: c.kind, server: c.server, tool: c.tool, args: JSON.stringify(c.arguments || {}).slice(0, 300) });
