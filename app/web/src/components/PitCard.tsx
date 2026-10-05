@@ -59,7 +59,8 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
     : p.kind === "retire" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><p className="small faint">{d.memberName}: {d.job || "no job set"}{d.schedules ? ` · ${d.schedules} schedule${d.schedules === 1 ? "" : "s"} will stop` : ""}. Threads and memory stay.</p></div>
     : p.kind === "member" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p>{(d.diff || []).map((x: { field: string; before: string; after: string }) => <div key={x.field}><b className="small">{x.field}</b><pre>{`${x.before || "(empty)"}\n→ ${x.after || "(empty)"}`}</pre></div>)}</div>
     : p.kind === "files" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><pre>{(d.paths || []).map((x: { path: string; dir: boolean; size: number }) => `${x.path}${x.dir ? "/ (folder and everything in it)" : ` · ${x.size} B`}`).join("\n")}</pre></div>
-    : p.kind === "check" ? <CheckSummary d={d} who={who} /> : null;
+    : p.kind === "check" ? <CheckSummary d={d} who={who} />
+    : p.kind === "teach" ? <TeachSummary d={d} who={who} /> : null;
 
   const outcome = `${p.kind === "engram" && p.note ? p.note : p.status} ${ago(p.decided_at)}`;
   // gate.ts appends the site to verify, escalation and untrusted-content flags to the title; those stay word for word.
@@ -116,6 +117,7 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
     {p.thread_id && <a className="pc-pill s" href={`#/t/${p.thread_id}`}>Open the thread</a>}
     {btn("Accept as is", () => decide("approve", "once"))}
     {btn("Try again", () => decide("approve", "retry"))}</div>;
+  else if (p.kind === "teach") actions = <div className="acts">{btn("Save as skill", () => decide("approve", "once"), true)}{btn("Not now", () => decide("deny"))}</div>;
   else if (p.kind === "plan") actions = <div className="acts">
     {btn(p.effect === "browse" ? "Allow for this plan" : "Allow", () => decide("approve", "once"), true)}
     {btn(p.effect === "browse" ? "Use what they know" : "Finish with what it has", () => decide("deny"))}
@@ -202,4 +204,13 @@ export function HireSummary({ s }: { s: HireSpec }) {
       </div>
     </div>
   );
+}
+
+/** Teach by doing (runtime/teach.ts): the steps recorded while the driver held the screen, never what was typed. */
+function TeachSummary({ d, who }: { d: Record<string, any>; who: string }) {
+  const steps: string[] = d.steps || [];
+  return <div className="col" style={{ gap: 4 }}>
+    <p className="small muted">{`${who} heard these steps. Save them and ${who} writes them up as a skill to do this itself next time.`}</p>
+    {steps.length > 0 && <details><summary className="small faint">{`${d.n} step${d.n === 1 ? "" : "s"}${d.full ? " (recording stopped there)" : ""} · typed text not recorded`}</summary><ol className="small">{steps.slice(0, 60).map((s, i) => <li key={i}>{s}</li>)}</ol>{steps.length > 60 && <p className="small faint">{`…and ${steps.length - 60} more`}</p>}</details>}
+  </div>;
 }
