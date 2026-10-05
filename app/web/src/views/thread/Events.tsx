@@ -217,7 +217,7 @@ export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
   const d = e.data;
   switch (e.kind) {
     // A scheduled run's prompt is the same every time: one line, not a message bubble.
-    case "user": return d.via === "retro" ? <p className="sys">{d.display || "Retro"}</p> : d.via === "resume" ? <p className="sys">{/^Pitcrew restarted/.test(d.text || "") ? "Picked up again after the restart" : "Picked up again after the usage limit reset"}</p> : d.via === "schedule" ? <p className="sys">{`Scheduled run · ${String(d.text || "").replace(/^\[Scheduled: ([^\]]+)\][\s\S]*/, "$1")}`}</p> : <UserMsg e={e} botId={c.b.id} fromName={c.fromName} images={c.images} onView={c.onView} />;
+    case "user": return d.via === "retro" ? <p className="sys">{d.display || "Retro"}</p> : d.via === "resume" ? <p className="sys">{/^Pitcrew restarted/.test(d.text || "") ? "Picked up again after the restart" : "Picked up again after the usage limit reset"}</p> : d.via === "schedule" ? <p className="sys">{/^\[Event\]/.test(d.text || "") ? d.display || "Event" : `Scheduled run · ${String(d.text || "").replace(/^\[Scheduled: ([^\]]+)\][\s\S]*/, "$1")}`}</p> : <UserMsg e={e} botId={c.b.id} fromName={c.fromName} images={c.images} onView={c.onView} />;
     // A follow-on message from the same member (only steps between) drops the face; the column stays for alignment.
     // A scheduled run with nothing notable (runtime/turns.ts isQuiet): one faint line.
     case "agent": if (/^\s*QUIET\b/.test(d.text || "")) return <p className="sys faint">{`Nothing new · ${String(d.text).replace(/^\s*QUIET:?\s*/, "")}`}</p>;

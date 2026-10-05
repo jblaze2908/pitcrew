@@ -28,7 +28,7 @@ export interface LearnedRow { bot_id: string; pattern: string; effect: string; l
 export interface MemoryRow { id: string; bot_id: string; text: string; source: string; created_at: number; updated_at: number; forgotten_at: number | null }
 export interface ScheduleRow {
   id: string; bot_id: string; thread_id: string | null; spec: string; prompt: string;
-  next_run: number; last_run: number | null; enabled: number; created_at: number;
+  next_run: number | null; last_run: number | null; enabled: number; created_at: number; hook_secret?: string | null;
 }
 export interface ScheduleRunRow {
   id: string; schedule_id: string; bot_id: string; thread_id: string | null; turn_id: string | null;

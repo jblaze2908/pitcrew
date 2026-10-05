@@ -1,7 +1,7 @@
 // Crew members: their card and settings, hiring and retiring, memory, schedules, projects and computers.
 import { Hono } from "hono";
 import { z } from "zod";
-import { all, run, now, uid, audit } from "../db.js";
+import { all, one, run, now, uid, audit } from "../db.js";
 import { httpErr } from "../auth.js";
 import * as R from "../runtime/index.js";
 import { getBot, updateBot, normaliseSpec, createBot, retireBot } from "../crew.js";
@@ -10,7 +10,8 @@ import { memberChanged, listMemories, remember, forget } from "../engram.js";
 import { memberLinked } from "../engramStore.js";
 import { learnedFor, undoLearned } from "../runtime/learned.js";
 import { signedIn, type Env } from "../http/guard.js";
-import { readJson, jsonBody, raw, text, trimmed, flag, field, pick } from "../http/body.js";
+import { readBody, readJson, jsonBody, raw, text, trimmed, flag, field, pick } from "../http/body.js";
+import { verifyHook, overHookLimit } from "../runtime/hooks.js";
 import { botCard, LEARNED, liveLearned } from "./views.js";
 import { ledgerOverview, tablePreview } from "../ledger.js";
 import { listSkills } from "../runtime/skills.js";
@@ -39,7 +40,7 @@ export const crewRoutes = new Hono<Env>()
       catch (e: any) { global = []; memoryError = e.message; }
     }
     return c.json({ bot: botCard(b, pending), memory, global, memoryIn: "pitcrew", memoryError,
-      schedules: all<ScheduleRow>("SELECT * FROM schedules WHERE bot_id=? ORDER BY created_at DESC", id).map((s) => ({ ...s, last: R.lastScheduledRun(s) })), rules: all("SELECT * FROM rules WHERE bot_id=? AND revoked_at IS NULL ORDER BY created_at DESC", id), learned: liveLearned(all<LearnedRow>(`${LEARNED} WHERE l.bot_id=? ORDER BY l.updated_at DESC`, id)) });
+      schedules: R.listSchedules(id).reverse().map((s) => ({ ...s, last: R.lastScheduledRun(s) })), rules: all("SELECT * FROM rules WHERE bot_id=? AND revoked_at IS NULL ORDER BY created_at DESC", id), learned: liveLearned(all<LearnedRow>(`${LEARNED} WHERE l.bot_id=? ORDER BY l.updated_at DESC`, id)) });
   })
   // The patch is normalised by updateBot itself (crew.ts), field by field.
   .patch("/api/bots/:id", signedIn, async (c) => { const patch = await readJson(c), b = updateBot(c.req.param("id"), patch); if ("private" in patch || "engram_scope" in patch || "engram_household" in patch) memberChanged(b); return c.json(b); })
@@ -80,6 +81,16 @@ export const crewRoutes = new Hono<Env>()
   .post("/api/bots/:id/schedules", signedIn, async (c) => { const b = await jsonBody(c, Schedule); try { return c.json(R.addSchedule(c.req.param("id"), b.threadId as string | null, b.spec, b.prompt)); } catch (e: any) { throw httpErr(400, e.message); } })
   .patch("/api/schedules/:id", signedIn, async (c) => { const b = await jsonBody(c, ScheduleEdit); try { return c.json(R.updateSchedule(c.req.param("id"), null, b, "driver")); } catch (e: any) { throw httpErr(400, e.message); } })
   .get("/api/schedules", signedIn, (c) => c.json(R.scheduleOverview()))
+  .get("/api/schedules/:id/hook", signedIn, (c) => { try { return c.json(R.scheduleHook(c.req.param("id"))); } catch (e: any) { throw httpErr(404, e.message); } })
+  // A webhook for an "on event" schedule: no session (the sender is another service), so it proves itself with the
+  // schedule's secret (hooks.ts). Every refusal is the same 404, so the address says nothing to a stranger.
+  .post("/api/hooks/:id", async (c) => {
+    const s = one<ScheduleRow>("SELECT * FROM schedules WHERE id=? AND enabled=1", c.req.param("id"));
+    const body = await readBody(c, 256 << 10);
+    if (!s?.hook_secret || verifyHook(s.hook_secret, (n) => c.req.header(n), body)) throw httpErr(404, "Not found");
+    if (overHookLimit(s.id)) throw httpErr(429, "Too many events this hour");
+    return c.json({ runId: R.fireEvent(s, body) }, 202);
+  })
   .get("/api/schedules/:id/runs", signedIn, (c) => c.json(R.scheduleRuns(c.req.param("id"), Math.min(200, Number(c.req.query("limit")) || 50))))
   .post("/api/schedules/:id/run", signedIn, (c) => { try { return c.json({ runId: R.runScheduleNow(c.req.param("id")) }); } catch (e: any) { throw httpErr(404, e.message); } })
   .delete("/api/schedules/:id", signedIn, (c) => { try { R.deleteSchedule(c.req.param("id"), null, "driver"); return c.json({ ok: true }); } catch (e: any) { throw httpErr(404, e.message); } })

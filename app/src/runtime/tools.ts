@@ -16,6 +16,7 @@ import { crewOverview, soulProposal, retireProposal, memberChange, memberFiles, 
 import { computer } from "./machines.js";
 import { pitStop } from "./pitstops.js";
 import { addSchedule, listSchedules, updateSchedule, deleteSchedule, lastScheduledRun } from "./schedules.js";
+import { isEventSpec } from "./hooks.js";
 import { askCrew } from "./delegation.js";
 import { planTool } from "./plans.js";
 import { runtimeTool, type ToolCall } from "./browser.js";
@@ -124,6 +125,8 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
     }
     case "schedule_task": {
       try {
+        // An event trigger opens an address on the internet, so only the driver adds one (Schedules page).
+        if (isEventSpec(String(a.when || ""))) return say("Only the driver can add an event trigger. Suggest it in your reply with what it should watch.", false);
         const s = addSchedule(b.id, threadId, String(a.when || ""), String(a.prompt || ""));
         addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Scheduled “${s.prompt.slice(0, 80)}” ${s.spec} (next ${ist(s.next_run)} IST)` });
         return say(`Scheduled ${s.id}: ${s.spec}.`);
