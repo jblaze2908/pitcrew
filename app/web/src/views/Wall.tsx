@@ -1,4 +1,5 @@
-// Home: ask the crew, decide what's waiting, see what's on track and pick up where you left off. The rest folds away.
+// Home: ask the crew, decide what's waiting, see what finished since you last looked and what was done for you, what's
+// on track, and pick up where you left off. The rest folds away.
 import { useState } from "react";
 import { AskBox } from "../components/AskBox";
 import { AsksList } from "../components/AsksList";
@@ -12,6 +13,8 @@ import { Face, Loader } from "../components/ui";
 import { api } from "../lib/api";
 import { ago, hourNow, plural, usd } from "../lib/format";
 import { connected, useStore } from "../lib/store";
+import { Activity } from "./home/Activity";
+import { Since } from "./home/Since";
 
 interface Idea { id: string; bot_name: string; area: string; title: string; evidence: string; proposal: string; votes: number }
 export function Wall() {
@@ -54,6 +57,7 @@ export function Wall() {
           <div className="spread"><p className="pc-lab sig">Box, box · waiting on you</p>{n > 1 && <a className="small faint" href="#/pitstops">Decide all ›</a>}</div>
           <div className="grid2">{pits.slice(0, 6).map((p) => <PitCard key={p.id} p={p} />)}</div>
         </section>)}
+      <div className="home2"><Since /><Activity /></div>
       {track.length > 0 && (
         <section className="col">
           <p className="pc-lab">On track</p>

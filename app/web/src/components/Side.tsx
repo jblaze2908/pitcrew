@@ -37,9 +37,11 @@ export function Side({ route }: { route: Route }) {
   const more = S.bots.length - faces.length;
   const shells = S.bots.filter((b) => b.computer.up).length, screens = S.bots.filter((b) => b.computer.desktop).length;
   // Crew is "on" for the index and for a member's page; a count shows quietly, a badge loudly.
-  const nav = (id: string, icon: string, label: string, href: string, badge?: number | null, count?: number) => (
+  // fresh: Home's unread runs, in the data tone, quieter than a pit stop's badge and shown only when none waits.
+  const nav = (id: string, icon: string, label: string, href: string, badge?: number | null, count?: number, fresh?: number) => (
     <a className={`nv ${route.name === id && (id !== "crew" || !route.args[0] || rail) ? "on" : ""}`} href={href} title={label}>
-      <Icon name={icon} />{!rail && <span>{label}</span>}{badge ? (rail ? <i className="bd" /> : <em className="hot">{badge}</em>) : count && !rail ? <em>{count}</em> : null}
+      <Icon name={icon} />{!rail && <span>{label}</span>}{badge ? (rail ? <i className="bd" /> : <em className="hot">{badge}</em>)
+        : fresh ? (rail ? <i className="bd new" /> : <em className="new" title={`${fresh} finished since you last looked`}>{fresh}</em>) : count && !rail ? <em>{count}</em> : null}
     </a>);
   const row = (t: Row) => (
     <a key={t.id} className={`tr ${open === t.id ? "on" : ""}`} href={`#/t/${t.id}`} title={`${t.title} · ${t.b.name}`}>
@@ -56,7 +58,7 @@ export function Side({ route }: { route: Route }) {
       <button className="ib" title="Show the sidebar" onClick={toggle}><Icon name="rail" /></button>
       <a className="ib nb" href="#/new" title="New thread"><Icon name="plus" /></a>
       <span className="sep" />
-      {nav("wall", "home", "Home", "#/", pending.length)}
+      {nav("wall", "home", "Home", "#/", pending.length, undefined, S.unread)}
       {nav("threads", "threads", "Threads", "#/threads")}
       {nav("crew", "crew", "Crew", "#/crew")}
       {nav("library", "library", "Library", "#/library")}
@@ -71,7 +73,7 @@ export function Side({ route }: { route: Route }) {
       {S.paused && <a className="stopped" href="#/">Crew stopped · resume</a>}
       <a className={`newt ${route.name === "new" ? "on" : ""}`} href="#/new"><Icon name="plus" />New thread</a>
       <nav>
-        {nav("wall", "home", "Home", "#/", pending.length)}
+        {nav("wall", "home", "Home", "#/", pending.length, undefined, S.unread)}
         {nav("threads", "threads", "Threads", "#/threads")}
         {nav("crew", "crew", "Crew", "#/crew", null, S.bots.length)}
         {nav("pitstops", "flag", "Pit stops", "#/pitstops")}

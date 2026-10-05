@@ -27,6 +27,19 @@ export const dayLabel = (t: number) => {
   return k === keyFmt.format(new Date()) ? "Today" : k === keyFmt.format(new Date(Date.now() - 86400000)) ? "Yesterday" : dayFmt.format(new Date(t)).replace(",", "");
 };
 
+const wdFmt = new Intl.DateTimeFormat("en-GB", { weekday: "short", timeZone: IST });
+const dmFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: IST });
+/** A log time: "07:38" today, "Sun 23:31" within the week, "3 Oct" before that. */
+export const stamp = (t: number) => {
+  if (keyFmt.format(new Date(t)) === keyFmt.format(new Date())) return hm(t);
+  return Date.now() - t < 6 * 86400000 ? `${wdFmt.format(new Date(t))} ${hm(t)}` : dmFmt.format(new Date(t));
+};
+/** "07:02" today, "yesterday 22:00", "Fri 23:33" within the week, else "3 Oct 23:33". */
+export const sinceLabel = (t: number) => {
+  const d = dayLabel(t);
+  return d === "Today" ? hm(t) : d === "Yesterday" ? `yesterday ${hm(t)}` : Date.now() - t < 6 * 86400000 ? `${wdFmt.format(new Date(t))} ${hm(t)}` : `${dmFmt.format(new Date(t))} ${hm(t)}`;
+};
+
 export const until = (t: number) => {
   const m = Math.max(0, Math.round((t - Date.now()) / 60000));
   return m < 60 ? `${m}m` : m < 2880 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${Math.round(m / 1440)}d`;
