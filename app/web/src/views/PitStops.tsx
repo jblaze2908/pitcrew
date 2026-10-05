@@ -5,13 +5,17 @@ import { LearnedList, RulesList } from "../components/Approvals";
 import { PitCard } from "../components/PitCard";
 import { EffectChip } from "../components/ui";
 import { api } from "../lib/api";
-import { when } from "../lib/format";
+import { cap, plainWords, when } from "../lib/format";
+import { pitLabel } from "../lib/steps";
 import { useLiveReload } from "../lib/live";
 import { useStore } from "../lib/store";
 import { toast } from "../lib/toast";
 import { useFetch } from "../lib/useFetch";
 
 interface Data { pending: PitStop[]; history: PitStop[]; rules: Rule[]; learned: Learned[] }
+const SCOPE: Record<string, string> = { once: "You · once", thread: "You · this thread", always: "You · always", site: "You · this site", full: "You · whole site", block: "You · blocked site", retry: "You · try again" };
+// The step's own words ("Ran a browser script on x.com"), not the gate's raw title with its code.
+const title = (p: PitStop) => { const v = pitLabel(p); return p.kind === "mcp" || p.kind === "command" ? `${v.label}${v.detail ? ` ${v.detail}` : ""}` : plainWords(p.title); };
 
 export function PitStops() {
   const { bot } = useStore();
@@ -35,7 +39,7 @@ export function PitStops() {
   return (
     <div className="page">
       <div className="spread"><h1 className="pc-h2">Pit stops</h1>
-        {data.pending.length > 1 && <div className="row"><button className="pc-pill sig s" onClick={() => batch("approve")}>Approve selected</button><button className="pc-pill o s" onClick={() => batch("deny")}>Deny selected</button></div>}
+        {data.pending.length > 1 && <div className="row"><button className="pc-pill s" onClick={() => batch("approve")}>Approve selected</button><button className="pc-pill o s" onClick={() => batch("deny")}>Deny selected</button></div>}
       </div>
       {data.pending.length ? (
         <div className="col">{data.pending.map((p) => (
@@ -55,9 +59,9 @@ export function PitStops() {
           <thead><tr><th>When</th><th>Crew</th><th>Effect</th><th>What</th><th>Outcome</th><th>Decided by</th></tr></thead>
           <tbody>{data.history.filter((p) => p.status !== "pending").slice(0, 80).map((p) => (
             <tr key={p.id}>
-              <td className="small faint">{when(p.created_at)}</td><td>{bot(p.bot_id)?.name || p.bot_id}</td><td><EffectChip kind={p.effect} /></td><td>{p.title}</td>
-              <td><span className={`pc-chip ${p.status === "approved" ? "ok" : p.status === "denied" ? "bad" : ""}`}>{p.status}</span></td>
-              <td className="small faint">{p.kind === "engram" ? p.note || "Engram" : p.status === "expired" ? "timeout" : p.scope || "once"}</td>
+              <td className="small faint">{when(p.created_at)}</td><td>{bot(p.bot_id)?.name || p.bot_id}</td><td><EffectChip kind={p.effect} /></td><td>{title(p)}</td>
+              <td><span className={`pc-chip ${p.status === "approved" ? "ok" : p.status === "denied" ? "bad" : ""}`}>{p.status === "expired" ? "No answer" : cap(p.status)}</span></td>
+              <td className="small faint">{p.kind === "engram" ? p.note || "Memory app" : p.status === "expired" ? "Timed out" : SCOPE[p.scope || "once"] || cap(p.scope || "")}</td>
             </tr>))}
           </tbody>
         </table>

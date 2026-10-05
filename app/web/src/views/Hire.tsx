@@ -82,21 +82,21 @@ function HireForm({ ps }: { ps: PitStop | null }) {
             <Field label="Scheduled task"><input value={f.sPrompt} placeholder="What to do on schedule" onChange={(e) => set("sPrompt", e.target.value)} /></Field>
           </div>
           {S.engram.linked && <>
-            <Field label="Memories in Engram" help="Other members read Personal; Money and Health only with a grant you give in Engram.">
+            <Field label="Shared memory" help="Other members read Personal; Money and Health only with a grant you give in the memory app.">
               <select value={f.scope} onChange={(e) => set("scope", e.target.value as EngramScope)}>
                 {(Object.keys(SCOPE_LABEL) as EngramScope[]).map((k) => <option key={k} value={k}>{SCOPE_LABEL[k]}</option>)}
               </select>
             </Field>
             <HouseholdBox checked={f.household} onChange={(v) => set("household", v)} />
             {!!conns.data?.length && <div className="col" style={{ gap: 6 }}>
-              <p className="pc-lab">Reads through Engram</p>
+              <p className="pc-lab">Accounts it can read</p>
               {conns.data.map((c) => (
                 <label key={c.id} className="row small" style={{ gap: 8 }}>
                   <input type="checkbox" checked={f.conns.includes(c.id)} disabled={!c.read}
                     onChange={(e) => set("conns", e.target.checked ? [...f.conns, c.id] : f.conns.filter((x) => x !== c.id))} />
                   <span>{c.name}</span><span className="faint">{c.read ? `${c.read} read ${c.read === 1 ? "tool" : "tools"}` : "no read tools"}{c.status !== "ok" ? ` · ${c.detail}` : ""}</span>
                 </label>))}
-              <p className="small faint">Read tools only. Writes and anything else you grant in Engram, where every write asks you first.</p>
+              <p className="small faint">Reading only. Writing and anything else you grant in the memory app, where every write asks you first.</p>
             </div>}
           </>}
         </div>
@@ -118,7 +118,7 @@ function HireForm({ ps }: { ps: PitStop | null }) {
           <HireSummary s={review} />
           <p className="small muted">Starts with read, draft and browse allowed. Sign-in, install, send and pay ask first. Delete and share always ask. It gets its own computer, browser profile and network.</p>
           <div className="row">
-            <button className="pc-pill sig" onClick={() => hire(review)}>{`Hire ${review.name}`}</button>
+            <button className="pc-pill" onClick={() => hire(review)}>{`Hire ${review.name}`}</button>
             <button className="pc-pill o" onClick={() => setReview(null)}>Back to edit</button>
             {ps && <button className="pc-pill o" onClick={async () => { await api.post(`/api/pitstops/${ps.id}/decide`, { decision: "deny" }); go("#/"); }}>Decline proposal</button>}
           </div>

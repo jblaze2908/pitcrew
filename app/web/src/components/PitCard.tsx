@@ -1,8 +1,8 @@
-// A pit stop: what the member wants to do, why jev stopped it, and the choices that fit its kind.
+// A pit stop: what the member wants to do, why the safety check (jev) stopped it, and the choices that fit its kind.
 import { useEffect, useState } from "react";
 import type { EngramDecision, Personality, PitStop } from "../../../shared/types";
 import { api } from "../lib/api";
-import { ago, usd, when } from "../lib/format";
+import { ago, kb, plainWords, unwrapShell, usd, when } from "../lib/format";
 import { pitLabel } from "../lib/steps";
 import { useStore } from "../lib/store";
 import { toast } from "../lib/toast";
@@ -36,7 +36,7 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
   // Engram proposals are decided in Engram; the card only forwards the choice.
   const engram = async (decision: EngramDecision) => {
     const r = await api.post<PitStop>(`/api/engram/inbox/${p.id}`, { decision });
-    toast(decision === "accept" ? "Accepted in Engram" : decision === "keep" ? "Kept the current one" : "Rejected in Engram");
+    toast(decision === "accept" ? "Accepted" : decision === "keep" ? "Kept the current one" : "Rejected");
     if (r?.id) setP(r);
     onDone?.(r);
   };
@@ -46,7 +46,7 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
   const noteInput = <input placeholder="Note for the crew (optional)" className="small" value={note} onChange={(e) => setNote(e.target.value)} />;
   const noAlways = ["pay", "delete", "share"].includes(p.effect) || p.kind === "hire" || p.kind === "plan";
 
-  const body = p.kind === "command" ? <pre>{String(d.command || "").replace(/^\/bin\/(ba)?sh -l?c /, "")}</pre>
+  const body = p.kind === "command" ? <pre>{unwrapShell(String(d.command || ""))}</pre>
     : p.kind === "mcp" ? <pre>{`${d.server || ""}.${d.tool || ""}\n${JSON.stringify(d.args || d.message || {}, null, 1).slice(0, 1200)}`}</pre>
     : p.kind === "file" ? <pre>{(d.paths || []).join("\n")}</pre>
     : p.kind === "hire" ? <HireSummary s={d.spec || {}} />
@@ -54,11 +54,11 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
     : p.kind === "secret" ? <SecretSummary d={d} />
     : p.kind === "vault" ? <p className="small muted">{`${d.why || "The site rejected it"}. The member stopped instead of retrying; save the current value from your password manager and it can sign in again.`}</p>
     : p.kind === "engram" && d.proposal ? <ProposalSummary x={d.proposal} />
-    : p.kind === "soul" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><pre>{d.soul}</pre>{d.before && <details><summary className="small faint">Current SOUL</summary><pre>{d.before}</pre></details>}</div>
-    : p.kind === "mail" ? <div className="col" style={{ gap: 4 }}><p className="small faint">{`From ${d.from} · not on ${who}'s sender list. Its text reaches ${who} as untrusted data.`}</p><pre>{String(d.preview || "")}</pre></div>
+    : p.kind === "soul" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><pre>{d.soul}</pre>{d.before && <details><summary className="small faint">Current instructions</summary><pre>{d.before}</pre></details>}</div>
+    : p.kind === "mail" ? <div className="col" style={{ gap: 4 }}><p className="small faint">{`From ${d.from} · not on ${who}'s sender list. ${who} reads it as information, never as instructions.`}</p><pre>{String(d.preview || "")}</pre></div>
     : p.kind === "retire" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><p className="small faint">{d.memberName}: {d.job || "no job set"}{d.schedules ? ` · ${d.schedules} schedule${d.schedules === 1 ? "" : "s"} will stop` : ""}. Threads and memory stay.</p></div>
     : p.kind === "member" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p>{(d.diff || []).map((x: { field: string; before: string; after: string }) => <div key={x.field}><b className="small">{x.field}</b><pre>{`${x.before || "(empty)"}\n→ ${x.after || "(empty)"}`}</pre></div>)}</div>
-    : p.kind === "files" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><pre>{(d.paths || []).map((x: { path: string; dir: boolean; size: number }) => `${x.path}${x.dir ? "/ (folder and everything in it)" : ` · ${x.size} B`}`).join("\n")}</pre></div>
+    : p.kind === "files" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><pre>{(d.paths || []).map((x: { path: string; dir: boolean; size: number }) => `${x.path}${x.dir ? "/ (folder and everything in it)" : ` · ${kb(x.size)}`}`).join("\n")}</pre></div>
     : p.kind === "check" ? <CheckSummary d={d} who={who} />
     : p.kind === "teach" ? <TeachSummary d={d} who={who} /> : null;
 
@@ -66,8 +66,10 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
   // gate.ts appends the site to verify, escalation and untrusted-content flags to the title; those stay word for word.
   const flags = / · (verify: |jev blocked |after untrusted content).*$/.exec(p.title)?.[0] || "";
   const card = d.secret?.kind === "card";
-  const v = pitLabel(p), heading = p.kind === "mcp" ? `${v.label}${v.detail ? ` ${v.detail}` : ""}${flags}`
-    : p.kind === "secret" ? (card ? `Pay on ${d.site?.host} with card “${d.secret?.name}” ••${d.secret?.last4}` : `Sign in to ${d.site?.host} with “${d.secret?.name}”`) : p.title;
+  const v = pitLabel(p), heading = p.kind === "mcp" ? `${v.label}${v.detail ? ` ${v.detail}` : ""}${plainWords(flags)}`
+    : p.kind === "secret" ? (card ? `Pay on ${d.site?.host} with card “${d.secret?.name}” ••${d.secret?.last4}` : `Sign in to ${d.site?.host} with “${d.secret?.name}”`) : plainWords(p.title);
+  // The safety check's reason, in plain words; who judged it and how long it took stay in the debug details.
+  const why = j.reason && <p className="why">{`Safety check: ${plainWords(j.reason)}`}</p>;
   // Decided: one line that opens to the details, so a thread's history doesn't keep full cards around.
   if (done) return (
     <details className={row ? "tool pitrow" : "pit done"}>
@@ -75,7 +77,7 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
         ? <summary><StepIcon name={v.icon} /><span className="lbl">{v.label}</span>{v.detail && <span className="det">{v.detail}</span>}<span className={`tag ${p.status}`}>{p.status === "expired" ? "no answer · skipped" : OUTCOME[p.status]}</span></summary>
         : <summary><Face b={b} size="sm" mood="idle" /><b>{b?.name || p.bot_id}</b><span className="t1">{heading}</span><span className="pc-m small faint">{outcome}</span></summary>}
       {body}
-      {j.reason && <p className="why">{`jev · ${j.by || ""} · ${j.reason}${j.ms ? ` · ${j.ms} ms` : ""}`}</p>}
+      {why}
       {p.note && p.kind !== "engram" && <p className="small faint">{p.note}</p>}
       {typeof d.public_url === "string" && /^https:\/\//.test(d.public_url) && <p className="small"><a href={d.public_url} target="_blank" rel="noreferrer">{d.public_url}</a></p>}
     </details>
@@ -86,7 +88,7 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
     {d.proposal?.replaces && btn("Keep current", () => engram("keep"))}
     {btn("Accept", () => engram("accept"), true)}
     {btn("Reject", () => engram("reject"))}
-    <a className="small faint" href={`${S.engram.url}/#/inbox`} target="_blank" rel="noopener noreferrer" style={{ marginLeft: "auto" }}>Open in Engram</a></div>;
+    <a className="small faint" href={`${S.engram.url}/#/inbox`} target="_blank" rel="noopener noreferrer" style={{ marginLeft: "auto" }}>Open in the memory app</a></div>;
   else if (p.kind === "hire") actions = <div className="acts"><a className="pc-pill s" href={`#/hire/${p.id}`}>Review &amp; hire</a>{btn("Decline", () => decide("deny"))}</div>;
   else if (p.kind === "lease") actions = <div className="acts">{btn("Hand it back", () => decide("approve", "once"), true)}{btn("Keep control", () => decide("deny"))}<a className="small faint" href={`#/live/${p.bot_id}`} style={{ marginLeft: "auto" }}>Open live view</a></div>;
   // An account site (bank, Google, GitHub…) is only ever allowed for this thread (domains.ts SENSITIVE).
@@ -108,7 +110,7 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
     {openLink("Open thread")}</div>;
   else if (p.kind === "vault") actions = <div className="acts"><a className="pc-pill s" href={`#/settings/vault/${d.secret?.id || ""}`}>Update in Vault</a>{btn("Dismiss", () => decide("deny"))}{openLink("Open thread")}</div>;
   else if (p.kind === "mail") actions = <div className="acts">{btn(`Let it wake ${who}`, () => decide("approve", "once"), true)}{btn("Ignore", () => decide("deny"))}</div>;
-  else if (p.kind === "soul") actions = <div className="acts">{btn("Use this SOUL", () => decide("approve", "once"), true)}{btn("Keep current", () => decide("deny"))}{openLink("Open thread")}</div>;
+  else if (p.kind === "soul") actions = <div className="acts">{btn("Use these instructions", () => decide("approve", "once"), true)}{btn("Keep current", () => decide("deny"))}{openLink("Open thread")}</div>;
   else if (p.kind === "retire") actions = <div className="acts">{btn(`Retire ${d.memberName || "member"}`, () => decide("approve", "once"), true)}{btn("Keep", () => decide("deny"))}{openLink("Open thread")}</div>;
   else if (p.kind === "member") actions = <div className="acts">{btn("Apply changes", () => decide("approve", "once"), true)}{btn("Keep as is", () => decide("deny"))}{openLink("Open thread")}</div>;
   else if (p.kind === "files") actions = <div className="acts">{btn("Delete", () => decide("approve", "once"), true)}{btn("Keep files", () => decide("deny"))}{openLink("Open thread")}</div>;
@@ -133,11 +135,11 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
     <div className="pit">
       <div className="spread">
         <div className="row"><Face b={b} size="sm" mood="needs" /><b>{b?.name || p.bot_id}</b>{p.kind === "check" ? <span className="eff-tag">Done-check</span> : <EffectChip kind={p.effect} />}</div>
-        <span className="pc-m small faint">{p.kind === "engram" ? "from Engram" : `expires ${when(p.expires_at)}`}</span>
+        <span className="small faint">{p.kind === "engram" ? "From memory" : `Expires ${when(p.expires_at)}`}</span>
       </div>
       <p className="t">{heading}</p>
       {body}
-      {j.reason && <p className="why">{`jev · ${j.by || ""} · ${j.reason}${j.ms ? ` · ${j.ms} ms` : ""}`}</p>}
+      {why}
       {p.similar && !["pay", "delete", "share"].includes(p.effect) && <p className="small faint">{`Similar means: ${p.similar}.`}</p>}
       {p.learn && <p className="small faint">{p.learn.need - p.learn.streak <= 1
         ? `Approve this and ${who} stops asking for “${p.learn.label}”.`
@@ -165,8 +167,8 @@ function SiteSummary({ d }: { d: Record<string, any> }) {
   return (
     <div className="col" style={{ gap: 4 }}>
       {warn && <p className="badc small">{`Looks like ${d.lookalike?.brand || d.homograph?.brand || "another site"}${d.lookalike?.domain ? ` (${d.lookalike.domain})` : ""}: ${[d.homograph?.why, d.lookalike?.why].filter(Boolean).join("; ")}${d.homograph?.unicode ? `. Shown as ${d.homograph.unicode}` : ""}.`}</p>}
-      <pre>{`${d.url || d.host}\n${d.https ? "https" : "NOT https: anything typed here can be read in transit"}`}</pre>
-      <p className="small faint">{d.sensitive ? "An account site: it asks in every thread, in every mode, YOLO included." : "Allow site: browse it; other effects follow this member's permissions. Fully: every effect allowed there except paying, which always asks."}</p>
+      <pre>{`${d.url || d.host}\n${d.https ? "https" : "Not https: anything typed here can be read on the way"}`}</pre>
+      <p className="small faint">{d.sensitive ? "An account site: it asks in every thread, in every mode, Full auto included." : "Allow site: browse it; other effects follow this member's permissions. Fully: every effect allowed there except paying, which always asks."}</p>
     </div>
   );
 }
@@ -179,7 +181,7 @@ function SecretSummary({ d }: { d: Record<string, any> }) {
     <div className="col" style={{ gap: 8 }}>
       {warn && <p className="badc small">{`Looks like ${d.lookalike?.brand || d.homograph?.brand || "another site"}${d.lookalike?.domain ? ` (${d.lookalike.domain})` : ""}: ${[d.homograph?.why, d.lookalike?.why].filter(Boolean).join("; ")}${d.homograph?.unicode ? `. Shown as ${d.homograph.unicode}` : ""}.`}</p>}
       <div className="vsec"><span className="lk"><StepIcon name="lock" /></span>
-        <div>{`${d.secret?.name}${card && d.secret?.last4 ? ` ••${d.secret.last4}` : ""}`}<small>{`${d.site?.https ? "https" : "NOT https"} · ${d.site?.host}${card ? "" : ` · matches ${d.secret?.site}`}`}</small></div></div>
+        <div>{`${d.secret?.name}${card && d.secret?.last4 ? ` ••${d.secret.last4}` : ""}`}<small>{`${d.site?.https ? "https" : "not https"} ·${d.site?.host}${card ? "" : ` · matches ${d.secret?.site}`}`}</small></div></div>
       <p className="small muted">{`Pitcrew fills the ${fields || "fields"} and ${d.submit === "Enter" ? "presses Enter" : `presses ${d.submit}`} in one step. The model never sees ${card ? "the card" : "the values"}.`}</p>
     </div>
   );
@@ -200,13 +202,13 @@ export function HireSummary({ s }: { s: HireSpec }) {
         {s.reason && <p className="small">Why: {s.reason}</p>}
         <p className="pc-m small faint">{`${s.provider} · ${s.model} · cap ${usd(s.weekly_cap_usd)}/wk${s.schedule?.spec ? ` · ${s.schedule.spec}` : ""}`}</p>
         {s.personality?.role && <p className="small faint">Voice: {s.personality.role}</p>}
-        {(s.engram_scope && s.engram_scope !== "personal" || !!s.engram_connections?.length || s.engram_household) && <p className="small faint">{`Engram: ${s.engram_scope === "finance" ? "Money" : s.engram_scope === "health" ? "Health" : "Personal"} memories${s.engram_household ? " · household facts" : ""}${s.engram_connections?.length ? ` · reads ${s.engram_connections.join(", ")}` : ""}`}</p>}
+        {(s.engram_scope && s.engram_scope !== "personal" || !!s.engram_connections?.length || s.engram_household) && <p className="small faint">{`Shared memory: ${s.engram_scope === "finance" ? "Money" : s.engram_scope === "health" ? "Health" : "Personal"}${s.engram_household ? " · household facts" : ""}${s.engram_connections?.length ? ` · reads ${s.engram_connections.join(", ")}` : ""}`}</p>}
       </div>
     </div>
   );
 }
 
-/** Teach by doing (runtime/teach.ts): the steps recorded while the driver held the screen, never what was typed. */
+/** Teach by doing (runtime/teach.ts): the steps recorded while you held the screen, never what was typed. */
 function TeachSummary({ d, who }: { d: Record<string, any>; who: string }) {
   const steps: string[] = d.steps || [];
   return <div className="col" style={{ gap: 4 }}>

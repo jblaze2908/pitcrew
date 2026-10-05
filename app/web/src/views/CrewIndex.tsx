@@ -1,4 +1,4 @@
-// The whole crew by state: who needs you, who's on track, who's in the garage. Scales past a sidebar's worth of faces.
+// The whole crew by state: who needs you, who's working, who's idle. Scales past a sidebar's worth of faces.
 import { useState } from "react";
 import type { BotCard } from "../../../shared/types";
 import { Icon } from "../components/Icon";
@@ -7,7 +7,7 @@ import { Face, hueStyle } from "../components/ui";
 import { usd } from "../lib/format";
 import { useStore } from "../lib/store";
 
-const STATE: Record<string, string> = { needs: "pit stop", working: "on track", failed: "didn't finish", done: "done", idle: "ready", sleep: "in the garage" };
+const STATE: Record<string, string> = { needs: "Pit stop", working: "Working", failed: "Didn't finish", done: "Ready", idle: "Ready", sleep: "Idle" };
 
 export function CrewIndex() {
   const { S } = useStore();
@@ -16,14 +16,14 @@ export function CrewIndex() {
   const bots = S.bots.filter(match);
   const groups: [string, BotCard[], string][] = [
     ["Needs you", bots.filter((b) => b.mood === "needs"), "sig"],
-    ["On track", bots.filter((b) => b.mood === "working"), ""],
-    ["In the garage", bots.filter((b) => b.mood !== "needs" && b.mood !== "working"), ""],
+    ["Working", bots.filter((b) => b.mood === "working"), ""],
+    ["Idle", bots.filter((b) => b.mood !== "needs" && b.mood !== "working"), ""],
   ];
   const n = (m: string) => S.bots.filter((b) => b.mood === m).length;
   return (
     <div className="page crew-index">
       <div className="row"><h1 className="pc-h2">Crew</h1>
-        <span className="pc-m small faint">{`${S.bots.length} members${n("needs") ? ` · ${n("needs")} need you` : ""}${n("working") ? ` · ${n("working")} on track` : ""}`}</span>
+        <span className="small faint">{`${S.bots.length} members${n("needs") ? ` · ${n("needs")} need you` : ""}${n("working") ? ` · ${n("working")} working` : ""}`}</span>
         <span style={{ flex: 1 }} />
         <label className="tsearch sm"><Icon name="search" size={14} /><input type="search" placeholder="Find a member" value={q} onChange={(e) => setQ(e.target.value)} /></label>
         <a className="pc-pill s" href="#/hire">+ New crew member</a></div>
@@ -37,7 +37,7 @@ export function CrewIndex() {
                 <a key={b.id} className={`mcard ${b.mood === "needs" ? "need" : ""}`} style={hueStyle(b.hue)} href={`#/crew/${b.id}`}>
                   <div className="row" style={{ gap: 12, flexWrap: "nowrap" }}><Face b={b} size="md" /><b className="pc-h3 trunc">{b.name}</b></div>
                   <p className="small muted clamp2">{jobLine(b)}</p>
-                  <div className="ft"><span className={b.mood === "needs" ? "sig" : b.mood === "working" ? "blue" : ""}>{pits ? `${pits} pit stop${pits > 1 ? "s" : ""}` : STATE[b.mood] || b.mood}{b.computer.desktop ? " · screen up" : b.computer.up ? " · shell up" : ""}</span><span>{`${usd(b.spend)} wk`}</span></div>
+                  <div className="ft"><span className={b.mood === "needs" ? "sig" : ""}>{pits ? `${pits} pit stop${pits > 1 ? "s" : ""}` : STATE[b.mood] || b.mood}{b.computer.desktop ? " · screen up" : b.computer.up ? " · shell up" : ""}</span><span>{`${usd(b.spend)} wk`}</span></div>
                 </a>);
             })}
           </div>

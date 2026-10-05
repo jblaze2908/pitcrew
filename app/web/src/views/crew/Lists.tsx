@@ -6,7 +6,7 @@ import { when } from "../../lib/format";
 import { toast } from "../../lib/toast";
 import { SCOPE_LABEL } from "./ProfileTab";
 
-// A linked member's memories live in Engram; this lists that member's own and adds or forgets there.
+// A linked member's memories live in Engram (shown as "shared memory"); this lists that member's own and adds or forgets there.
 // Two tiers: the member's own memory (it writes freely, capped at 3,000 chars) and global notes in Engram (about you,
 // for the whole crew; a member's go through your review, yours save directly).
 export function MemoryTab({ b, memory, global, error, reload }: { b: BotCard; memory: Memory[]; global: Memory[] | null; error: string | null; reload: () => void }) {
@@ -14,15 +14,16 @@ export function MemoryTab({ b, memory, global, error, reload }: { b: BotCard; me
   return (
     <div className="col">
       <MemoryList b={b} title={`Own memory · ${used} / 3,000 chars`} help={`${b.name}'s working knowledge: how its job runs, site quirks, where things are. Only it reads this.`} items={memory} scope="agent" reload={reload} />
-      {global && <MemoryList b={b} title="Global, in Engram" help={`Facts about you that ${b.name} filed for the whole crew, under ${SCOPE_LABEL[b.engram_scope]}. Its new ones wait for your review in Engram; ones you add here save directly.`} items={global} scope="global" reload={reload} />}
-      {error && <p className="small badc">{`Couldn't read Engram: ${error}`}</p>}
+      {global && <MemoryList b={b} title="Shared with the whole crew" help={`Facts about you that ${b.name} saved for everyone, kept as ${SCOPE_LABEL[b.engram_scope]}. Its new ones wait for your review in the memory app; ones you add here save directly.`} items={global} scope="global" reload={reload} />}
+      {error && <p className="small badc">{`Couldn't read shared memory: ${error}`}</p>}
     </div>
   );
 }
 function MemoryList({ b, title, help, items, scope, reload }: { b: BotCard; title: string; help: string; items: Memory[]; scope: "agent" | "global"; reload: () => void }) {
   const [text, setText] = useState("");
   const add = async () => { if (!text.trim()) return; await api.post(`/api/bots/${b.id}/memory`, { text, scope }); setText(""); reload(); };
-  const who = (m: Memory) => (scope === "global" ? m.source || "Engram" : m.source === "driver" ? "you" : "learned in a thread");
+  // Shared memories carry the memory app's source ("pitcrew:Finance Strategist"); show who added it.
+  const who = (m: Memory) => (scope === "global" ? (m.source ? `added by ${m.source.replace(/^pitcrew:/, "")}` : "shared memory") : m.source === "driver" ? "you" : "learned in a thread");
   return (
     <section className="col">
       <p className="pc-lab">{title}</p><p className="small muted">{help}</p>
@@ -67,13 +68,13 @@ function ScheduleRow({ s, reload }: { s: Schedule; reload: () => void }) {
       <td><input value={edit.spec} onChange={(e) => setEdit({ ...edit, spec: e.target.value })} aria-label="When" /></td>
       <td colSpan={2}><textarea rows={3} value={edit.prompt} onChange={(e) => setEdit({ ...edit, prompt: e.target.value })} aria-label="What to do" style={{ width: "100%" }} /></td>
       <td className="num"><div className="row" style={{ justifyContent: "flex-end" }}>
-        <button className="small sig" onClick={() => patch(edit)}>Save</button><button className="small faint" onClick={() => setEdit(null)}>Cancel</button></div></td>
+        <button className="small" onClick={() => patch(edit)}>Save</button><button className="small faint" onClick={() => setEdit(null)}>Cancel</button></div></td>
     </tr>
   );
   return (
     <tr>
       <td className="pc-m">{s.spec}</td><td>{s.prompt}</td>
-      <td className="small faint">{s.enabled ? (s.next_run ? `next ${when(s.next_run)}` : "") : "paused"}
+      <td className="small faint">{s.enabled ? (s.next_run ? `Next ${when(s.next_run)}` : "") : "Paused"}
         {s.last && <><br /><a className={s.last.status === "failed" ? "badc" : "faint"} href={s.last.threadId ? `#/t/${s.last.threadId}` : undefined} title={s.last.summary}>{`last ${when(s.last.at)} · ${s.last.status}${s.last.summary ? ` · ${s.last.summary.slice(0, 60)}` : ""}`}</a></>}</td>
       <td className="num"><div className="row" style={{ justifyContent: "flex-end" }}>
         <button className="small faint" onClick={() => setEdit({ spec: s.spec, prompt: s.prompt })}>Edit</button>

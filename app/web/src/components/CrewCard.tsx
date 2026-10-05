@@ -11,7 +11,7 @@ export function CrewCard({ b }: { b: BotCard }) {
     <div className="pc-card crewcard" onClick={() => go(`#/crew/${b.id}`)}>
       <div className="who"><Face b={b} size="md" /><div className="col" style={{ gap: 3, minWidth: 0 }}><b>{b.name}</b><span className="pc-m small faint">{`${b.provider} · ${b.model}`}</span></div></div>
       <p className={`now ${busy ? "flex" : ""}`}>
-        {b.mood === "working" ? <><Loader />{running?.title || "On track"}</>
+        {b.mood === "working" ? <><Loader />{running?.title || "Working"}</>
           : b.mood === "needs" ? <span className="sig">Waiting on a pit stop</span>
           : b.mood === "failed" ? <span className="badc">Last run failed</span> : b.job || ""}
       </p>

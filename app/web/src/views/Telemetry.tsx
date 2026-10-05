@@ -3,12 +3,15 @@ import type { ReactNode } from "react";
 import type { OpenRouterUsage, PlanLimits, PlanWindow, Telemetry as T } from "../../../shared/types";
 import { Meter, Track } from "../components/ui";
 import { api } from "../lib/api";
-import { ago, tokens, until, usd, when } from "../lib/format";
+import { ago, cap, tokens, until, usd, when } from "../lib/format";
 import { useLiveReload } from "../lib/live";
 import { go } from "../lib/router";
 import { useFetch } from "../lib/useFetch";
 
-const usedTone = (pct: number) => (pct >= 90 ? "bad" : pct >= 70 ? "hot" : "");
+// What started a run (the turns' trigger values), in plain words.
+const TRIGGER: Record<string, string> = { driver: "You", schedule: "Schedule", email: "Email", delegation: "Another member", plan: "Plan step", resume: "Picked up again",
+  retro: "Review", check: "Done-check retry", surface: "Dashboard", teach: "Teach by doing" };
+const usedTone =(pct: number) => (pct >= 90 ? "bad" : pct >= 70 ? "hot" : "");
 
 export function Telemetry() {
   const { data: t, error, reload } = useFetch(() => api.get<T>("/api/telemetry"), []);
@@ -51,8 +54,8 @@ export function Telemetry() {
           <thead><tr><th>Started</th><th>Crew</th><th>Thread</th><th>Trigger</th><th>Outcome</th><th className="num">Tokens in/out</th><th className="num">Cost</th></tr></thead>
           <tbody>{t.runs.map((r) => (
             <tr key={r.id} style={{ cursor: "pointer" }} onClick={() => go(`#/t/${r.thread_id}`)}>
-              <td className="small faint">{when(r.started_at)}</td><td>{r.bot_name}</td><td>{r.thread_title}</td><td className="small">{r.trigger}</td>
-              <td><span className={`pc-chip ${r.status === "completed" ? "ok" : r.status === "failed" ? "bad" : ""}`}>{r.status}</span>{r.error && <p className="small badc">{r.error.slice(0, 120)}</p>}</td>
+              <td className="small faint">{when(r.started_at)}</td><td>{r.bot_name}</td><td>{r.thread_title}</td><td className="small">{TRIGGER[r.trigger] || cap(r.trigger)}</td>
+              <td><span className={`pc-chip ${r.status === "completed" ? "ok" : r.status === "failed" ? "bad" : ""}`}>{cap(r.status)}</span>{r.error && <p className="small badc">{r.error.slice(0, 120)}</p>}</td>
               <td className="num pc-m small">{`${tokens(r.input_tokens)} / ${tokens(r.output_tokens)}`}</td>
               <td className="num pc-m" title={r.cost_basis === "billed" ? "Billed by the provider" : r.cost_basis === "list" ? "Estimate from list price" : ""}>
                 {r.cost_basis === "plan" ? "plan" : r.cost_basis === "unknown" ? "?" : `${usd(r.cost_usd)}${r.cost_basis === "list" ? " est." : ""}`}</td>
