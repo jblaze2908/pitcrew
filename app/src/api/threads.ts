@@ -8,7 +8,7 @@ import { routeMessage, SURE, namedMembers, type Candidate } from "../router.js";
 import { getBot, listBots } from "../crew.js";
 import { signedIn, type Env } from "../http/guard.js";
 import { readBody, jsonBody, raw, text, trimmed, flag, truthy, given, field, pick } from "../http/body.js";
-import { AUTONOMY, type Autonomy } from "../runtime/autonomy.js";
+import { AUTONOMY, newThreadAutonomy, type Autonomy } from "../runtime/autonomy.js";
 import { addEvent } from "../runtime/threads.js";
 import { threadView } from "./views.js";
 import { resolveSurface } from "../ledger.js";
@@ -38,7 +38,7 @@ const RewindBody = z.object({ mode: pick(REWIND_MODES, "both") });
 // Front door: one message, routed to the member whose job covers it. Unsure → the driver picks from the top candidates.
 function openRouted(botId: string, text: string, origin: Origin) {
   const id = uid("th");
-  run("INSERT INTO threads(id,bot_id,title,origin,created_at,updated_at) VALUES(?,?,?,?,?,?)", id, botId, "New thread", JSON.stringify(origin), now(), now());
+  run("INSERT INTO threads(id,bot_id,title,origin,autonomy,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", id, botId, "New thread", JSON.stringify(origin), newThreadAutonomy(), now(), now());
   return R.sendMessage(id, { text }).then(() => ({ threadId: id, botId }));
 }
 
@@ -67,7 +67,7 @@ export const threadRoutes = new Hono<Env>()
   .get("/api/threads", signedIn, (c) => c.json(listAll(c.req.query("q") || "", c.req.query("bot") || null, c.req.query("archived") === "1")))
   .post("/api/threads", signedIn, async (c) => {
     const b = await jsonBody(c, NewThread); if (!getBot(b.botId as string)) throw httpErr(404, "No such crew member");
-    const id = uid("th"); run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES(?,?,?,?,?)", id, b.botId as string, b.title, now(), now());
+    const id = uid("th"); run("INSERT INTO threads(id,bot_id,title,autonomy,created_at,updated_at) VALUES(?,?,?,?,?,?)", id, b.botId as string, b.title, newThreadAutonomy(), now(), now());
     return c.json({ id });
   })
   .post("/api/ask", signedIn, async (c) => {
@@ -158,8 +158,8 @@ export const threadRoutes = new Hono<Env>()
     const id = c.req.param("id"), t = R.getThread(id); if (!t) throw httpErr(404, "No such thread");
     const last = one<{ data: string }>("SELECT data FROM events WHERE thread_id=? AND kind='agent' ORDER BY id DESC LIMIT 1", id);
     const nid = uid("th");
-    run("INSERT INTO threads(id,bot_id,title,carry,created_at,updated_at) VALUES(?,?,?,?,?,?)", nid, t.bot_id, `${t.title} (cont.)`.slice(0, 120),
-      `Context carried from the thread "${t.title}". Its last reply was:\n${(json(last?.data, {}).text || "(none)").slice(0, 6000)}`, now(), now());
+    run("INSERT INTO threads(id,bot_id,title,carry,autonomy,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", nid, t.bot_id, `${t.title} (cont.)`.slice(0, 120),
+      `Context carried from the thread "${t.title}". Its last reply was:\n${(json(last?.data, {}).text || "(none)").slice(0, 6000)}`, newThreadAutonomy(), now(), now());
     return c.json({ id: nid });
   })
   .post("/api/threads/:id/upload", signedIn, async (c) => {
