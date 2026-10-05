@@ -67,6 +67,8 @@ export interface VaultEntry {
 
 export interface State {
   driverName: string; paused: boolean; defaultProvider: ProviderId; plainVoice: boolean; plans: boolean;
+  /** The mode threads the driver starts open in (server: runtime/autonomy.ts). */
+  newThreadMode: "ask" | "handsfree" | "yolo";
   bots: BotCard[]; pitstops: PitStop[]; providers: Record<ProviderId, ProviderStatus>;
   today: { usd: number; runs: number }; week: { usd: number; runs: number }; weekCap: number; computersUp: number;
   engram: { linked: boolean; url: string };
