@@ -185,26 +185,113 @@ function gatedCalls(events: ThreadEvent[], pits: Record<string, PitStop>) {
   return { byCall, merged };
 }
 
+// Every system event in a thread is one quiet line: a small icon and a grey sentence aligned with the reply text.
+const NOTE_ICON = {
+  restart: '<path d="M13 8a5 5 0 1 1-1.5-3.5M13 2.5v2.5h-2.5"/>',
+  shield: '<path d="M8 2l5 2v4c0 3-2.2 5-5 6-2.8-1-5-3-5-6V4z"/>',
+  mark: '<path d="M4.5 2.5h7v11L8 11l-3.5 2.5z"/>',
+  tools: '<path d="M2.5 5h11M2.5 11h11"/><circle cx="6" cy="5" r="1.7" fill="var(--ground)"/><circle cx="10" cy="11" r="1.7" fill="var(--ground)"/>',
+  retro: '<path d="M3 4h7M3 8h10M3 12h5"/>',
+  clock: '<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2l2.2 1.4"/>',
+  quiet: '<path d="M12.5 10A5 5 0 0 1 6 3.5a5 5 0 1 0 6.5 6.5z"/>',
+  check: '<path d="M3.5 8.5l3 3 6-7"/>',
+  alert: '<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.5M8 11h.01"/>',
+  info: '<circle cx="8" cy="8" r="5.5"/><path d="M8 7.5v3.5M8 5h.01"/>',
+  mail: '<rect x="2.5" y="3.5" width="11" height="9" rx="1.5"/><path d="M3 4.5l5 4 5-4"/>',
+  compact: '<path d="M5 3l3 3 3-3M5 13l3-3 3 3"/>',
+  rewind: '<path d="M6.5 4.5L3 8l3.5 3.5M3 8h10"/>',
+} as const;
+type NoteIcon = keyof typeof NOTE_ICON;
+export function Note({ icon, bad, title, children }: { icon: NoteIcon; bad?: boolean; title?: string; children: ReactNode }) {
+  return <p className={`tnote${bad ? " bad" : ""}`} title={title}>
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: NOTE_ICON[icon] }} />
+    <span>{children}</span></p>;
+}
+/** Stored notes come with and without a full stop; each sentence ends once, with a space before any inline action. */
+const said = (s: string) => `${/[.!?…:)”"]$/.test(s.trim()) ? s.trim() : `${s.trim()}.`} `;
+
 type Learned = { memory_id: string; text: string; state: "saved" | "held" | "known" | "replaced" | "undone" };
-const LEARNED_STATE: Record<Learned["state"], string> = { saved: "saved", held: "waiting for you", known: "already known", replaced: "replaced an older one", undone: "undone" };
-/** What this run remembered; read per card from the turn, so an undo shows after a reload too. */
-function LearnedCard({ d }: { d: Record<string, any> }) {
+const LEARNED_SAID: Record<Learned["state"], string> = { saved: "Remembered", held: "Waiting for your review before it's shared", known: "Already knew", replaced: "Remembered, replacing an older note", undone: "Undone" };
+/** What this run remembered, one note per memory with Undo inline; read from the turn, so an undo shows after a reload. */
+function LearnedNotes({ d }: { d: Record<string, any> }) {
   const f = useFetch(() => api.get<{ items: Learned[] }>(`/api/turns/${d.turnId}/learned`, { quiet: true }), [d.turnId]);
   const [items, setItems] = useState<Learned[] | null>(null);
   const list = items ?? f.data?.items ?? null;
   if (!list?.length) return null;
   const undo = async (m: Learned) => setItems((await api.post<{ items: Learned[] }>(`/api/turns/${d.turnId}/learned/${encodeURIComponent(m.memory_id)}/undo`)).items);
-  return (
-    <div className="changes learned">
-      <b className="small">{`Learned this run · ${list.length}`}</b>
-      {list.map((m) => (
-        <div key={m.memory_id} className="cf">
-          <span className={`pc-chip ${m.state === "saved" ? "ok" : m.state === "held" ? "blue" : ""}`}>{LEARNED_STATE[m.state]}</span>
-          <span className={`small${m.state === "undone" ? " faint" : ""}`} style={m.state === "undone" ? { textDecoration: "line-through" } : undefined}>{m.text}</span>
-          {m.state === "saved" && <BusyButton className="small faint" busyLabel="Undoing…" onClick={() => undo(m)}>Undo</BusyButton>}
-        </div>))}
-    </div>
-  );
+  return <>{list.map((m) => (
+    <Note key={m.memory_id} icon="mark">{said(`${LEARNED_SAID[m.state]}: ${m.text}`)}
+      {m.state === "saved" && <BusyButton className="lnk" busyLabel="Undoing…" onClick={() => undo(m)}>Undo</BusyButton>}</Note>))}</>;
+}
+
+const MODE_SAID: Record<string, string> = {
+  ask: "You switched this thread to Ask first: it asks before sending, paying, signing in, installing, sharing or deleting.",
+  handsfree: "You switched this thread to Hands-free: it stops only for paying, signing in, sending, sharing and deleting.",
+  yolo: "You switched this thread to YOLO: no pit stops, paying and sending included. Hard blocks and house rules still apply.",
+};
+// Mode notes are stored with the server's long sentence (api/threads.ts AUTONOMY_NOTE); the label before the colon names the mode.
+const modeOf = (t: string) => /^Ask first:/.test(t) ? "ask" : /^Hands-free:/.test(t) ? "handsfree" : /^YOLO:/.test(t) ? "yolo" : null;
+const isRestart = (e: ThreadEvent) => e.kind === "system" && /^Pitcrew restarted/.test(e.data.text || "");
+const CONTINUE = "Say continue to pick it up.";
+const isRemembered = (t: string) => /^(Remembered|Sent to Engram for [^:]*review): /.test(t);
+
+/** Notes that fold into a neighbour: a restart into the resume or "continue" right after it, and "Remembered" into the
+ * run's memory notes (LearnedNotes). Also the newest mode note, the only one offering a way back. One pass per events change. */
+export function noteFolds(events: ThreadEvent[]) {
+  const hide = new Set<number>(), learned = new Set<string>();
+  let modeNote: number | null = null;
+  for (const e of events) {
+    if (e.kind === "learned" && e.turn_id) learned.add(e.turn_id);
+    if (e.kind === "system" && modeOf(e.data.text || "")) modeNote = e.id;
+  }
+  events.forEach((e, i) => {
+    if (isRestart(e)) {
+      const next = events.slice(i + 1, i + 5).find((x) => x.kind === "user" || x.kind === "system");
+      if (next && ((next.kind === "user" && next.data.via === "resume") || next.data.text === CONTINUE)) hide.add(e.id);
+    }
+    if (e.kind === "system" && e.turn_id && learned.has(e.turn_id) && isRemembered(e.data.text || "")) hide.add(e.id);
+  });
+  return { hide, modeNote };
+}
+
+/** A retro's note: "Looking back at the run · <why> · <what changed>" (runtime/turns.ts) as a sentence, the change behind Details. */
+function RetroNote({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const parts = text.split(" · "), why = parts.length > 2 ? parts[1] : null, outcome = parts.slice(why ? 2 : 1).join(" · ");
+  return <>
+    <Note icon="retro">{said(`How this run went: ${why || outcome || "looked back at it"}`)}
+      {why && outcome && <button className="lnk" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Hide" : "Details"}</button>}</Note>
+    {open && <p className="tnote sub"><span>{said(`Looking back on it: ${outcome}`)}</span></p>}
+  </>;
+}
+
+function SystemNote({ e, c }: { e: ThreadEvent; c: EventCtx }) {
+  const d = e.data, t = String(d.text || "");
+  // A restart cut the run (runtime/lifecycle.ts): nothing broke on the member's side, so no red.
+  if (isRestart(e)) return <Note icon="restart">Pitcrew restarted during this run, so it stopped partway.</Note>;
+  if (t === CONTINUE) return <Note icon="restart">{"Pitcrew restarted, so the last run stopped partway. "}{c.onContinue && <button className="lnk" onClick={c.onContinue}>Pick up where it left off</button>}</Note>;
+  // A mode change isn't a failure: older YOLO notes were stored with the bad tone.
+  const mode = modeOf(t);
+  if (mode) return <Note icon="shield">{`${MODE_SAID[mode]} `}{mode !== "ask" && e.id === c.modeNote && c.autonomy === mode && c.onAutonomy && <button className="lnk" onClick={() => c.onAutonomy!("ask")}>Back to Ask first</button>}</Note>;
+  if (d.retro) return <RetroNote text={t} />;
+  const icon: NoteIcon = /tools changed|^Tools and skills reload/.test(t) ? "tools" : /^(Remembered|Noted for this thread|Learned|Sent to Engram)/.test(t) ? "mark"
+    : /compact/i.test(t) ? "compact" : /^Rewound/.test(t) ? "rewind" : /^(Usage limit|Scheduled|Changed schedule|Cancelled schedule)/.test(t) ? "clock"
+    : /untrusted content/.test(t) ? "shield" : /^Published/.test(t) ? "check" : d.tone === "bad" ? "alert" : "info";
+  return <Note icon={icon} bad={d.tone === "bad"}>{said(plainWords(t).replace(/^Sent to Engram for [^:]*review: /, "Waiting for your review before it's shared: "))}</Note>;
+}
+
+/** A user event that isn't the driver typing (a schedule, a resume, a retro) as a note; null for a real message. */
+function userNote(d: Record<string, any>): ReactNode {
+  switch (d.via) {
+    case "check": return <Note icon="alert" bad>{said(d.display || "Done-check")}</Note>;
+    case "retro": return <Note icon="retro">{said(String(d.display || "Looked back at the run").replace(/^Retro\b/, "Looked back at the run").replace(/ · /g, ": "))}</Note>;
+    case "teach": return <Note icon="mark">{said(String(d.display || "Save as skill").replace(/ · /g, ", "))}</Note>;
+    case "resume": return <Note icon="restart">{/^Pitcrew restarted/.test(d.text || "") ? "Pitcrew restarted and picked up where it left off." : "The usage limit reset, so it picked up where it left off."}</Note>;
+    case "email": return <Note icon="mail">{said(d.display || "An email arrived")}</Note>;
+    // A scheduled run's prompt is the same every time: a note, not a message bubble.
+    case "schedule": return <Note icon="clock">{/^\[Event\]/.test(d.text || "") ? said(d.display || "An event arrived") : said(`Scheduled run, ${String(d.text || "").replace(/^\[Scheduled: ([^\]]+)\][\s\S]*/, "$1")}`)}</Note>;
+  }
+  return null;
 }
 
 export interface EventCtx { cont?: boolean; b: Bot; fromName: string; pits: Record<string, PitStop>; latest: Map<string, Record<string, any>>; surface: (id: string) => ReactNode;
@@ -214,46 +301,39 @@ export interface EventCtx { cont?: boolean; b: Bot; fromName: string; pits: Reco
   onContinue?: () => void;
   images?: ImageIndex; onView?: (im: Img) => void; onCompare?: (im: Img) => void; onEdit?: (im: Img) => void; onMore?: (im: Img) => void; onKeep?: (id: string) => Promise<unknown>;
   /** The last reply of each finished, not yet rewound run: those get Copy and Rewind (Rewind.tsx). */
-  rewind?: { ids: Set<number>; onRewound: () => void } }
+  rewind?: { ids: Set<number>; onRewound: () => void };
+  /** Folded notes and the newest mode note (noteFolds), plus the thread's mode so that note can offer the way back. */
+  hide?: Set<number>; modeNote?: number | null; autonomy?: string; onAutonomy?: (a: string) => void }
 
-/** A done-check result (runtime/donecheck.ts): "Checked" with its proof, a retry line, or why it wasn't checked. */
+/** A done-check result (runtime/donecheck.ts) as a note: checked with its proof one click away, a retry, or why not. */
 function CheckLine({ d }: { d: Record<string, any> }) {
-  if (d.status === "retrying") return <p className="sys bad">{`Done-check couldn't confirm ${d.headline} · trying again (${d.attempt} of ${d.of})`}</p>;
-  if (d.status !== "passed") return <p className="sys faint">{`Not checked · ${d.why || "no grader"}`}</p>;
+  if (d.status === "retrying") return <Note icon="alert" bad>{`The done-check couldn't confirm ${d.headline}, so it's trying again (${d.attempt} of ${d.of}).`}</Note>;
+  if (d.status !== "passed") return <Note icon="check">{said(`Not checked: ${d.why || "no grader"}`)}</Note>;
   const src = d.proof?.file ? `/shots/${d.proof.botId}/${d.proof.file}` : null;
-  return (
-    <div className="ck">
-      {src && <a className="th" href={src} target="_blank" rel="noopener"><img src={src} alt="Proof" loading="lazy" /></a>}
-      <div className="tx"><b>Checked</b>{d.evidence ? <>{" · "}<Inline text={d.evidence} /></> : ""}
-        <small>{`Graded by a second model against ${d.n} criteri${d.n === 1 ? "on" : "a"}${d.attempt ? ` after ${d.attempt} ${d.attempt === 1 ? "retry" : "retries"}` : ""}${src ? " · proof kept" : ""}`}</small></div>
-    </div>
-  );
+  const how = `Graded by a second model against ${d.n} criteri${d.n === 1 ? "on" : "a"}${d.attempt ? ` after ${d.attempt} ${d.attempt === 1 ? "retry" : "retries"}` : ""}`;
+  return <Note icon="check" title={how}>{d.evidence ? <>{"Checked: "}<Inline text={said(d.evidence)} /></> : "Checked. "}{src && <a className="lnk" href={src} target="_blank" rel="noopener">Proof</a>}</Note>;
 }
 
 /** The element for one event, or null when it draws nothing (an unknown pit stop or surface). */
 export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
   const d = e.data;
+  if (c.hide?.has(e.id)) return null;
   switch (e.kind) {
-    // A scheduled run's prompt is the same every time: one line, not a message bubble.
-    case "user": return d.via === "check" ? <p className="sys bad">{d.display || "Done-check"}</p> : d.via === "retro" ? <p className="sys">{String(d.display || "Retro").replace(/^Retro\b/, "Looked back at the run")}</p> : d.via === "teach" ? <p className="sys">{d.display || "Save as skill"}</p> : d.via === "resume" ? <p className="sys">{/^Pitcrew restarted/.test(d.text || "") ? "Picked up again after the restart" : "Picked up again after the usage limit reset"}</p> : d.via === "email" ? <p className="sys">{d.display || "Email"}</p> : d.via === "schedule" ? <p className="sys">{/^\[Event\]/.test(d.text || "") ? d.display || "Event" : `Scheduled run · ${String(d.text || "").replace(/^\[Scheduled: ([^\]]+)\][\s\S]*/, "$1")}`}</p> : <UserMsg e={e} botId={c.b.id} fromName={c.fromName} images={c.images} onView={c.onView} />;
+    case "user": return userNote(d) ?? <UserMsg e={e} botId={c.b.id} fromName={c.fromName} images={c.images} onView={c.onView} />;
     // A follow-on message from the same member (only steps between) drops the face; the column stays for alignment.
-    // A scheduled run with nothing notable (runtime/turns.ts isQuiet): one faint line.
-    case "agent": if (/^\s*QUIET\b/.test(d.text || "")) return <p className="sys faint">{`Nothing new · ${String(d.text).replace(/^\s*QUIET:?\s*/, "")}`}</p>;
+    // A scheduled run with nothing notable (runtime/turns.ts isQuiet): one note.
+    case "agent": if (/^\s*QUIET\b/.test(d.text || "")) { const why = String(d.text).replace(/^\s*QUIET:?\s*/, "").trim(); return <Note icon="quiet">{why ? said(`Nothing new: ${why}`) : "Nothing new."}</Note>; }
       return <div className={`msg bot${c.cont ? " cont" : ""}`}>{c.cont ? <span /> : <Face b={c.b} size="sm" mood="idle" />}
         {c.rewind?.ids.has(e.id) && e.turn_id ? <div className="reply"><Md text={d.text} /><ReplyActions text={d.text} turnId={e.turn_id} name={c.b.name} onRewound={c.rewind.onRewound} /></div> : <Md text={d.text} />}</div>;
     case "check": return <CheckLine d={d} />;
     case "shot": return <Shot e={e} b={c.b} />;
     case "image": return <Images e={e} b={c.b} c={c} />;
     case "tool": return <Tool e={e} />;
-    // A restart cut the run (runtime/lifecycle.ts): a divider, since nothing broke on the member's side.
-    case "system": return /^Pitcrew restarted/.test(d.text || "") ? <p className="sys rule"><span>{d.text}</span></p>
-      : d.text === "Say continue to pick it up." ? (c.onContinue ? <p className="sys rule"><button className="pc-pill o s" onClick={c.onContinue}>Pick up where it left off</button></p> : null)
-      // A mode change isn't a failure: older YOLO notes were stored with the bad tone.
-      : <p className={`sys ${d.tone === "bad" && !/^YOLO:/.test(d.text || "") ? "bad" : ""}`}>{plainWords(d.text)}</p>;
-    case "error": return <p className="err">{d.text}</p>;
+    case "system": return <SystemNote e={e} c={c} />;
+    case "error": return <Note icon="alert" bad>{said(String(d.text || "Something went wrong"))}</Note>;
     // Older runs recorded a changed-files card; threads no longer draw it (Crew → Files keeps the history).
     case "changes": return null;
-    case "learned": return <LearnedCard d={d} />;
+    case "learned": return <LearnedNotes d={d} />;
     case "delegation": return <DelegationCard d={(c.latest.get(d.id) || d) as Deleg} />;
     case "plan": { const P = (c.latest.get(d.id) || d) as PlanSnapshot; return c.onPlan ? <PlanChip P={P} onOpen={c.onPlan} /> : <PlanCard P={P} />; }
     case "pitstop": { const p = c.pits[d.id]; return p ? <div style={{ marginLeft: 40, maxWidth: 760 }}><PitCard p={p} /></div> : null; }

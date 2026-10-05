@@ -60,7 +60,8 @@ function ModePicker({ threadId, value, onChange }: { threadId: string; value: st
   };
   return (
     <span className="modepick">
-      <button className={`chipb mode-${cur[0]}`} title="Pit stops for this thread" aria-expanded={open} onClick={() => setOpen(!open)}><i className="d7" />{cur[1]}<Icon name="chev" size={13} /></button>
+      <button className="chipb mode" title="Pit stops for this thread" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" aria-hidden="true"><path d="M8 2l5 2v4c0 3-2.2 5-5 6-2.8-1-5-3-5-6V4z" /></svg>{cur[1]}<Icon name="chev" size={13} /></button>
       {open && <>
         <div className="scrim" onClick={() => setOpen(false)} />
         <div className="menu modes" role="menu">
@@ -74,16 +75,19 @@ function ModePicker({ threadId, value, onChange }: { threadId: string; value: st
     </span>);
 }
 
-/** Context used, as a ring; click compacts the thread (same as /compact). */
+// Below this share of the window the meter stays hidden. Pitcrew has no summarise trigger of its own (Codex compacts by
+// itself, runtime/notify.ts), so this only warns; a click summarises now, same as /compact.
+const CTX_WARN = 0.8;
+/** How full the context is, shown only from CTX_WARN on: a ring and one plain sentence, no token counts. */
 function ContextRing({ threadId, ctx, running }: { threadId: string; ctx: { tokens: number | null; window: number | null }; running: boolean }) {
-  if (!ctx.tokens || !ctx.window) return null;
+  if (!ctx.tokens || !ctx.window || ctx.tokens / ctx.window < CTX_WARN) return null;
   const pct = Math.min(100, (ctx.tokens / ctx.window) * 100), c = 2 * Math.PI * 6;
   return (
-    <button className={`ring ${pct > 70 ? "hot" : ""}`} disabled={running} title={`${Math.round(ctx.tokens / 1000)}k of ${Math.round(ctx.window / 1000)}k tokens · click to compact`}
-      onClick={async () => { await api.post(`/api/threads/${threadId}/compact`); toast("Compacting the thread"); }}>
+    <button className="ring" disabled={running} title="Summarise older messages now"
+      onClick={async () => { await api.post(`/api/threads/${threadId}/compact`); toast("Summarising older messages"); }}>
       <svg width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="var(--surface-3)" strokeWidth="2.2" />
         <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeDasharray={`${(pct / 100) * c} ${c}`} transform="rotate(-90 8 8)" strokeLinecap="round" /></svg>
-      {`${Math.round(ctx.tokens / 1000)}k / ${Math.round(ctx.window / 1000)}k`}
+      {`${Math.round(pct)}% full · summarising older messages soon`}
     </button>);
 }
 
