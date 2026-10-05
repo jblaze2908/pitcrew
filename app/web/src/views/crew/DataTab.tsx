@@ -3,7 +3,7 @@ import { useState } from "react";
 import type { BotCard, Surface as SurfaceRow } from "../../../../shared/types";
 import { Surface } from "../../components/Surface";
 import { api } from "../../lib/api";
-import { ago, kb } from "../../lib/format";
+import { ago, kb, plural } from "../../lib/format";
 import { toast } from "../../lib/toast";
 import { useFetch } from "../../lib/useFetch";
 
@@ -28,7 +28,7 @@ export function DataTab({ b }: { b: BotCard }) {
         {data.skills.length ? <div className="pc-card tight"><table className="tbl"><tbody>{data.skills.map((k) => (
           <tr key={k.name}><td className="pc-m">{k.name}</td><td className="small muted">{k.description}</td>
             <td className="num small faint">{k.uses ? `${k.uses} load${k.uses === 1 ? "" : "s"} · last ${ago(k.last_used)}` : "never loaded"}{k.stale ? " · stale" : ""}</td></tr>))}</tbody></table>
-          <p className="small faint">{`In /bot/work/skills, a git repo: history under Files → Projects.`}</p></div>
+          <p className="small faint" style={{ padding: "0 12px 10px" }}>{`In /bot/work/skills, a git repo: history under Files → Projects.`}</p></div>
           : <div className="pc-card tight"><p className="empty">{`No skills yet. ${b.name} writes them in /bot/work/skills as it learns how a task runs.`}</p></div>}
       </section>
       <section className="col">
@@ -62,7 +62,7 @@ function LedgerCard({ b, l }: { b: BotCard; l: Ledger }) {
       </table>
       {open && (rows == null ? <p className="small faint">Loading…</p> : "error" in rows ? <p className="badc small">{rows.error}</p> : (
         <div className="col" style={{ gap: 4 }}>
-          <p className="small faint">{`${open}: newest ${rows.rows.length} rows`}</p>
+          <p className="small faint">{`${open}: newest ${plural(rows.rows.length, "row")}`}</p>
           <div className="scrollx"><table className="tbl"><thead><tr>{rows.columns.map((c) => <th key={c}>{c}</th>)}</tr></thead>
             <tbody>{rows.rows.map((r, i) => <tr key={i}>{rows.columns.map((c) => <td key={c} className="small">{String(r[c] ?? "").slice(0, 120)}</td>)}</tr>)}</tbody></table></div>
         </div>))}
@@ -76,7 +76,7 @@ function BoardRow({ d, onChange }: { d: Board; onChange: () => void }) {
   return (
     <div className="pc-card col">
       <div className="spread">
-        <div className="col" style={{ gap: 2 }}><b>{d.title}</b><span className="small faint">{`${d.source} · ${d.queries.length} queries · made ${ago(d.created_at)}`}</span></div>
+        <div className="col" style={{ gap: 2 }}><b>{d.title}</b><span className="small faint">{`${d.source} · ${plural(d.queries.length, "query")} · made ${ago(d.created_at)}`}</span></div>
         <div className="row" style={{ gap: 8 }}>
           <button className="pc-pill o s" onClick={async () => setS(s ? null : await api.get<SurfaceRow>(`/api/surfaces/${d.id}`))}>{s ? "Hide" : "Show"}</button>
           <button className={`pc-pill s ${d.saved ? "o" : "sig"}`} onClick={toggle}>{d.saved ? "On the Wall" : "Pin to Wall"}</button>
