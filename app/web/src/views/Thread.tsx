@@ -113,6 +113,7 @@ function LiveThread({ d }: { d: ThreadView }) {
     if (e.type === "thread") {
       if (e.data.id !== id) return;
       setRunning(e.data.status === "running" || e.data.status === "needs");
+      if (e.data.status === "idle") setLive([]);
       if (e.data.title) setTitle(e.data.title);
       return;
     }

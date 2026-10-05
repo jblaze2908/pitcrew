@@ -89,7 +89,8 @@ export function onNotify(c: Brain, method: string, p: Record<string, any>) {
       bus.emit("context", { threadId, tokens: tu.last.inputTokens, window: tu.modelContextWindow });
       break;
     }
-    case "turn/completed": scanScripts(threadId, a?.turnId, c.bot.id, p.threadId); if (a) finishTurn(threadId, p.turn.status, p.turn.status === "failed" ? (p.turn.error?.message || "The run failed") : null); break;
+    // A script's nested commands complete through the rollout scan, not item/completed: drop whatever is left running.
+    case "turn/completed": for (const [k, lc] of liveCommands) if (lc.threadId === threadId) liveCommands.delete(k); scanScripts(threadId, a?.turnId, c.bot.id, p.threadId); if (a) finishTurn(threadId, p.turn.status, p.turn.status === "failed" ? (p.turn.error?.message || "The run failed") : null); break;
     case "error": if (!p.willRetry) addEvent(threadId, a?.turnId, "error", { text: short(p.error?.message || "Model error", 500) }); break;
     case "thread/compacted": addEvent(threadId, null, "system", { text: "Thread compacted." }); break;
   }
