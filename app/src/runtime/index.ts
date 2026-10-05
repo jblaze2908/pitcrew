@@ -21,7 +21,7 @@ export { stopPlan } from "./plans.js";
 export { inbox, markSeen, markAllSeen } from "./inbox.js";
 export { activity, describeCall, ALLOWED_BY } from "./activity.js";
 export { sideAsk, sidePrompt, NOT_CONNECTED } from "./side.js";
-export { nextRun, addSchedule, listSchedules, updateSchedule, deleteSchedule } from "./schedules.js";
+export { nextRun, addSchedule, listSchedules, updateSchedule, deleteSchedule, scheduleTitle, backfillScheduleTitles } from "./schedules.js";
 export { takeControl, handBack, leaseHeld } from "./lease.js";
 export { killSwitch, resumeCrew, bootRuntime, settleCutTurns, resumable, resumeCut } from "./lifecycle.js";
 export { pushConfig, setPushConfig, pushTest, markPresent, readActToken, phoneMayApprove, pitForAct } from "./push.js";

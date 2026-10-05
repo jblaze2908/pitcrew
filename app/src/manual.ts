@@ -18,7 +18,7 @@ const PAGES = (driver: string): Record<string, string> => ({
   ].join("\n"),
   dashboards: `render_surface shows ${driver} a visual surface: {title, root}, root a component tree ({type, ...props, children?}); colours are hue tokens only. Forms come back to you as a message with the submitted values; pass id to update a surface of yours in place.\n\nComponents:\n${catalogueDoc()}\n\n${BOUND_DOC}`,
   schedules: [
-    "Schedules: schedule_task(when, prompt) runs a prompt on a cadence (daily 09:00, weekly mon 08:30, every 6 hours); list_schedules shows each one's next and last run; update_schedule / cancel_schedule manage them.",
+    "Schedules: schedule_task(when, prompt, title) runs a prompt on a cadence (daily 09:00, weekly mon 08:30, every 6 hours); title is the short name the driver sees (left out, it comes from the prompt's first line); list_schedules shows each one's next and last run; update_schedule / cancel_schedule manage them.",
     `- A run arrives as "[Scheduled: …]"; ${driver} isn't waiting on it. Stay quiet unless something needs them: an alert rule in the skill fired, something failed (a login expired), they must act, or the digest is due. Otherwise your whole reply is "QUIET: <what you checked>"; the thread folds it to one line.`,
     "- Keep the task's data in a SQLite ledger and show it with a bound dashboard, so a run only adds rows. Alert rules (thresholds over the ledger) live in the task's skill.",
     "- A weekly digest is notable: a short summary with the numbers that changed.",

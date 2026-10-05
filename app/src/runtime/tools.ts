@@ -128,20 +128,20 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
       try {
         // An event trigger opens an address on the internet, so only the driver adds one (Schedules page).
         if (isEventSpec(String(a.when || ""))) return say("Only the driver can add an event trigger. Suggest it in your reply with what it should watch.", false);
-        const s = addSchedule(b.id, threadId, String(a.when || ""), String(a.prompt || ""));
-        addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Scheduled “${s.prompt.slice(0, 80)}” ${s.spec} (next ${ist(s.next_run)} IST)` });
-        return say(`Scheduled ${s.id}: ${s.spec}.`);
+        const s = addSchedule(b.id, threadId, String(a.when || ""), String(a.prompt || ""), a.title != null ? String(a.title) : null);
+        addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Scheduled “${s.title || s.prompt.slice(0, 80)}” ${s.spec} (next ${ist(s.next_run)} IST)` });
+        return say(`Scheduled ${s.id} “${s.title}”: ${s.spec}.`);
       } catch (e: any) { return say(e.message, false); }
     }
     case "list_schedules": {
       const list = listSchedules(b.id);
-      return say(list.length ? list.map((s) => { const l = lastScheduledRun(s); return `${s.id} · ${s.spec}${s.enabled ? ` · next ${ist(s.next_run)} IST` : " · paused"}${l ? ` · last run ${ist(l.at)} IST: ${l.status}${l.summary ? `, "${l.summary}"` : ""}` : " · not run yet"}\n  ${s.prompt}`; }).join("\n") : "No schedules.");
+      return say(list.length ? list.map((s) => { const l = lastScheduledRun(s); return `${s.id} · ${s.title ? `“${s.title}” · ` : ""}${s.spec}${s.enabled ? ` · next ${ist(s.next_run)} IST` : " · paused"}${l ? ` · last run ${ist(l.at)} IST: ${l.status}${l.summary ? `, "${l.summary}"` : ""}` : " · not run yet"}\n  ${s.prompt}`; }).join("\n") : "No schedules.");
     }
     case "update_schedule": {
       try {
-        const s = updateSchedule(String(a.id || ""), b.id, { ...(a.when != null ? { spec: String(a.when) } : {}), ...(a.prompt != null ? { prompt: String(a.prompt) } : {}),
+        const s = updateSchedule(String(a.id || ""), b.id, { ...(a.when != null ? { spec: String(a.when) } : {}), ...(a.prompt != null ? { prompt: String(a.prompt) } : {}), ...(a.title != null ? { title: String(a.title) } : {}),
           ...(typeof a.paused === "boolean" ? { enabled: !a.paused } : {}) }, "crew");
-        addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Changed schedule “${s.prompt.slice(0, 80)}”: ${s.spec}${s.enabled ? ` (next ${ist(s.next_run)} IST)` : ", paused"}` });
+        addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Changed schedule “${s.title || s.prompt.slice(0, 80)}”: ${s.spec}${s.enabled ? ` (next ${ist(s.next_run)} IST)` : ", paused"}` });
         return say(`Updated ${s.id}: ${s.spec}${s.enabled ? "" : ", paused"}.`);
       } catch (e: any) { return say(e.message, false); }
     }

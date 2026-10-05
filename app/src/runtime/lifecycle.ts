@@ -7,7 +7,7 @@ import { active } from "./state.js";
 import { getThread, addEvent, UNTITLED, titleFrom, isSmallTalk } from "./threads.js";
 import { interrupt, sendMessage, startQueues } from "./turns.js";
 import { decide } from "./pitstops.js";
-import { tickSchedules, scheduleRunsCut } from "./schedules.js";
+import { tickSchedules, scheduleRunsCut, backfillScheduleTitles } from "./schedules.js";
 import { backfillTitles } from "./titles.js";
 
 export async function killSwitch() {
@@ -36,6 +36,7 @@ export function bootRuntime() {
     if (first) { const title = titleFrom(first.text, first.attachments || []); if (title !== UNTITLED) run("UPDATE threads SET title=? WHERE id=?", title, t.id); }
   }
   setTimeout(() => backfillTitles().catch(() => {}), 60000).unref();
+  backfillScheduleTitles();
   setInterval(tickSchedules, 30000).unref();
   startShotSweeper();
   return cut;
