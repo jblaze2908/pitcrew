@@ -898,6 +898,10 @@ test("threads are named by the plan model once they have a topic, never over a t
   assert.equal(await Tt.nameFromConversation("th_name", { ask }), "Swiggy order history export");
   assert.equal(asked, "Driver: pull my Swiggy orders since January into a CSV\n\nAgent: Pulled 63 orders into out/swiggy.csv", "small talk and its replies are dropped");
   assert.deepEqual({ ...one("SELECT title, title_auto FROM threads WHERE id='th_name'") }, { title: "Swiggy order history export", title_auto: 2 });
+  say("user", "now plan a Goa trip in December"); say("agent", "Here are three Goa itineraries.");
+  say("user", "book the second one"); say("agent", "Shortlisted flights for the second itinerary.");
+  say("user", "thanks");
+  assert.equal(Tt.openingText("th_name", true), "Driver: pull my Swiggy orders since January into a CSV\n\nAgent: Pulled 63 orders into out/swiggy.csv\n\nDriver: now plan a Goa trip in December\n\nAgent: Here are three Goa itineraries.\n\nDriver: book the second one\n\nAgent: Shortlisted flights for the second itinerary.", "a hand rename reads the latest asks");
   run("UPDATE threads SET title='Mine', title_auto=0 WHERE id='th_name'");
   assert.equal(await Tt.nameFromConversation("th_name", { ask }), null);
   assert.equal(one("SELECT title FROM threads WHERE id='th_name'").title, "Mine", "a hand-set title stays");

@@ -20,8 +20,10 @@ export function cleanTitle(s: unknown) {
   return t && !mixed && !/^none$/i.test(t) && words <= 8 && t.length <= 70 ? t : null;
 }
 
-/** The opening exchanges with greetings dropped: up to 3 driver messages and the first reply to each, 600 chars apiece. */
-export function openingText(threadId: string) {
+/** The opening exchanges with greetings dropped: up to 3 driver messages and the first reply to each, 600 chars apiece.
+ * latest: the last 3 the driver typed instead, for a rename asked by hand after the thread moved on to something else. */
+export function openingText(threadId: string, latest = false) {
+  if (latest) return latestText(threadId);
   const out: string[] = [];
   let asks = 0, skipping = false;
   for (const e of all<{ kind: string; data: string }>("SELECT kind, data FROM events WHERE thread_id=? AND kind IN ('user','agent') ORDER BY id LIMIT 60", threadId)) {
@@ -36,10 +38,24 @@ export function openingText(threadId: string) {
   return out.join("\n\n");
 }
 
-export async function nameFromConversation(threadId: string, { ask }: { ask?: PlanAsk } = {}) {
+function latestText(threadId: string) {
+  const rows = all<{ kind: string; data: string }>("SELECT kind, data FROM events WHERE thread_id=? AND kind IN ('user','agent') ORDER BY id DESC LIMIT 400", threadId).reverse();
+  const pairs: string[][] = [];
+  let open = false; // the newest driver message counted and still waiting for its first reply
+  for (const e of rows) {
+    const d = json<{ text?: string; via?: string }>(e.data, {}), text = String(d.text || "").trim();
+    if (!text) continue;
+    // Only what the driver typed: retro, resume, schedule and delegation prompts are Pitcrew's words.
+    if (e.kind === "user") { open = !d.via && !isSmallTalk(text); if (open) pairs.push([`Driver: ${text.slice(0, 600)}`]); }
+    else if (open) { pairs.at(-1)!.push(`Agent: ${text.slice(0, 600)}`); open = false; }
+  }
+  return pairs.slice(-3).flat().join("\n\n");
+}
+
+export async function nameFromConversation(threadId: string, { ask, latest }: { ask?: PlanAsk; latest?: boolean } = {}) {
   const t = getThread(threadId);
   if (!t || !t.title_auto || t.pinned) return null; // a pinned thread is named after its member
-  const text = openingText(threadId);
+  const text = openingText(threadId, latest);
   if (!text) return null;
   const side = ask ? null : await openPlanSide().catch(() => null);
   const asker = ask ?? side?.ask;

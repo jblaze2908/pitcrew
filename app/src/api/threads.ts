@@ -134,11 +134,12 @@ export const threadRoutes = new Hono<Env>()
   .post("/api/threads/:id/queue/:qid/send-now", signedIn, async (c) => c.json(await R.sendQueuedNow(c.req.param("id"), c.req.param("qid"))))
   .post("/api/threads/:id/interrupt", signedIn, async (c) => c.json({ ok: await R.interrupt(c.req.param("id")) }))
   .post("/api/threads/:id/refresh", signedIn, (c) => { const id = c.req.param("id"); if (!R.getThread(id)) throw httpErr(404, "No such thread"); return c.json(R.refresh(id)); })
-  // Hands the title back to the conversation: named now by titles.ts, and kept automatic until renamed by hand again.
+  // Hands the title back to the conversation: named now by titles.ts from the latest asks (the thread may have moved on),
+  // and kept automatic until renamed by hand again.
   .post("/api/threads/:id/retitle", signedIn, async (c) => {
     const id = c.req.param("id"); if (!R.getThread(id)) throw httpErr(404, "No such thread");
     run("UPDATE threads SET title_auto=1 WHERE id=?", id);
-    return c.json({ title: (await nameFromConversation(id)) ?? R.getThread(id)!.title });
+    return c.json({ title: (await nameFromConversation(id, { latest: true })) ?? R.getThread(id)!.title });
   })
   .post("/api/threads/:id/compact", signedIn, async (c) => { await R.compact(c.req.param("id")); return c.json({ ok: true }); })
   .post("/api/threads/:id/fresh", signedIn, (c) => {

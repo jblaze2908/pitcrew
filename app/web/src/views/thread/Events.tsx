@@ -1,5 +1,5 @@
 // One transcript event as an element. Tool calls are grouped by the caller (see groupEvents).
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Img, ImageIndex } from "../../lib/images";
 import { editOf, type EditAsk } from "../../../../shared/edits";
 import type { Bot, DelegationCard as Deleg, PitStop, PlanSnapshot, ThreadEvent } from "../../../../shared/types";
@@ -8,7 +8,7 @@ import { OUTCOME, PitCard } from "../../components/PitCard";
 import { PlanCard, PlanChip } from "../../components/PlanCard";
 import { BusyButton, Face, Md } from "../../components/ui";
 import { tidyTitle } from "../../lib/format";
-import { stepView } from "../../lib/steps";
+import { pitLabel, stepView } from "../../lib/steps";
 import { StepIcon } from "../../components/StepIcon";
 import { api } from "../../lib/api";
 import { useFetch } from "../../lib/useFetch";
@@ -158,11 +158,27 @@ function Debug({ d }: { d: Record<string, any> }) {
   );
 }
 
-export function Tool({ e, results }: { e: ThreadEvent; results?: Map<string, Record<string, any>> }) {
+/** pit: the decided pit stop that gated this call, shown as its outcome tag and jev's reason instead of a row of its own. */
+export function Tool({ e, results, pit }: { e: ThreadEvent; results?: Map<string, Record<string, any>>; pit?: PitStop }) {
   if (e.data.type === "script") return <Script e={e} result={results?.get(e.data.callId)} />;
   const st = stepOk(e) ? "ok" : e.data.status === "inProgress" ? "" : "bad";
-  const v = stepView(tidyTitle(e.data.title), e.data.conn);
-  return <details className={`tool${e.data.viaScript ? " nested" : ""}`}><summary><span className={`st ${st}`} /><StepIcon name={v.icon} /><span className="lbl">{v.label}</span>{v.detail && <span className="det">{v.detail}</span>}</summary><Debug d={e.data} /></details>;
+  const v = stepView(tidyTitle(e.data.title), e.data.conn), j = pit?.jev || {};
+  return <details className={`tool${e.data.viaScript ? " nested" : ""}`}><summary><span className={`st ${st}`} /><StepIcon name={v.icon} /><span className="lbl">{v.label}</span>{v.detail && <span className="det">{v.detail}</span>}{pit && <span className={`tag ${pit.status}`}>{OUTCOME[pit.status]}</span>}</summary>
+    {j.reason && <p className="why">{`jev · ${j.by || ""} · ${j.reason}`}</p>}<Debug d={e.data} /></details>;
+}
+
+/** Each decided pit stop's gated call: the next tool call within 4 steps with the same label (an approved call runs
+ * right after its pit stop). A pit stop with no such call (denied, expired) keeps its own row. */
+function gatedCalls(events: ThreadEvent[], pits: Record<string, PitStop>) {
+  const byCall = new Map<number, PitStop>(), merged = new Set<number>();
+  events.forEach((e, i) => {
+    const p = e.kind === "pitstop" ? pits[e.data.id] : undefined;
+    if (!p || p.status !== "approved") return;
+    const label = pitLabel(p).label;
+    const hit = events.slice(i + 1, i + 5).find((x) => x.kind === "tool" && !byCall.has(x.id) && stepView(tidyTitle(x.data.title), x.data.conn).label === label);
+    if (hit) { byCall.set(hit.id, p); merged.add(e.id); }
+  });
+  return { byCall, merged };
 }
 
 type Learned = { memory_id: string; text: string; state: "saved" | "held" | "known" | "replaced" | "undone" };
@@ -238,6 +254,7 @@ export function Steps({ events, pits, initialOpen, closeSignal, results }: { eve
   const bad = tools.filter((e) => !stepOk(e) && e.data.status !== "inProgress").length;
   const n = (st: PitStop["status"]) => decided.filter((p) => p.status === st).length;
   const counts = (["approved", "denied", "expired"] as const).filter((st) => n(st) > 0);
+  const gated = useMemo(() => gatedCalls(events, pits), [events, pits]);
   return (
     <details className="steps" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary>
@@ -247,8 +264,8 @@ export function Steps({ events, pits, initialOpen, closeSignal, results }: { eve
         {counts.map((st) => <span key={st} className={`cnt ${st}`}>{`${n(st)} ${OUTCOME[st]}`}</span>)}
       </summary>
       <div className="steps-body">{events.map((e) => e.kind === "pitstop"
-        ? pits[e.data.id] && <PitCard key={e.id} p={pits[e.data.id]} row />
-        : <Tool key={e.id} e={e} results={results} />)}</div>
+        ? pits[e.data.id] && !gated.merged.has(e.id) && <PitCard key={e.id} p={pits[e.data.id]} row />
+        : <Tool key={e.id} e={e} results={results} pit={gated.byCall.get(e.id)} />)}</div>
     </details>
   );
 }
