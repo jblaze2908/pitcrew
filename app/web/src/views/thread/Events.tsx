@@ -5,7 +5,7 @@ import { editOf, type EditAsk } from "../../../../shared/edits";
 import type { Bot, DelegationCard as Deleg, PitStop, PlanSnapshot, ThreadEvent } from "../../../../shared/types";
 import { DelegationCard } from "../../components/DelegationCard";
 import { PitCard } from "../../components/PitCard";
-import { PlanCard } from "../../components/PlanCard";
+import { PlanCard, PlanChip } from "../../components/PlanCard";
 import { BusyButton, Face, Md } from "../../components/ui";
 import { tidyTitle } from "../../lib/format";
 import { stepView } from "../../lib/steps";
@@ -188,6 +188,8 @@ function LearnedCard({ d }: { d: Record<string, any> }) {
 }
 
 export interface EventCtx { cont?: boolean; b: Bot; fromName: string; pits: Record<string, PitStop>; latest: Map<string, Record<string, any>>; surface: (id: string) => ReactNode;
+  /** Opens the work panel's Plan tab; when set, plans show as a chip in the chat instead of the full card. */
+  onPlan?: () => void;
   images?: ImageIndex; onView?: (im: Img) => void; onCompare?: (im: Img) => void; onEdit?: (im: Img) => void; onMore?: (im: Img) => void; onKeep?: (id: string) => Promise<unknown> }
 
 /** The element for one event, or null when it draws nothing (an unknown pit stop or surface). */
@@ -209,7 +211,7 @@ export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
     case "changes": return null;
     case "learned": return <LearnedCard d={d} />;
     case "delegation": return <DelegationCard d={(c.latest.get(d.id) || d) as Deleg} />;
-    case "plan": return <PlanCard P={(c.latest.get(d.id) || d) as PlanSnapshot} />;
+    case "plan": { const P = (c.latest.get(d.id) || d) as PlanSnapshot; return c.onPlan ? <PlanChip P={P} onOpen={c.onPlan} /> : <PlanCard P={P} />; }
     case "pitstop": { const p = c.pits[d.id]; return p ? <div style={{ marginLeft: 40, maxWidth: 760 }}><PitCard p={p} /></div> : null; }
     case "surface": return c.surface(d.id);
   }

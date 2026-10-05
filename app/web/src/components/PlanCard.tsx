@@ -9,17 +9,39 @@ const ITEM_LABEL: Record<string, string> = { todo: "waits", doing: "on track", d
 const ITEM_MOOD: Record<string, string> = { doing: "working", done: "done", failed: "failed" };
 const nothing = (x: string | null | undefined) => !x || /^nothing\.?$/i.test(x.trim());
 
-export function PlanCard({ P }: { P: PlanSnapshot }) {
+const spendLine = (P: PlanSnapshot) => P.status === "done" ? `done · ${usd(P.spend)}` : P.status === "stopped" ? "stopped by you" : `${usd(P.spend)} of ${usd(P.budget)}`;
+const doneOf = (P: PlanSnapshot) => [P.items.filter((i) => i.status === "done").length, P.items.length] as const;
+
+/** The plan in the chat when the work panel can show it: goal, progress and who's on it now; the full todo opens in the panel. */
+export function PlanChip({ P, onOpen }: { P: PlanSnapshot; onOpen: () => void }) {
+  const { bot } = useStore();
+  const [n, of] = doneOf(P);
+  const doing = P.items.filter((i) => i.status === "doing");
+  const now = doing.length ? `${doing.map((i) => i.ownerName).join(", ")} ${doing.length > 1 ? "are" : "is"} on ${doing.map((i) => i.key).join(", ")}${doing.some((i) => i.reopened) ? ", again" : ""}` : P.log?.length ? P.log[P.log.length - 1].text : P.status === "done" ? "Everyone's done." : "Waiting to start.";
+  return (
+    <button className="deleg planchip pc-card" onClick={onOpen}>
+      <span className="row" style={{ gap: 10, flexWrap: "nowrap" }}><b className="pc-h3 trunc" style={{ flex: 1 }}>{P.goal}</b><span className="pc-m small faint">{`${n} of ${of} · ${spendLine(P)}`}</span></span>
+      <span className="bar"><i style={{ width: `${of ? (n / of) * 100 : 0}%` }} /></span>
+      <span className="row" style={{ gap: 8, flexWrap: "nowrap" }}>
+        {doing.length > 0 && <span className="faces">{doing.map((i) => <Face key={i.key} b={bot(i.owner) || null} size="xs" mood="working" />)}</span>}
+        <span className="small muted trunc" style={{ flex: 1 }}>{now}</span><span className="small faint">Open plan ›</span>
+      </span>
+    </button>);
+}
+
+export function PlanCard({ P, flat }: { P: PlanSnapshot; flat?: boolean }) {
   const { chief } = useStore();
   const grade = (c: string) => P.checks?.find((x) => x.text.trim().toLowerCase() === c.trim().toLowerCase());
+  const [n, of] = doneOf(P);
   return (
-    <div className="deleg plan pc-card">
+    <div className={flat ? "plan flat" : "deleg plan pc-card"}>
       <div className="ph">
-        <Face b={chief} size="xs" mood={P.status === "running" ? "working" : "idle"} />
+        {!flat && <Face b={chief} size="xs" mood={P.status === "running" ? "working" : "idle"} />}
         <b className="pc-h3" style={{ flex: 1, minWidth: 0 }}>{P.goal}</b>
-        <span className="pc-m small faint">{P.status === "done" ? `DONE · ${usd(P.spend)}` : P.status === "stopped" ? "STOPPED BY YOU" : `${usd(P.spend)} OF ${usd(P.budget)}`}</span>
+        <span className="pc-m small faint">{spendLine(P)}</span>
         {P.status === "running" && <ConfirmButton className="pc-pill o s" ask="Stop?" onConfirm={() => api.post(`/api/plans/${P.id}/stop`)}>Stop plan</ConfirmButton>}
       </div>
+      {flat && <span className="bar"><i style={{ width: `${of ? (n / of) * 100 : 0}%` }} /></span>}
       {P.constraints?.length > 0 && (
         <div className="cons"><p className="pc-lab">Your constraints</p>
           {P.constraints.map((c, i) => { const k = grade(c); return (
@@ -29,6 +51,7 @@ export function PlanCard({ P }: { P: PlanSnapshot }) {
             </div>); })}
         </div>)}
       {P.status === "done" && P.answer && <div className="pans"><Md text={P.answer} /></div>}
+      {flat && <p className="pc-lab">{`Todo · ${n} of ${of}`}</p>}
       {P.items.map((i) => <PlanItem key={i.key} i={i} />)}
       {P.sweep && (
         <div className="sweep"><p className="pc-lab">Alternatives check</p>
