@@ -9,7 +9,7 @@ import type { Brain } from "../computer.js";
 import { active } from "./state.js";
 import { addEvent, findThreads, threadLink, readThread, addThreadNote, NOTES_MAX } from "./threads.js";
 import { viewSkill } from "./skills.js";
-import { harnessHelp, TOPICS } from "../manual.js";
+import { harnessHelp, HELP_TOPICS } from "../manual.js";
 import { CHANGELOG } from "../changelog.js";
 import { suggest } from "./retro.js";
 import { crewOverview, soulProposal, retireProposal, memberChange, memberFiles, fileDeletion, triageSuggestion, openSuggestions } from "./manage.js";
@@ -263,7 +263,7 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
     }
     case "harness_help": {
       const page = harnessHelp(String(a.topic || ""), getSetting("driver_name", "the driver"));
-      return page ? say(page) : say(`Topics: ${TOPICS.join(", ")}.`, false);
+      return page ? say(page) : say(`Topics: ${HELP_TOPICS.join(", ")}.`, false);
     }
     case "whats_new": {
       // Members count what they've read, so a note added later shows up exactly once (changelog.ts: append only).

@@ -120,6 +120,12 @@ db.exec(`CREATE TABLE IF NOT EXISTS schedule_runs (id TEXT PRIMARY KEY, schedule
 CREATE INDEX IF NOT EXISTS schedule_runs_sched ON schedule_runs(schedule_id, fired_at);
 CREATE INDEX IF NOT EXISTS schedule_runs_thread ON schedule_runs(thread_id, status);
 CREATE INDEX IF NOT EXISTS schedule_runs_turn ON schedule_runs(turn_id)`);
+// The vault (vault.ts): blob holds every value sealed under vault.key, bound to the row id. has names the fields set,
+// so listing never decrypts. allowed: members that may use it; always: those that skip the per-thread ask.
+// needs_update: why a sign-in with it failed, until the driver saves a new value (the source of truth is theirs).
+db.exec(`CREATE TABLE IF NOT EXISTS vault (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, site TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL CHECK (kind IN ('login','login+totp','card')), note TEXT NOT NULL DEFAULT '', last4 TEXT, blob TEXT NOT NULL, has TEXT NOT NULL DEFAULT '[]',
+  allowed TEXT NOT NULL DEFAULT '[]', always TEXT NOT NULL DEFAULT '[]', last_used INTEGER, last_used_by TEXT, needs_update TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`);
 // Columns added after v1 shipped; ALTER fails harmlessly once they exist.
 for (const sql of ["ALTER TABLE turns ADD COLUMN changes TEXT", "ALTER TABLE jev_labels ADD COLUMN shadow TEXT",
   "ALTER TABLE threads ADD COLUMN origin TEXT", "ALTER TABLE bots ADD COLUMN private INTEGER NOT NULL DEFAULT 0",

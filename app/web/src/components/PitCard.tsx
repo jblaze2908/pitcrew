@@ -51,6 +51,8 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
     : p.kind === "file" ? <pre>{(d.paths || []).join("\n")}</pre>
     : p.kind === "hire" ? <HireSummary s={d.spec || {}} />
     : p.kind === "site" ? <SiteSummary d={d} />
+    : p.kind === "secret" ? <SecretSummary d={d} />
+    : p.kind === "vault" ? <p className="small muted">{`${d.why || "The site rejected it"}. The member stopped instead of retrying; save the current value from your password manager and it can sign in again.`}</p>
     : p.kind === "engram" && d.proposal ? <ProposalSummary x={d.proposal} />
     : p.kind === "soul" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><pre>{d.soul}</pre>{d.before && <details><summary className="small faint">Current SOUL</summary><pre>{d.before}</pre></details>}</div>
     : p.kind === "retire" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><p className="small faint">{d.memberName}: {d.job || "no job set"}{d.schedules ? ` · ${d.schedules} schedule${d.schedules === 1 ? "" : "s"} will stop` : ""}. Threads and memory stay.</p></div>
@@ -61,7 +63,9 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
   const outcome = `${p.kind === "engram" && p.note ? p.note : p.status} ${ago(p.decided_at)}`;
   // gate.ts appends the site to verify, escalation and untrusted-content flags to the title; those stay word for word.
   const flags = / · (verify: |jev blocked |after untrusted content).*$/.exec(p.title)?.[0] || "";
-  const v = pitLabel(p), heading = p.kind === "mcp" ? `${v.label}${v.detail ? ` ${v.detail}` : ""}${flags}` : p.title;
+  const card = d.secret?.kind === "card";
+  const v = pitLabel(p), heading = p.kind === "mcp" ? `${v.label}${v.detail ? ` ${v.detail}` : ""}${flags}`
+    : p.kind === "secret" ? (card ? `Pay on ${d.site?.host} with card “${d.secret?.name}” ••${d.secret?.last4}` : `Sign in to ${d.site?.host} with “${d.secret?.name}”`) : p.title;
   // Decided: one line that opens to the details, so a thread's history doesn't keep full cards around.
   if (done) return (
     <details className={row ? "tool pitrow" : "pit done"}>
@@ -95,6 +99,12 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
     {btn("Allow site fully", () => decide("approve", "full"))}
     {btn("Block site", () => decide("deny", "block"))}
     {openLink("Open thread")}</div></>;
+  // Cards never get a standing yes; a login's "always" puts the member on the secret's no-ask list.
+  else if (p.kind === "secret") actions = <div className="acts">
+    {card ? btn("Allow this payment", () => decide("approve", "once"), true) : <>{btn("Allow for this task", () => decide("approve", "thread"), true)}{btn(`Always for ${who}`, () => decide("approve", "always"))}</>}
+    {btn("Deny", () => decide("deny"))}
+    {openLink("Open thread")}</div>;
+  else if (p.kind === "vault") actions = <div className="acts"><a className="pc-pill s" href={`#/settings/vault/${d.secret?.id || ""}`}>Update in Vault</a>{btn("Dismiss", () => decide("deny"))}{openLink("Open thread")}</div>;
   else if (p.kind === "soul") actions = <div className="acts">{btn("Use this SOUL", () => decide("approve", "once"), true)}{btn("Keep current", () => decide("deny"))}{openLink("Open thread")}</div>;
   else if (p.kind === "retire") actions = <div className="acts">{btn(`Retire ${d.memberName || "member"}`, () => decide("approve", "once"), true)}{btn("Keep", () => decide("deny"))}{openLink("Open thread")}</div>;
   else if (p.kind === "member") actions = <div className="acts">{btn("Apply changes", () => decide("approve", "once"), true)}{btn("Keep as is", () => decide("deny"))}{openLink("Open thread")}</div>;
@@ -153,6 +163,20 @@ function SiteSummary({ d }: { d: Record<string, any> }) {
       {warn && <p className="badc small">{`Looks like ${d.lookalike?.brand || d.homograph?.brand || "another site"}${d.lookalike?.domain ? ` (${d.lookalike.domain})` : ""}: ${[d.homograph?.why, d.lookalike?.why].filter(Boolean).join("; ")}${d.homograph?.unicode ? `. Shown as ${d.homograph.unicode}` : ""}.`}</p>}
       <pre>{`${d.url || d.host}\n${d.https ? "https" : "NOT https: anything typed here can be read in transit"}`}</pre>
       <p className="small faint">{d.sensitive ? "An account site: it asks in every thread, in every mode, YOLO included." : "Allow site: browse it; other effects follow this member's permissions. Fully: every effect allowed there except paying, which always asks."}</p>
+    </div>
+  );
+}
+
+// A vault ask: the secret by name (never a value), the exact host it would be typed into, and any look-alike warning.
+function SecretSummary({ d }: { d: Record<string, any> }) {
+  const warn = d.homograph || d.lookalike, card = d.secret?.kind === "card";
+  const fields = (d.fields || []).map((f: { field: string }) => f.field.replace(/^card_/, "").replace("totp", "one-time code")).join(", ");
+  return (
+    <div className="col" style={{ gap: 8 }}>
+      {warn && <p className="badc small">{`Looks like ${d.lookalike?.brand || d.homograph?.brand || "another site"}${d.lookalike?.domain ? ` (${d.lookalike.domain})` : ""}: ${[d.homograph?.why, d.lookalike?.why].filter(Boolean).join("; ")}${d.homograph?.unicode ? `. Shown as ${d.homograph.unicode}` : ""}.`}</p>}
+      <div className="vsec"><span className="lk"><StepIcon name="lock" /></span>
+        <div>{`${d.secret?.name}${card && d.secret?.last4 ? ` ••${d.secret.last4}` : ""}`}<small>{`${d.site?.https ? "https" : "NOT https"} · ${d.site?.host}${card ? "" : ` · matches ${d.secret?.site}`}`}</small></div></div>
+      <p className="small muted">{`Pitcrew fills the ${fields || "fields"} and ${d.submit === "Enter" ? "presses Enter" : `presses ${d.submit}`} in one step. The model never sees ${card ? "the card" : "the values"}.`}</p>
     </div>
   );
 }

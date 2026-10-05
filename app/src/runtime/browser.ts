@@ -3,19 +3,25 @@
 // browser_read is ours: a gated browser_snapshot turned into text. Page JS and Playwright code run like any other tool:
 // gated per call (gate.ts never lets a fully allowed site skip jev for them), with secrets masked and size capped.
 import { getBot } from "../crew.js";
-import { chownSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { getSetting, audit } from "../db.js";
+import { chownSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { PW_SETTLE_MS, botDir, type Brain, type Rpc } from "../computer.js";
 import type { ToolResult } from "../shots.js";
+import { siteOf, lookalike, homograph } from "../sites.js";
+import { siteVerdict, siteTag, knownDomains } from "../domains.js";
+import { FIELDS, SCRUB_FIELDS, findSecret, usableBy, siteMatch, reveal, markUsed, granted, isRetry, noteFill, noteFilled, scrubbing, scrubFilled, flagNeedsUpdate, vaultRefusal, type Secret } from "../vault.js";
 import { bus } from "./bus.js";
 import { active, snapshots } from "./state.js";
 import { addEvent } from "./threads.js";
 import { computer } from "./machines.js";
 import { gate } from "./gate.js";
+import { waitLease } from "./lease.js";
+import { pitStop } from "./pitstops.js";
 import { takeRefusal, afterAction } from "./sitegate.js";
 import { planLive } from "./plans.js";
 import { ground, pixelContext, snapshotOf, noteSnapshot } from "./grounding.js";
-import { SNAP_LINK, SNAP_MODES, DATA_TOOLS, shapeSnapshot, verifyLine, snapshotToText, readTabs, pageHead, maskSecrets, capData } from "./pageText.js";
+import { SNAP_LINK, SNAP_MODES, DATA_TOOLS, shapeSnapshot, verifyLine, snapshotToText, readTabs, pageHead, maskSecrets, capData, linkPath } from "./pageText.js";
 import { short, summariseArgs, hostOf, say, debugArgs } from "./util.js";
 
 // A dynamic tool call from the brain (item/tool/call): p.threadId is Codex's thread id.
@@ -27,6 +33,9 @@ export async function runtimeTool(br: Brain, threadId: string, p: ToolCall): Pro
   const b = getBot(br.bot.id)!, turnId = active.get(threadId)?.turnId, t0 = Date.now();
   const kind = p.tool.startsWith("browser_") ? "browser" : "computer", reading = p.tool === "browser_read";
   if (p.tool === "browser_replay_request") return replayRequest(br, threadId, p);
+  if (p.tool === "browser_fill_secret") return fillSecret(br, threadId, p);
+  const shut = vaultRefusal(threadId, p.tool, p.arguments || {});
+  if (shut) { audit("crew", "vault.read_refused", { botId: b.id, threadId, tool: p.tool }); return say(`Not run: ${shut}.`, false); }
   if (kind === "browser" && !(await planLive(threadId))) return say("This plan runs on what the crew already knows: the driver turned live lookups off. Answer from your memory and say what you couldn't check.", false);
   // `snapshot` (what the result shows of the page afterwards) is ours; Playwright never sees it.
   const { snapshot: snapArg, ...given } = p.arguments || {};
@@ -55,10 +64,12 @@ export async function runtimeTool(br: Brain, threadId: string, p: ToolCall): Pro
     const r = await mcp.request("tools/call", { name: tool, arguments: kind === "computer" ? { ...args, _watched: comp.viewers > 0 } : args }, 120000);
     timing.run = Date.now() - t;
     const content: McpContent[] = Array.isArray(r.content) ? r.content : [];
-    const text = maskSecrets(tool, content.filter((x) => x.type === "text").map((x) => x.text).join("\n"));
+    // After a vault fill, filled values are scrubbed from the result and from the snapshot file it links (vault.ts).
+    const text = scrubFilled(threadId, maskSecrets(tool, content.filter((x) => x.type === "text").map((x) => x.text).join("\n")));
     let out = text;
     if (kind === "browser") {
-      const prev = snapshots.get(p.threadId), url = /^- Page URL: (\S+)/m.exec(text)?.[1] || prev?.url || null, snap = snapshotOf(b.id, text);
+      scrubSnapshotFile(b.id, threadId, text);
+      const prev = snapshots.get(p.threadId), url = /^- Page URL: (\S+)/m.exec(text)?.[1] || prev?.url || null, snap = scrubFilled(threadId, snapshotOf(b.id, text));
       const mode = SNAP_MODES.includes(snapArg) ? snapArg : undefined;
       if (reading) out = snap == null ? text : `${pageHead(text)}\n\n${snapshotToText(snap)}`;
       else out = `${SNAP_LINK.test(text) ? `${verifyLine(tool, text, { before: prev?.url, tabsBefore })}\n` : ""}${shapeSnapshot(DATA_TOOLS.test(tool) ? capData(text) : text, snap, { prev, url, mode })}`;
@@ -119,9 +130,10 @@ async function replayRequest(br: Brain, threadId: string, p: ToolCall): Promise<
   const ok = await gate(br, threadId, { kind: "mcp", server: "browser", tool: "browser_replay_request", arguments: { method, url: target.url, ...change, page_url } }, { kind: "mcp", title, detail: { server: "browser", tool: "browser_replay_request", args: { method, url: target.url, ...change } } });
   if (!ok) { addEvent(threadId, turnId, "tool", { type: "browser", title, ...viaScript(p), server: "browser", tool: p.tool, input: debugArgs(a), status: "declined" }); return say(takeRefusal(threadId) || "Not done: this replay was declined at a pit stop. Don't retry it another way; tell the driver what didn't happen.", false); }
   const r = await mcp.request("tools/call", { name: "browser_run_code_unsafe", arguments: { code: replayCode({ method, source, url: target.url, body: a.body, merge: a.merge && typeof a.merge === "object" ? a.merge : null }) } }, 120000);
-  const raw = (r.content || []).map((x: McpContent) => x.text || "").join("\n");
+  const raw = scrubFilled(threadId, (r.content || []).map((x: McpContent) => x.text || "").join("\n"));
   let res: { status: number; type: string; text: string; found: boolean } | null = null;
   try { res = JSON.parse((/### Result\n([\s\S]*?)(?:\n### |$)/.exec(raw)?.[1] ?? raw).trim()); } catch {}
+  if (res) res.text = scrubFilled(threadId, String(res.text));
   addEvent(threadId, turnId, "tool", { type: "browser", title: `${title}${host ? ` on ${host}` : ""}`, ...viaScript(p), server: "browser", tool: p.tool, input: debugArgs(a), status: r.isError || !res ? "failed" : "completed", output: res ? `HTTP ${res.status} · ${res.text.length} chars` : raw.slice(0, 2000) });
   if (!res) return say(`The replay failed: ${raw.slice(0, 600)}`, false);
   const head = `HTTP ${res.status}${res.type ? ` · ${res.type.split(";")[0]}` : ""}${res.found ? "" : " · sent without the original's headers (it's no longer in the page's request log)"}`;
@@ -133,6 +145,164 @@ async function replayRequest(br: Brain, threadId: string, p: ToolCall): Promise<
   }
   return say(`${head}\n${res.text.length > REPLAY_MAX ? `${res.text.slice(0, REPLAY_MAX)}\n…\nTruncated at ${REPLAY_MAX / 1000} KB of ${(res.text.length / 1000).toFixed(0)} KB: pass save (a path under /bot/work) for the whole body.` : res.text}`);
 }
+// ---------- filling a vault secret ----------
+// browser_fill_secret: fill fields from a vault secret by name and submit, in ONE Playwright call, so the member never
+// gets a turn while a value sits in the page. The value is decrypted (a TOTP computed) here, JSON-embedded in the code
+// and never returned: the result is ours, and anything that echoes back is scrubbed (vault.ts). The page's host is
+// checked against the secret's site before asking and again inside the call. Per call: one approval check (a pit
+// stop the first time in a thread, every time for a card), one run_code. deps.mcp lets tests stand in for the computer.
+export interface FillField { field: string; target: string; value: string }
+export function fillCode(spec: { site: string; card: boolean; fields: FillField[]; submit: string | null; clear: string[] }) {
+  return `async (page) => {
+  const spec = ${JSON.stringify(spec)};
+  // A card's fields may sit in a payment provider's frame (any https host); the page itself must be the site when one is set.
+  const onSite = (u, any) => { try { const x = new URL(u), h = x.hostname.toLowerCase(); return x.protocol === "https:" && (any || h === spec.site || h.endsWith("." + spec.site)); } catch { return false; } };
+  const okHost = (u) => onSite(u, spec.card && !spec.site), okFrame = (u) => onSite(u, spec.card);
+  const hide = (e) => spec.fields.reduce((t, f) => t.split(f.value).join("«secret»"), String((e && e.message) || e)).split("\\n")[0].slice(0, 300);
+  const loc = (t) => page.locator(/^f?\\d*e\\d+$/.test(t) ? "aria-ref=" + t : t);
+  if (!okHost(page.url())) return { ok: false, why: "page", url: page.url() };
+  const frames = new Set([page.mainFrame()]), filled = [];
+  // Empties every field still holding a password, code or card value, and says whether a password box and an error show.
+  const sweep = async () => {
+    const out = { left: 0, pw: false, err: false };
+    for (const fr of frames) {
+      const r = await fr.evaluate((vals) => { let left = 0, pw = false;
+        for (const i of document.querySelectorAll("input,textarea")) { if (i.value && vals.includes(i.value)) { left++; i.value = ""; i.dispatchEvent(new Event("input", { bubbles: true })); } if (i.type === "password" && i.offsetParent !== null) pw = true; }
+        return { left, pw, err: /\\b(incorrect|invalid|wrong|didn.?t match|not recognized|try again|failed|locked)\\b/i.test(((document.body && document.body.innerText) || "").slice(0, 20000)) };
+      }, spec.clear).catch(() => null);
+      if (r) { out.left += r.left; out.pw = out.pw || r.pw; out.err = out.err || r.err; }
+    }
+    return out;
+  };
+  try {
+    for (const f of spec.fields) {
+      const h = await loc(f.target).elementHandle({ timeout: 10000 });
+      const fr = await h.ownerFrame();
+      if (!fr || !okFrame(fr.url())) { await sweep(); return { ok: false, why: "frame", field: f.field, url: fr ? fr.url() : null }; }
+      const [tag, type] = await h.evaluate((e) => [e.tagName.toLowerCase(), (e.getAttribute("type") || "text").toLowerCase()]);
+      if (tag !== "input" || (f.field === "password" ? type !== "password" : type === "password" && f.field !== "card_cvc")) { await sweep(); return { ok: false, why: "field", field: f.field, type: tag === "input" ? type : tag }; }
+      frames.add(fr);
+      await h.fill(f.value, { timeout: 10000 });
+      filled.push(f.field);
+    }
+    const before = page.url();
+    if (spec.submit) await loc(spec.submit).click({ timeout: 10000 }); else await loc(spec.fields[spec.fields.length - 1].target).press("Enter", { timeout: 10000 });
+    await page.waitForTimeout(600);
+    await page.waitForLoadState("load", { timeout: 8000 }).catch(() => {});
+    await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
+    const s = await sweep();
+    return { ok: true, filled, url: page.url(), moved: page.url() !== before, ...s };
+  } catch (e) { await sweep().catch(() => {}); return { ok: false, why: "error", filled, error: hide(e) }; }
+}`;
+}
+type FillResult = { ok: boolean; why?: string; field?: string; type?: string; url?: string | null; filled?: string[]; moved?: boolean; left?: number; pw?: boolean; err?: boolean; error?: string };
+const WHY: Record<string, (r: FillResult) => string> = {
+  page: (r) => `the page moved to ${hostOf(r.url) || "another site"} before the fill`,
+  frame: (r) => `the ${r.field} box sits in a frame from ${hostOf(r.url) || "another site"}`,
+  field: (r) => `the ref given for ${r.field} is a ${r.type} ${r.field === "password" ? "field, not a password box" : r.type === "password" ? "box" : "element, not a text box"}`,
+  error: (r) => r.error || "Playwright failed",
+};
+const asks = new Map<string, Promise<string>>(); // thread|secret → pending sign-in pit stop, shared by calls that land meanwhile
+const roleName = (el: string) => /^[a-z]+(\s+"(?:[^"\\]|\\.)*")?/.exec(el)?.[0] || "element"; // no value after the name
+
+export async function fillSecret(br: Brain, threadId: string, p: ToolCall, deps: { mcp?: Pick<Rpc, "request"> } = {}): Promise<ToolResult> {
+  const b = getBot(br.bot.id)!, turnId = active.get(threadId)?.turnId, a = p.arguments || {}, driver = getSetting("driver_name", "the driver");
+  if (!(await planLive(threadId))) return say("This plan runs on what the crew already knows: the driver turned live lookups off.", false);
+  const sec = findSecret(String(a.secret || ""));
+  const refuse = (why: string, event = true) => {
+    audit("crew", "vault.refused", { botId: b.id, threadId, secret: sec?.name || String(a.secret || "").slice(0, 60), why });
+    if (event) addEvent(threadId, turnId, "system", { text: `Not filled: ${why}.`, tone: "bad" });
+    return say(`Not filled: ${why}. Don't type it another way or retry; tell ${driver} what's waiting.`, false);
+  };
+  if (!sec) { const mine = usableBy(b.id); return say(`No secret called "${short(a.secret, 60)}". ${mine.length ? `Yours: ${mine.map((s) => `"${s.name}" (${s.site || "card"})`).join(", ")}.` : `${driver} hasn't given you any; they keep them in Settings → Vault.`}`, false); }
+  if (!sec.allowed.includes(b.id)) return refuse(`${b.name} isn't allowed to use "${sec.name}" (${driver} sets who may in Settings → Vault)`);
+  if (sec.needs_update) return refuse(`"${sec.name}" failed before and waits for ${driver} to update it in Vault`);
+  const card = sec.kind === "card", given = Array.isArray(a.fields) ? a.fields : [];
+  const fields = given.map((f: any) => ({ field: String(f?.field || ""), target: String(f?.target || f?.ref || "") }));
+  const bad = fields.find((f: { field: string; target: string }) => !FIELDS[sec.kind].includes(f.field) || !f.target);
+  if (!fields.length || fields.length > 4 || bad || new Set(fields.map((f: { field: string }) => f.field)).size < fields.length) return say(`fields: 1 to 4 of {field, target}, field one of ${FIELDS[sec.kind].join(", ")}, target a ref from the latest snapshot.`, false);
+  const missing = fields.find((f: { field: string }) => !sec.has.includes(f.field));
+  if (missing) return say(`"${sec.name}" has no ${missing.field} saved; ask ${driver} to add it in Settings → Vault.`, false);
+  const submit = a.submit ? String(a.submit) : null;
+  if (card && !submit) return say("A card fill needs submit: the ref of the pay button. It fills and pays in one step once the driver approves.", false);
+  const seen = snapshots.get(p.threadId), url = seen?.url;
+  if (!url) return say("Take a snapshot of the sign-in page first, so Pitcrew can check which site it is.", false);
+  const s = siteOf(url);
+  if (!s || !["http", "https"].includes(s.scheme)) return refuse(`${short(url, 80)} isn't a web page`);
+  if (!s.https) return refuse(`${s.host} isn't https: anything typed there can be read in transit`);
+  if (s.ip) return refuse(`${s.host} is a network address, not a site`);
+  if ((!card || sec.site) && !siteMatch(s.host, sec.site)) { const like = lookalike(s.host, [sec.site]); return refuse(`"${sec.name}" is for ${sec.site}, and this page is ${s.host}${like ? ` (it looks like ${like.domain}: ${like.why})` : ""}`); }
+  const sv = siteVerdict(b, threadId, url, {});
+  if (sv.action !== "go") return refuse(sv.why || `${s.domain} isn't approved for ${b.name} yet`);
+  const names = fields.map((f: { field: string }) => f.field) as string[];
+  if (isRetry(threadId, sec.id, names)) { failedSignIn(b, threadId, sec, s.host, "a member filled it again within minutes: the last sign-in with it didn't work"); return say(`Not filled again: you filled "${sec.name}" here minutes ago, so that sign-in didn't work. Don't retry; ${driver} was asked to update it in Vault.`, false); }
+  if (!(await waitLease(b.id, threadId, { kind: "mcp", server: "browser", tool: "browser_fill_secret", arguments: { page_url: url } }))) return say(`Not done: ${driver} has the computer.`, false);
+
+  // Approval: a member on the "always" list, or one already allowed for this thread, goes on; anyone else asks. Cards ask every time.
+  if (card || !(sec.always.includes(b.id) || granted(threadId, sec.id))) {
+    const g = ground(seen, "browser_fill_form", { fields: fields.map((f: { target: string }) => ({ target: f.target })), ...(submit ? { target: submit } : {}) }).grounded.grounded_elements || [];
+    const label = (ref: string) => roleName(g.find((e: { ref: string }) => e.ref === ref)?.element || "");
+    const homo = homograph(s.host), like = card ? lookalike(s.host, [...knownDomains(b.id)]) : null;
+    const warn = homo || like ? `This looks like ${homo?.brand || like?.brand} but is ${s.host}: ${[homo?.why, like?.why].filter(Boolean).join("; ")}. ` : "";
+    const title = `${warn}${card ? `${b.name} wants to pay on ${s.host} with card “${sec.name}” ••${sec.last4}` : `${b.name} wants to sign in to ${s.host} with “${sec.name}”`} · verify: ${siteTag(s)}`;
+    const detail = { secret: { id: sec.id, name: sec.name, kind: sec.kind, site: sec.site, last4: sec.last4 }, fields: fields.map((f: { field: string; target: string }) => ({ field: f.field, element: label(f.target) })), submit: submit ? label(submit) : "Enter",
+      site: { domain: s.domain, host: s.host, https: s.https, url: s.url.slice(0, 500) }, lookalike: like, homograph: homo };
+    const key = `${threadId}|${sec.id}`, ask = () => pitStop({ botId: b.id, threadId, kind: "secret", effect: card ? "pay" : "signin", title, detail });
+    let d: string;
+    if (card) d = await ask();
+    else { if (!asks.has(key)) asks.set(key, ask().finally(() => asks.delete(key))); d = await asks.get(key)!; }
+    if (d !== "approved") return refuse(d === "expired" ? "the pit stop expired before the driver answered" : `${driver} said no`, false);
+  }
+
+  const at = Date.now(), filling: FillField[] = fields.map((f: { field: string; target: string }) => ({ ...f, value: reveal(sec, f.field, at) || "" }));
+  const clear = filling.filter((f) => SCRUB_FIELDS.has(f.field)).map((f) => f.value);
+  noteFilled(threadId, clear); // before the call, so anything that echoes during it is scrubbed too
+  const title = card ? `Used card ${sec.name} on ${s.host}` : `Signed in to ${s.host} with ${sec.name}`;
+  const input = debugArgs({ secret: sec.name, fields: fields.map((f: { field: string; target: string }) => ({ field: f.field, target: f.target })), submit });
+  try {
+    const mcp = deps.mcp || (await (async () => { const comp = computer(b), m = await comp.mcp("browser"); comp.touch(); return m; })());
+    const r = await mcp.request("tools/call", { name: "browser_run_code_unsafe", arguments: { code: fillCode({ site: sec.site, card, fields: filling, submit, clear }) } }, 120000);
+    const raw = scrubFilled(threadId, (r.content || []).map((x: McpContent) => x.text || "").join("\n"));
+    scrubSnapshotFile(b.id, threadId, raw);
+    let res: FillResult | null = null;
+    try { res = JSON.parse((/### Result\n([\s\S]*?)(?:\n### |$)/.exec(raw)?.[1] ?? raw).trim()); } catch {}
+    markUsed(sec.id, b.id);
+    audit("crew", "vault.filled", { botId: b.id, threadId, id: sec.id, name: sec.name, host: s.host, fields: names, ok: !!res?.ok });
+    if (!res || !res.ok) {
+      const why = res ? (WHY[res.why || ""] || WHY.error)(res) : short(raw, 300);
+      addEvent(threadId, turnId, "tool", { type: "browser", title, server: "browser", tool: p.tool, input, status: "failed", error: `Not filled: ${why}` });
+      return say(`Not filled: ${why}. Nothing was submitted, and any box it filled was emptied. Take a fresh snapshot and pass the right refs.`, false);
+    }
+    noteFill(threadId, sec.id, names);
+    // The site kept the password, or still shows a password box with an error: wrong or stale credentials.
+    const failed = !card && names.some((n) => n === "password" || n === "totp") && ((res.left || 0) > 0 || (!!res.pw && !!res.err && !res.moved));
+    if (failed) {
+      const why = res.err ? `${s.host} showed an error after submit` : `${s.host} kept the sign-in form after submit`;
+      failedSignIn(b, threadId, sec, s.host, why);
+      addEvent(threadId, turnId, "tool", { type: "browser", title, server: "browser", tool: p.tool, input, status: "failed", error: `Sign-in didn't work: ${why}` });
+      return say(`Signing in to ${s.host} with "${sec.name}" didn't work (${why}). The filled values were emptied. Don't retry: ${driver} was asked to update it in Vault. Tell them what you were doing.`, false);
+    }
+    const out = `Filled ${names.join(", ")} from "${sec.name}" and ${submit ? "clicked submit" : "pressed Enter"} on ${s.host}${res.moved ? `; the page is now ${hostOf(res.url) || "elsewhere"}` : ""}. The values never reach you. Take a snapshot to see where it landed.`;
+    addEvent(threadId, turnId, "tool", { type: "browser", title, server: "browser", tool: p.tool, input, status: "completed", output: out });
+    return say(out);
+  } catch (e: any) {
+    addEvent(threadId, turnId, "tool", { type: "browser", title, server: "browser", tool: p.tool, input, status: "failed", error: scrubFilled(threadId, String(e.message)) });
+    return say(`The computer couldn't fill it: ${scrubFilled(threadId, String(e.message))}`, false);
+  }
+}
+// One failure, one pit stop: "BESCOM login failed — update it in Vault", linking to its edit form. It blocks nothing.
+function failedSignIn(b: { id: string; name: string }, threadId: string, sec: Secret, host: string, why: string) {
+  addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Sign-in with ${sec.name} on ${host} didn't work: ${why}. It's marked "needs update" in Vault.`, tone: "bad" });
+  if (flagNeedsUpdate(sec.id, why)) pitStop({ botId: b.id, threadId, kind: "vault", effect: "ask", title: `${sec.name} failed — update it in Vault`, detail: { secret: { id: sec.id, name: sec.name, kind: sec.kind, site: sec.site }, host, why }, expiresMin: 7 * 24 * 60 }).catch(() => {});
+}
+// Playwright writes each action's snapshot to a file in the member's computer; after a fill, that file is scrubbed too.
+function scrubSnapshotFile(botId: string, threadId: string, text: string) {
+  const abs = scrubbing(threadId) ? linkPath(SNAP_LINK.exec(text)?.[1]) : null;
+  if (!abs) return;
+  const f = `${botDir(botId)}${abs.slice("/bot".length)}`;
+  try { if (lstatSync(f).isFile()) { const t = readFileSync(f, "utf8"), c = scrubFilled(threadId, t); if (c !== t) writeFileSync(f, c); } } catch {}
+}
+
 // A /bot/work path as its host file, with its folder made, or null when it would leave the work dir. Folders it makes
 // belong to the work dir's owner (the bot's uid), never root: the control plane runs as root, the bot doesn't.
 export function workFile(botId: string, path: string) {

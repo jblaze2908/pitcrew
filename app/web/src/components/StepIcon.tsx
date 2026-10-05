@@ -19,6 +19,7 @@ const P: Record<Name, string[]> = {
   remove: ["M4 7h16", "M9 7V4h6v3", "M6 7l1 13h10l1-13"],
   send: ["M21 3L10 14", "M21 3l-7 18-4-7-7-4z"],
   code: ["M8 7l-5 5 5 5", "M16 7l5 5-5 5", "M14 4l-4 16"],
+  lock: ["M6 11h12a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z", "M8.5 11V8a3.5 3.5 0 0 1 7 0v3"],
 };
 
 export function StepIcon({ name }: { name: Name }) {

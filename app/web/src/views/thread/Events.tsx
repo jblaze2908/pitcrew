@@ -160,13 +160,14 @@ function Debug({ d }: { d: Record<string, any> }) {
   );
 }
 
+const SECRET_SCOPE: Record<string, string> = { thread: "allowed for this task", always: "always allowed", once: "allowed once" };
 /** pit: the decided pit stop that gated this call, shown as its outcome tag and jev's reason instead of a row of its own. */
 export function Tool({ e, results, pit }: { e: ThreadEvent; results?: Map<string, Record<string, any>>; pit?: PitStop }) {
   if (e.data.type === "script") return <Script e={e} result={results?.get(e.data.callId)} />;
   const failed = !stepOk(e) && e.data.status !== "inProgress";
   const v = stepView(tidyTitle(e.data.title), e.data.conn), j = pit?.jev || {};
   return <details className={`tool${e.data.viaScript ? " nested" : ""}`}><summary><StepIcon name={v.icon} /><span className="lbl">{v.label}</span>{v.detail && <span className={`det${v.icon === "terminal" ? " code" : ""}`}>{v.detail}</span>}
-    {failed ? <span className="tag failed">Failed</span> : pit && <span className={`tag ${pit.status}`}>{OUTCOME[pit.status]}</span>}</summary>
+    {failed ? <span className="tag failed">Failed</span> : pit && <span className={`tag ${pit.status}`}>{pit.kind === "secret" && pit.status === "approved" ? SECRET_SCOPE[pit.scope || ""] || OUTCOME.approved : OUTCOME[pit.status]}</span>}</summary>
     {j.reason && <p className="why">{`jev · ${j.by || ""} · ${j.reason}`}</p>}<Debug d={e.data} /></details>;
 }
 

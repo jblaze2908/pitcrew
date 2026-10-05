@@ -26,8 +26,8 @@ export function resumeCrew() { setSetting("paused", "0"); audit("driver", "crew.
 /** Returns the turns this restart cut off; the caller resumes them once reapOrphans has restarted the brains. */
 export function bootRuntime() {
   // Pit stops from a previous process can't be answered: their Codex requests died with the computers. A done-check's
-  // decision is applied in decide(), not by a waiting request, so it survives (a deploy shouldn't expire it).
-  for (const ps of all<{ id: string }>("SELECT id,thread_id FROM pitstops WHERE status='pending' AND kind NOT IN ('hire','engram','check')")) run("UPDATE pitstops SET status='expired', note='Control plane restarted', decided_at=? WHERE id=?", now(), ps.id);
+  // decision is applied in decide(), not by a waiting request, and a vault "update it" reminder waits on nothing, so both stay.
+  for (const ps of all<{ id: string }>("SELECT id,thread_id FROM pitstops WHERE status='pending' AND kind NOT IN ('hire','engram','check','vault')")) run("UPDATE pitstops SET status='expired', note='Control plane restarted', decided_at=? WHERE id=?", now(), ps.id);
   const cut = settleCutTurns();
   run("UPDATE threads SET status='idle' WHERE status!='idle'"); // also clears pre-v1.2 'done'/'failed' thread states
   // Name threads left untitled (from before naming existed, or still on small talk) from their first real message.

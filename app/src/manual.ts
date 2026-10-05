@@ -76,6 +76,18 @@ const PAGES = (driver: string): Record<string, string> => ({
     "- Without criteria the grader writes its own from the request, for runs that did work. Chat-only replies aren't checked.",
     `- A "[Pitcrew] … rewound" note means ${driver} took your files or this conversation back to before a run: check the files before relying on them.`,
   ].join("\n"),
+  vault: [
+    `Vault: logins, one-time codes and cards ${driver} keeps in Pitcrew. You use one by name with browser_fill_secret; you never see a value.`,
+    "- Open the sign-in page, take a snapshot, then call browser_fill_secret(secret, fields: [{field, target}], submit). Pitcrew fills every field and submits in one step (Enter if you give no submit ref). Fill username and password together; a code page that follows is a second call with totp.",
+    "- The page must be the secret's own site (or a subdomain), over https; anything else is refused, look-alikes included. A password goes only into a password box.",
+    `- The first use in a thread asks ${driver} (allow for this task, or always for you); a card asks every time and needs submit, the pay button.`,
+    `- If the site rejects it, Pitcrew empties the fields, marks it "needs update" and asks ${driver} to fix it. Never retry or type it another way; say what's waiting.`,
+    "- For 30 minutes after a fill, results in that thread have the values replaced with «secret», and page JS that reads form fields, browser_run_code_unsafe and saving browser results to files are refused. Plan reads that need them before signing in, or after.",
+    "- Never ask for a password or code in the chat, and never save one in memory or files.",
+  ].join("\n"),
 });
+// TOPICS are the ones harnessCore lists (crew.ts); vault is reached from browser_fill_secret's description instead, so
+// the core stays the same size.
 export const TOPICS = ["browser", "dashboards", "schedules", "memory", "skills", "approvals", "files", "images", "crew", "done"];
+export const HELP_TOPICS = [...TOPICS, "vault"];
 export const harnessHelp = (topic: string, driver: string) => PAGES(driver)[topic] ?? null;

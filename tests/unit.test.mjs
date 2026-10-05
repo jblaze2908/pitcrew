@@ -1224,6 +1224,11 @@ test("the Chief as workspace admin: profile and model changes, file listing and 
   assert.equal(notChief.success, false);
 });
 
+// ---------- vault (synthetic values only) ----------
+const V = await import("../app/dist/src/vault.js");
+const PW = "Tr0ub4dor&3 synthetic", SEED = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"; // RFC 6238's "12345678901234567890"
+const tables = () => JSON.stringify([all("SELECT * FROM events"), all("SELECT * FROM audit"), all("SELECT * FROM jev_labels"), all("SELECT * FROM pitstops")]);
+
 test("since you last looked: runs ended after the thread was last opened are unread; quiet, retro and stopped runs never are", () => {
   const t0 = Date.now(), m = 60000;
   run("INSERT INTO bots(id,name,created_at) VALUES('b_inb','Inboxer',0),('b_inb_chief','Chief',0)");
@@ -1533,4 +1538,180 @@ test("rewind: files go back to before a run, links are never followed, the chat 
   S.pruneShadow(id, 0);
   for (const f of Object.values(now.files)) assert.ok(existsSync(`${root}/data/shadow/${id}/objects/${f.hash}`));
   assert.ok(!existsSync(`${root}/data/shadow/${id}/objects/${s1.files["new.txt"].hash}`), "an object nothing uses goes first");
+});
+test("vault: values are sealed under a 0600 key bound to their row, write-only, and validated", async () => {
+  const { statSync } = await import("node:fs");
+  run("INSERT INTO bots(id,name,created_at) VALUES('b_v','Bill Keeper',0)");
+  const s = V.saveVault({ name: "Test login", site: "https://www.bescom.example/login", kind: "login", username: "driver@example.com", password: PW, allowed: ["b_v", "b_ghost"] });
+  assert.deepEqual([s.site, s.has, s.allowed], ["www.bescom.example", ["username", "password"], ["b_v"]], "unknown members are dropped");
+  V.saveVault({ site: "bescom.example" }, s.id);
+  assert.equal(statSync(`${root}/data/vault.key`).mode & 0o777, 0o600);
+  const blob = one("SELECT blob FROM vault WHERE id=?", s.id).blob;
+  assert.ok(!blob.includes(PW) && !blob.includes(Buffer.from(PW).toString("base64url")));
+  assert.equal(V.reveal(V.findSecret("test LOGIN"), "password"), PW);
+  assert.ok(!JSON.stringify(V.listVault()).includes(PW) && !JSON.stringify(V.listVault()).includes("driver@example.com"), "listing never carries a value");
+  V.saveVault({ password: "", note: "account ending 0000" }, s.id);
+  assert.equal(V.reveal(V.findSecret("Test login"), "password"), PW, "an empty field keeps the stored value");
+  const other = V.saveVault({ name: "Other", site: "other.example", kind: "login", password: "another-synthetic" });
+  run("UPDATE vault SET blob=? WHERE id=?", blob, other.id);
+  assert.throws(() => V.reveal(V.findSecret("Other"), "password"), "a blob moved to another row fails to open");
+  V.removeVault(other.id);
+  assert.throws(() => V.saveVault({ name: "No site", kind: "login", password: "x1234" }), /needs the site/);
+  assert.throws(() => V.saveVault({ name: "Bad card", kind: "card", number: "4111111111111112" }), /doesn't check out/);
+  assert.throws(() => V.saveVault({ name: "Bad seed", kind: "login+totp", site: "x.example", password: "x1234", totp: "not a seed!" }), /seed/);
+  assert.throws(() => V.saveVault({ name: "test login", site: "x.example", kind: "login", password: "x1234" }), /already/);
+  const c = V.saveVault({ name: "Test card", kind: "card", number: "4111 1111 1111 1111", cvc: "123", allowed: ["b_v"], always: ["b_v"] });
+  assert.deepEqual([c.last4, c.always, c.site], ["1111", [], ""], "a card never skips the ask");
+});
+
+test("vault: TOTP matches RFC 6238 and Authenticator exports decode in the browser parser", async () => {
+  const t8 = V.parseTotp(`otpauth://totp/Example:driver?secret=${SEED}&digits=8`);
+  assert.deepEqual([59, 1111111109, 1234567890, 20000000000].map((s) => V.totp(t8, s * 1000)), ["94287082", "07081804", "89005924", "65353130"]);
+  assert.equal(V.totp(V.parseTotp(SEED.toLowerCase()), 59000), "287082");
+  assert.equal(V.parseTotp("otpauth://hotp/x?secret=" + SEED), null);
+  const I = await import("../app/dist/shared/vaultImport.js");
+  const enc = (n) => { const o = []; while (n > 127) { o.push((n & 127) | 128); n = Math.floor(n / 128); } o.push(n); return o; };
+  const bytes = (f, b) => [...enc(f * 8 + 2), ...enc(b.length), ...b], num = (f, v) => [...enc(f * 8), ...enc(v)];
+  const otp = [...bytes(1, Buffer.from("12345678901234567890")), ...bytes(2, Buffer.from("driver@example.com")), ...bytes(3, Buffer.from("ExampleCo")), ...num(4, 1), ...num(5, 1), ...num(6, 2)];
+  const hotp = [...bytes(1, Buffer.from("abcdefghij")), ...bytes(2, Buffer.from("counter")), ...num(6, 1)];
+  const data = Buffer.from([...bytes(1, otp), ...bytes(1, hotp), ...num(2, 1)]).toString("base64");
+  const [a, h] = I.parseMigration(`otpauth-migration://offline?data=${encodeURIComponent(data)}`);
+  assert.deepEqual([a.secret, a.issuer, a.name, a.digits, a.type, h.type], [SEED, "ExampleCo", "driver@example.com", 6, "totp", "hotp"]);
+  assert.equal(V.totp(V.parseTotp(a.uri), 59000), "287082");
+  assert.throws(() => I.parseMigration("otpauth://totp/x"), /migration/);
+  const rows = I.parseGoogleCsv(`name,url,username,password,note\r\nBESCOM,https://www.bescom.example/login,driver@example.com,"p,a""ss\nword",recovery 0000\nApp,android://x@com.example,u,p,\n`);
+  assert.deepEqual(rows.map((r) => [r.name, r.site, r.password]), [["BESCOM", "bescom.example", 'p,a"ss\nword'], ["App", "", "p"]]);
+  assert.ok(!("note" in rows[0]), "notes never leave the browser");
+});
+
+// A stand-in for the computer's Playwright MCP: records each call and answers with result (plus an echo, to check scrubbing).
+const fakeMcp = (result, echo = "") => { const calls = []; return { calls, request: async (_m, p) => { calls.push(p); return { content: [{ type: "text", text: `### Result\n${JSON.stringify(result)}${echo ? `\n### Ran Playwright code\n${echo}` : ""}` }] }; } }; };
+const LOGIN_PAGE = { url: "https://bescom.example/login", text: null, lines: ['- textbox "Email" [ref=e1]', '- textbox "Password" [ref=e2]', '- button "Sign in" [ref=e3]', '- textbox "Code" [ref=e4]'] };
+
+test("vault: a fill types and submits server-side; the value never reaches the result, events, audit or labels", async () => {
+  const Bz = await import("../app/dist/src/runtime/browser.js");
+  const Tl = await import("../app/dist/src/runtime/tools.js");
+  const { snapshots } = await import("../app/dist/src/runtime/state.js");
+  const { setSite, FULL } = await import("../app/dist/src/domains.js");
+  const { getBot } = await import("../app/dist/src/crew.js");
+  setSite("b_v", "bescom.example", "allowed", FULL);
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_v','b_v','v',0,0)");
+  const s = V.findSecret("Test login");
+  V.saveVault({ always: ["b_v"] }, s.id);
+  snapshots.set("cx_v", LOGIN_PAGE);
+  const c = { bot: { id: "b_v" }, mems: new Map() };
+  const mcp = fakeMcp({ ok: true, filled: ["username", "password"], url: "https://bescom.example/home", moved: true, left: 0, pw: false, err: false }, `echo ${PW}`);
+  const r = await Bz.fillSecret(c, "th_v", { tool: "browser_fill_secret", threadId: "cx_v", arguments: { secret: "Test login", fields: [{ field: "username", target: "e1" }, { field: "password", target: "e2" }], submit: "e3" } }, { mcp });
+  assert.equal(r.success, true, r.contentItems[0].text);
+  assert.match(r.contentItems[0].text, /^Filled username, password from "Test login" and clicked submit on bescom\.example; the page is now bescom\.example/);
+  const code = mcp.calls[0].arguments.code;
+  assert.ok(code.includes(JSON.stringify(PW)) && code.includes('"site":"bescom.example"'), "the value goes only into the Playwright call");
+  assert.equal(mcp.calls.length, 1, "fill and submit are one call");
+  // The function itself, against a stand-in page: host and box checks inside the call, then fill, submit and sweep.
+  const fakePage = (url, types, log) => {
+    const frame = { url: () => url, evaluate: async (_fn, vals) => { log.push(["sweep", vals]); return { left: 0, pw: false, err: false }; } };
+    return { url: () => url, mainFrame: () => frame, waitForTimeout: async () => {}, waitForLoadState: async () => {},
+      locator: (sel) => ({ elementHandle: async () => ({ ownerFrame: async () => frame, evaluate: async () => ["input", types[sel] || "text"], fill: async (v) => log.push(["fill", sel, v]) }),
+        click: async () => log.push(["click", sel]), press: async (_k) => log.push(["enter", sel]) }) };
+  };
+  const run_ = async (url, types) => { const log = []; const out = await (0, eval)(code)(fakePage(url, types, log)); return { out, log }; };
+  const good = await run_("https://accounts.bescom.example/login", { "aria-ref=e2": "password" });
+  assert.deepEqual([good.out.ok, good.out.filled, good.log.map((x) => x[0])], [true, ["username", "password"], ["fill", "fill", "click", "sweep"]]);
+  assert.deepEqual(good.log.at(-1)[1], [PW], "only the password is swept from the page afterwards");
+  assert.equal((await run_("https://bescom.example.evil.test/login", { "aria-ref=e2": "password" })).out.why, "page");
+  const wrongBox = await run_("https://bescom.example/login", {});
+  assert.deepEqual([wrongBox.out.why, wrongBox.out.field, wrongBox.log.some((x) => x[0] === "click")], ["field", "password", false], "a password never goes into a text box, and nothing is submitted");
+  assert.ok(!JSON.stringify(r).includes(PW) && !tables().includes(PW), "nowhere else");
+  assert.equal(JSON.parse(one("SELECT data FROM events WHERE thread_id='th_v' AND kind='tool'").data).title, "Signed in to bescom.example with Test login");
+  assert.ok(V.listVault().find((x) => x.name === "Test login").last_used);
+
+  // For the scrub window, every browser result in the thread has the value replaced: a network body and a page JS result.
+  const comp = R.computer(getBot("b_v"));
+  const page = (text) => ({ closed: false, request: async (_m, p) => ({ content: [{ type: "text", text: p.name === "browser_tabs" ? "" : text }] }) });
+  comp.desktop = async () => {}; comp.ensure = async () => {};
+  const real = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ model: "jev-test", answers: { effect: { choice: "read", confidence: 0.99, probabilities: { read: 0.99 } }, outside: { noul: 0.1 } } }) });
+  try {
+    const form = encodeURIComponent(PW).replace(/%20/g, "+");
+    comp.mcps.browser = page(`### Request\nPOST https://bescom.example/session\nusername=driver%40example.com&password=${form}\n{"password":${JSON.stringify(PW)}}`);
+    const net = await Tl.dynamicTool(c, "th_v", { tool: "browser_network_request", threadId: "cx_v", arguments: { index: 3 } });
+    assert.ok(!JSON.stringify(net).includes(form) && !JSON.stringify(net).includes(PW), net.contentItems[0].text);
+    assert.equal(net.contentItems[0].text.split("«secret»").length - 1, 2);
+    comp.mcps.browser = page(`### Result\n"title is ${PW}"`);
+    const ev = await Tl.dynamicTool(c, "th_v", { tool: "browser_evaluate", threadId: "cx_v", arguments: { function: "() => document.title" } });
+    assert.match(ev.contentItems[0].text, /title is «secret»/);
+    assert.ok(!tables().includes(PW), "the scrubbed outputs are what the events keep");
+    // And what could read it back another way is refused while the fill is fresh.
+    for (const [tool, args] of [["browser_evaluate", { function: "() => document.querySelector('input[type=password]').value" }], ["browser_run_code_unsafe", { code: "async (page) => 1" }], ["browser_network_request", { index: 3, filename: "/bot/work/x.txt" }]]) {
+      const x = await Tl.dynamicTool(c, "th_v", { tool, threadId: "cx_v", arguments: args });
+      assert.equal(x.success, false); assert.match(x.contentItems[0].text, /after a vault fill/);
+    }
+  } finally { globalThis.fetch = real; delete comp.mcps.browser; }
+  assert.equal(V.vaultRefusal("th_other", "browser_run_code_unsafe", { code: "x" }), null, "other threads are untouched");
+});
+
+test("vault: a page that isn't the secret's site is refused, look-alikes named, nothing filled", async () => {
+  const Bz = await import("../app/dist/src/runtime/browser.js");
+  const { snapshots } = await import("../app/dist/src/runtime/state.js");
+  const mcp = fakeMcp({ ok: true }), c = { bot: { id: "b_v" }, mems: new Map() };
+  const call = (cx, args) => Bz.fillSecret(c, "th_v", { tool: "browser_fill_secret", threadId: cx, arguments: { secret: "Test login", fields: [{ field: "password", target: "e2" }], ...args } }, { mcp });
+  snapshots.set("cx_vx", { ...LOGIN_PAGE, url: "https://bescorn.example/login" });
+  const r = await call("cx_vx");
+  assert.equal(r.success, false); assert.match(r.contentItems[0].text, /"Test login" is for bescom\.example, and this page is bescorn\.example \(it looks like bescom\.example/);
+  snapshots.set("cx_vh", { ...LOGIN_PAGE, url: "http://bescom.example/login" });
+  assert.match((await call("cx_vh")).contentItems[0].text, /isn't https/);
+  assert.equal(mcp.calls.length, 0);
+  assert.ok(V.siteMatch("accounts.bescom.example", "bescom.example") && !V.siteMatch("bescom.example.evil.test", "bescom.example") && !V.siteMatch("xbescom.example", "bescom.example"));
+  assert.match((await Bz.fillSecret(c, "th_v", { tool: "browser_fill_secret", threadId: "cx_v", arguments: { secret: "Nope", fields: [] } }, { mcp })).contentItems[0].text, /No secret called "Nope". Yours: .*"Test login" \(bescom\.example\)/);
+});
+
+test("vault: the first use in a thread asks; a thread grant holds; a rejected sign-in flags it for the driver", async () => {
+  const Bz = await import("../app/dist/src/runtime/browser.js");
+  const { snapshots } = await import("../app/dist/src/runtime/state.js");
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_va','b_v','va',0,0)");
+  snapshots.set("cx_va", LOGIN_PAGE);
+  V.saveVault({ name: "Ask login", site: "bescom.example", kind: "login+totp", username: "driver@example.com", password: "Ask-synthetic-1", totp: SEED, allowed: ["b_v"] });
+  const c = { bot: { id: "b_v" }, mems: new Map() }, ok = { ok: true, filled: [], url: "https://bescom.example/2fa", moved: true, left: 0, pw: false, err: false };
+  const fill = (fields, mcp) => Bz.fillSecret(c, "th_va", { tool: "browser_fill_secret", threadId: "cx_va", arguments: { secret: "Ask login", fields } }, { mcp });
+  const waitPit = async (kind) => { let ps; for (let i = 0; i < 50 && !(ps = one("SELECT * FROM pitstops WHERE kind=? AND status='pending'", kind)); i++) await new Promise((r) => setTimeout(r, 5)); return ps; };
+  const first = fill([{ field: "username", target: "e1" }, { field: "password", target: "e2" }], fakeMcp(ok));
+  const ps = await waitPit("secret");
+  assert.equal(ps.title, "Bill Keeper wants to sign in to bescom.example with “Ask login” · verify: on bescom.example, https");
+  assert.equal(ps.effect, "signin"); assert.ok(!ps.detail.includes("Ask-synthetic-1"));
+  assert.deepEqual(JSON.parse(ps.detail).fields, [{ field: "username", element: 'textbox "Email"' }, { field: "password", element: 'textbox "Password"' }]);
+  await R.decide(ps.id, "approve", { scope: "thread" });
+  assert.equal((await first).success, true);
+  const m2 = fakeMcp(ok);
+  assert.equal((await fill([{ field: "totp", target: "e4" }], m2)).success, true, "the thread grant covers the next step");
+  assert.equal(one("SELECT COUNT(*) n FROM pitstops WHERE kind='secret'").n, 1);
+  assert.match(m2.calls[0].arguments.code, /"field":"totp","target":"e4","value":"\d{6}"/, "the code is computed at fill time");
+  // The same field again minutes later means the last sign-in didn't work: no blind retry, the driver is asked to update it.
+  const again = await fill([{ field: "password", target: "e2" }], fakeMcp(ok));
+  assert.equal(again.success, false); assert.match(again.contentItems[0].text, /Don't retry/);
+  const vp = await waitPit("vault");
+  assert.equal(vp.title, "Ask login failed — update it in Vault");
+  assert.ok(V.listVault().find((x) => x.name === "Ask login").needs_update);
+  assert.match((await fill([{ field: "totp", target: "e4" }], fakeMcp(ok))).contentItems[0].text, /failed before and waits for .+ to update it in Vault/);
+  V.saveVault({ password: "Ask-synthetic-2" }, V.findSecret("Ask login").id);
+  assert.equal(V.listVault().find((x) => x.name === "Ask login").needs_update, null, "a new value clears it");
+
+  // A site that keeps the password after submit rejected it: flagged the same way, from the page itself.
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_vb','b_v','vb',0,0)");
+  snapshots.set("cx_vb", LOGIN_PAGE);
+  V.saveVault({ always: ["b_v"] }, V.findSecret("Ask login").id);
+  const kept = await Bz.fillSecret(c, "th_vb", { tool: "browser_fill_secret", threadId: "cx_vb", arguments: { secret: "Ask login", fields: [{ field: "password", target: "e2" }] } }, { mcp: fakeMcp({ ...ok, moved: false, left: 1, pw: true, err: true }) });
+  assert.equal(kept.success, false); assert.match(kept.contentItems[0].text, /showed an error after submit/);
+  assert.ok(V.findSecret("Ask login").needs_update);
+
+  // A card asks every time, as a payment, and needs the pay button.
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_vc','b_v','vc',0,0)");
+  (await import("../app/dist/src/domains.js")).setSite("b_v", "shop.example", "allowed");
+  snapshots.set("cx_vc", { ...LOGIN_PAGE, url: "https://shop.example/checkout" });
+  const card = (args) => Bz.fillSecret(c, "th_vc", { tool: "browser_fill_secret", threadId: "cx_vc", arguments: { secret: "Test card", fields: [{ field: "card_number", target: "e1" }], ...args } }, { mcp: fakeMcp(ok) });
+  assert.match((await card({})).contentItems[0].text, /needs submit/);
+  const paying = card({ submit: "e3" }), cp = await waitPit("secret");
+  assert.equal(cp.effect, "pay"); assert.match(cp.title, /wants to pay on shop\.example with card “Test card” ••1111/);
+  await R.decide(cp.id, "approve", { scope: "always" });
+  assert.equal((await paying).success, true);
+  assert.deepEqual(V.findSecret("Test card").always, [], "approving a card never makes it standing");
 });
