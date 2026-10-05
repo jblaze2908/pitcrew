@@ -54,7 +54,7 @@ export const plural = (n: number, word: string, many?: string) => `${n} ${n === 
 export const flat = (t: string | null | undefined) => String(t || "").replace(/^\s*(?:#{1,6}|[-*>]|\d+\.)\s+/gm, "").replace(/\s+/g, " ").trim();
 export const plainText = (t: string | null | undefined) => String(t || "").replace(/[*_#`>|]/g, "").replace(/\s+/g, " ").trim();
 // Older events carry the model-facing snapshot attributes; show role and name only.
-export const tidyTitle = (s: string | null | undefined) => String(s || "").replace(/\s*\[[a-z-]+(=[^\]]*)?\]/g, "").replace(/:(?=\s|$)/g, "");
+export const tidyTitle = (s: string | null | undefined) => String(s || "").replace(/ · pinned$/, "").replace(/\s*\[[a-z-]+(=[^\]]*)?\]/g, "").replace(/:(?=\s|$)/g, "");
 export const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 /** "/bin/zsh -lc 'curl …'" → "curl …": the shell wrapper Codex puts around every command. */
 export const unwrapShell = (s: string) => s.replace(/^\/bin\/(ba|z)?sh -l?c /, "").replace(/^(["'])([\s\S]*)\1$/, "$2");

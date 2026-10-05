@@ -56,7 +56,8 @@ export function pitHistory(q: Q, at = Date.now()): PitHistoryPage {
 
 // --- Threads -------------------------------------------------------------------------------------------------------
 const TOP = "(origin IS NULL OR json_extract(origin,'$.kind') IS NOT 'delegated')";
-const COLS = "id,bot_id,title,status,pinned,archived,test,created_at,updated_at";
+// Pinned threads made before 5 Oct 2026 stored " · pinned" in the title itself.
+const COLS = "id,bot_id,replace(title,' · pinned','') AS title,status,pinned,archived,test,created_at,updated_at";
 const tidyText = (t: unknown) => String(t || "").replace(/[*_`#>]+|\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\s+/g, " ").trim().slice(0, 180);
 
 /** The last thing said in each thread, and whether it was the member: one grouped read over events_thread. */
@@ -82,7 +83,7 @@ export function threadPage(q: Q): ThreadPage {
     const w = ["archived=?", TOP], a: (string | number)[] = [archived];
     if (!test) w.push("test=0");
     if (bot) { w.push("bot_id=?"); a.push(bot); }
-    if (!cur) pinned = all<ThreadListRow>(`SELECT ${COLS} FROM threads WHERE ${w.join(" AND ")} AND pinned=1 ORDER BY updated_at DESC LIMIT 50`, ...a);
+    if (!cur) pinned = all<ThreadListRow>(`SELECT ${COLS} FROM threads WHERE ${w.join(" AND ")} AND pinned=1 AND bot_id IN (SELECT id FROM bots WHERE archived=0) ORDER BY updated_at DESC LIMIT 50`, ...a);
     const got = all<ThreadListRow>(`SELECT ${COLS} FROM threads WHERE ${w.join(" AND ")} AND pinned=0${cur ? " AND (updated_at<? OR (updated_at=? AND id<?))" : ""} ORDER BY updated_at DESC, id DESC LIMIT ?`,
       ...a, ...(cur ? [cur.ts, cur.ts, cur.id] : []), limit + 1);
     rows = got.slice(0, limit);

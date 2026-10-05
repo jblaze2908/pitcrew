@@ -35,7 +35,7 @@ export function ensureChief() {
     "chief", "Crew Chief", "Takes any task, runs a thread for each, and proposes new crew members when work keeps coming back.", "chief", "c1", "square",
     JSON.stringify({ role: "Calm race engineer. Short sentences, facts first.", warmth: 3, talk: 2, humour: 1, quirks: ["Says what changed before what's next"], signoff: "", callMe: "" }),
     provider, DEFAULT_MODEL[provider as ProviderId], 20, "{}", now());
-  run("INSERT INTO threads(id,bot_id,title,pinned,created_at,updated_at) VALUES(?,?,?,?,?,?)", uid("th"), "chief", "Crew Chief · pinned", 1, now(), now());
+  run("INSERT INTO threads(id,bot_id,title,pinned,created_at,updated_at) VALUES(?,?,?,?,?,?)", uid("th"), "chief", "Crew Chief", 1, now(), now());
 }
 
 const clamp = (n: any, lo: number, hi: number, d: number) => (Number.isFinite(+n) ? Math.min(hi, Math.max(lo, Math.round(+n))) : d);
@@ -81,7 +81,7 @@ export function createBot(spec: Spec) {
     id, spec.name, spec.job, "specialist", spec.hue, spec.shape, JSON.stringify(spec.personality), spec.provider, spec.model, spec.weekly_cap_usd, "{}", spec.engram_scope, spec.engram_household ? 1 : 0, now());
   // Read by the member's first Engram link (engram.ts linkMember), then dropped.
   if (spec.engram_connections.length) setSetting(`engram_hire:${id}`, JSON.stringify(spec.engram_connections));
-  run("INSERT INTO threads(id,bot_id,title,pinned,created_at,updated_at) VALUES(?,?,?,?,?,?)", uid("th"), id, `${spec.name} · pinned`, 1, now(), now());
+  run("INSERT INTO threads(id,bot_id,title,pinned,created_at,updated_at) VALUES(?,?,?,?,?,?)", uid("th"), id, spec.name, 1, now(), now());
   audit("driver", "crew.hired", { id, name: spec.name, provider: spec.provider, model: spec.model });
   return getBot(id)!;
 }
