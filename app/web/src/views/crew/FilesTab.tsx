@@ -33,7 +33,7 @@ export function FilesTab({ b, rest }: { b: BotCard; rest: (string | undefined)[]
 const chip = (status: string) => (status === "added" ? ["ok", "new"] : status === "deleted" ? ["bad", "gone"] : ["blue", "edit"]);
 const Delta = ({ n }: { n: number }) => (n ? <span className={n > 0 ? "plus" : "minus"}>{n > 0 ? `+${n}` : `−${-n}`}</span> : null);
 const net = (cs: FileChange[]) => cs.reduce((a, c) => { const l = c.lines || 0; return l > 0 ? [a[0] + l, a[1]] : [a[0], a[1] - l]; }, [0, 0]);
-function Tally({ cs }: { cs: FileChange[] }) {
+export function Tally({ cs }: { cs: FileChange[] }) {
   const [add, del] = net(cs);
   return <>{add ? <span className="plus">{`+${add}`}</span> : null}{del ? <span className="minus">{`−${del}`}</span> : null}</>;
 }
@@ -103,7 +103,7 @@ function RunView({ b, run, nth, of, path }: { b: BotCard; run: ChangeRun; nth: n
   );
 }
 
-function FileBlock({ b, turnId, c, open, focus, split, onToggle }: { b: BotCard; turnId: string; c: FileChange; open: boolean; focus: boolean; split: boolean; onToggle: () => void }) {
+export function FileBlock({ b, turnId, c, open, focus, split, onToggle }: { b: BotCard; turnId: string; c: FileChange; open: boolean; focus: boolean; split: boolean; onToggle: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => { if (focus) ref.current?.scrollIntoView({ block: "start" }); }, [focus]);
   const [tone, label] = chip(c.status);
