@@ -759,3 +759,6 @@ svg text{fill:var(--ink-3);font:10px var(--font-data)}
 .newthread .ways p{display:grid;grid-template-columns:24px 1fr;gap:10px;font-size:13px;line-height:1.5;color:var(--ink-2)}
 .newthread .ways p>b{width:22px;height:22px;border-radius:50%;background:var(--surface-3);color:var(--ink);font:600 11px/22px var(--font-data);text-align:center}
 @media (max-width:900px){.newthread{padding-top:24px}.newthread .ways{grid-template-columns:1fr}}
+/* Pit stop card (Draft F3): a signal ring, a bigger title, the exact action first. */
+.pit:not(.done){border-radius:var(--radius);box-shadow:inset 0 0 0 1.5px var(--signal);background:var(--surface);padding:18px 20px}
+.pit .t{font:700 17px/1.3 var(--font-display)}

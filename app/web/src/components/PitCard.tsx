@@ -33,7 +33,8 @@ export function PitCard({ p: given, onDone }: { p: PitStop; onDone?: (r: PitStop
     if (r?.id) setP(r);
     onDone?.(r);
   };
-  const btn = (label: string, onClick: () => void, sig = false) => <button className={`pc-pill ${sig ? "sig" : "o"} s`} onClick={onClick}>{label}</button>;
+  // The main choice is the plain primary pill; orange stays for "needs you" (the card's ring), not for buttons.
+  const btn = (label: string, onClick: () => void, main = false) => <button className={`pc-pill ${main ? "" : "o"} s`} onClick={onClick}>{label}</button>;
   const openLink = (label: string) => p.thread_id && <a className="small faint" href={`#/t/${p.thread_id}`} style={{ marginLeft: "auto" }}>{label}</a>;
   const noteInput = <input placeholder="Note for the crew (optional)" className="small" value={note} onChange={(e) => setNote(e.target.value)} />;
   const noAlways = ["pay", "delete", "share"].includes(p.effect) || p.kind === "hire" || p.kind === "plan";
@@ -67,7 +68,7 @@ export function PitCard({ p: given, onDone }: { p: PitStop; onDone?: (r: PitStop
     {btn("Accept", () => engram("accept"), true)}
     {btn("Reject", () => engram("reject"))}
     <a className="small faint" href={`${S.engram.url}/#/inbox`} target="_blank" rel="noopener noreferrer" style={{ marginLeft: "auto" }}>Open in Engram</a></div>;
-  else if (p.kind === "hire") actions = <div className="acts"><a className="pc-pill sig s" href={`#/hire/${p.id}`}>Review &amp; hire</a>{btn("Decline", () => decide("deny"))}</div>;
+  else if (p.kind === "hire") actions = <div className="acts"><a className="pc-pill s" href={`#/hire/${p.id}`}>Review &amp; hire</a>{btn("Decline", () => decide("deny"))}</div>;
   else if (p.kind === "lease") actions = <div className="acts">{btn("Hand it back", () => decide("approve", "once"), true)}{btn("Keep control", () => decide("deny"))}<a className="small faint" href={`#/live/${p.bot_id}`} style={{ marginLeft: "auto" }}>Open live view</a></div>;
   else if (p.kind === "site") actions = <>{noteInput}<div className="acts">
     {p.thread_id && btn("Allow once (this thread)", () => decide("approve", "thread"))}
