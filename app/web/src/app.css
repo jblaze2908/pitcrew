@@ -870,6 +870,10 @@ svg text{fill:var(--ink-3);font:10px var(--font-data)}
 
 /* Schedules (H1): a row per schedule, its last 14 runs as dots; open, its history beside its settings. */
 .sch .tbl td{vertical-align:middle}
+.sch-row .row{flex-wrap:nowrap}
+.sch-row td:last-child{white-space:nowrap;width:1%}
+.sch-row td:first-child{min-width:240px}
+.sch-row td:nth-child(4){white-space:nowrap}
 .sch-row{cursor:pointer}
 .sch-row:hover,.sch-row.on{background:var(--surface-2)}
 .sch-row.off{opacity:.6}
