@@ -8,7 +8,7 @@ import { activityNow } from "./bus.js";
 import { getThread } from "./threads.js";
 import { isRunning, recentLines } from "./turns.js";
 
-export const NOT_CONNECTED = "Side questions run on the ChatGPT plan, which isn't connected. Sign in with ChatGPT in Settings → Providers.";
+export const NOT_CONNECTED = "Side questions run on the ChatGPT plan, which isn't connected. Sign in with ChatGPT in Settings → Models.";
 export interface SideTurn { q: string; a: string }
 const STEPS = 10, HISTORY = 4;
 const inFlight = new Set<string>();

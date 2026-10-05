@@ -1,4 +1,4 @@
-// Settings → Vault: secrets the crew fills by name. Values are write-only: the API never returns one, so the editor
+// Settings → Permissions → Vault: secrets the crew fills by name. Values are write-only: the API never returns one, so the editor
 // only knows which fields are "set". Imports (Google Passwords CSV, Authenticator QR) are parsed here in the browser;
 // only the rows or the one seed the driver picks are sent.
 import { useState } from "react";
@@ -11,6 +11,7 @@ import { useStore } from "../lib/store";
 import { toast } from "../lib/toast";
 import { useFetch } from "../lib/useFetch";
 import { BusyButton, ConfirmButton, Face, Field, Seg } from "./ui";
+import { Section, Toggle, Wide } from "../views/settings/kit";
 
 const KINDS = [["login", "login"], ["login+totp", "login + TOTP"], ["card", "card"]] as const;
 type Access = "no" | "ask" | "always";
@@ -25,34 +26,32 @@ export function VaultSettings({ item }: { item?: string }) {
   if (item && (item === "new" || editing)) return <VaultEditor key={item} v={editing || null} bots={S.bots} done={() => { reload(); go("#/settings/vault"); }} />;
   const name = (id: string | null) => S.bots.find((b) => b.id === id)?.name || "a member";
   return (
-    <div className="col vault">
-      <div className="spread" style={{ alignItems: "flex-end", gap: 16 }}>
-        <p className="small muted" style={{ maxWidth: 560 }}>Logins, one-time codes and cards your crew can use without ever seeing them. Pitcrew fills the value into the page and submits; the model only knows the name.</p>
-        <div className="row"><button className="pc-pill o s" onClick={() => setImporting((x) => !x)}>Import</button><a className="pc-pill s" href="#/settings/vault/new">+ Add secret</a></div>
-      </div>
-      {importing && <CsvImport bots={S.bots} done={() => { setImporting(false); reload(); }} />}
+    <Section id="vault" title="Vault" intro="Logins, one-time codes and cards the crew uses without seeing them. Pitcrew types the value in; the model only knows the name."
+      action={<><button className="pc-pill o s" onClick={() => setImporting((x) => !x)}>Import</button><a className="pc-pill s" href="#/settings/vault/new">Add secret</a></>}>
+      {importing && <Wide><CsvImport bots={S.bots} done={() => { setImporting(false); reload(); }} /></Wide>}
       {data.length ? (
-        <div className="vtbl">
-          <div className="vh"><span>Name · site</span><span>Kind</span><span>Who may use it</span><span>Last used</span></div>
+        <div className="vtbl st-vault">
+          <div className="vh"><span>Name</span><span>Kind</span><span>Who may use it</span><span>Last used</span></div>
           {data.map((v) => (
             <a key={v.id} className="vr" href={`#/settings/vault/${v.id}`}>
-              <div><b>{v.name}</b>{v.needs_update && <span className="pc-chip bad" title={v.needs_update}>Needs update</span>}<small>{[v.site || "any checkout", v.kind === "card" && v.last4 ? `card ending ${v.last4}` : "", v.note].filter(Boolean).join(" · ")}</small></div>
-              <span><span className="vk">{v.kind === "card" ? `card ·${v.last4}` : v.kind === "login+totp" ? "login + TOTP" : "login"}</span></span>
+              <div><b>{v.name}</b>{v.needs_update ? <small className="badc" title={v.needs_update}>Sign-in failed. Save the current password.</small>
+                : <small>{[v.site || "Any checkout", v.kind === "card" && v.last4 ? `card ending ${v.last4}` : "", v.note].filter(Boolean).join(" · ")}</small>}</div>
+              <span>{v.kind === "card" ? "Card, asks every time" : v.kind === "login+totp" ? "Login and one-time code" : "Login"}</span>
               <Who v={v} bots={S.bots} />
-              <span className="pc-m small faint" title={v.last_used ? `by ${name(v.last_used_by)}` : undefined}>{v.last_used ? ago(v.last_used) : "never"}</span>
+              <span className="small faint" title={v.last_used ? `by ${name(v.last_used_by)}` : undefined}>{v.last_used ? ago(v.last_used) : "Never"}</span>
             </a>
           ))}
         </div>
-      ) : <p className="empty">No secrets yet. Add one, or import the sites your crew needs from a Google Passwords export.</p>}
-      <p className="small faint" style={{ maxWidth: 640 }}>Values are encrypted on this server with a key that never enters a member's computer. A member asks by name; Pitcrew checks the page is that secret's site and that you allowed it, then types it in and submits itself. Cards always ask, every time.</p>
-    </div>
+      ) : <Wide><p className="st-empty">No secrets yet. Add one, or import the sites your crew needs from a Google Passwords export.</p></Wide>}
+      <p className="st-foot">Open a secret to replace its value or change who may use it. Values are encrypted on this server, never shown again, and never enter a member's computer. Pitcrew checks the page is that secret's site before it types.</p>
+    </Section>
   );
 }
 
 function Who({ v, bots }: { v: VaultEntry; bots: BotCard[] }) {
   const list = bots.filter((b) => v.allowed.includes(b.id));
-  if (!list.length) return <span className="faces faint">nobody yet</span>;
-  return <span className="faces">{list.slice(0, 2).map((b) => <span key={b.id} className="row" style={{ gap: 6 }}><Face b={b} size="xs" />{b.name}</span>)}{list.length > 2 && <span className="faint">{`+${list.length - 2}`}</span>}{v.kind === "card" && <span className="faint">asks every time</span>}</span>;
+  if (!list.length) return <span className="faces faint">Nobody yet</span>;
+  return <span className="faces">{list.slice(0, 1).map((b) => <span key={b.id} className="row" style={{ gap: 6 }}><Face b={b} size="xs" />{b.name}</span>)}{list.length > 1 && <span className="faint">{`+${list.length - 1}`}</span>}</span>;
 }
 
 // One field: write-only, shows "set" when there's a value, and an empty box keeps it.
@@ -76,7 +75,7 @@ function VaultEditor({ v, bots, done }: { v: VaultEntry | null; bots: BotCard[];
   const accessOpts = kind === "card" ? ([["no", "no"], ["ask", "asks every time"]] as const) : ([["no", "no"], ["ask", "asks each thread"], ["always", "without asking"]] as const);
   return (
     <div className="pc-card col" style={{ maxWidth: 640 }}>
-      <div className="spread"><b className="pc-h3">{v ? v.name : "New secret"}</b><a className="small faint" href="#/settings/vault">Back to Vault</a></div>
+      <div className="spread"><b className="pc-h3">{v ? v.name : "New secret"}</b><a className="small faint" href="#/settings/vault">Back to Permissions</a></div>
       {v?.needs_update && <p className="small badc">{`A sign-in with this failed: ${v.needs_update}. Save the current value from your password manager and the crew can use it again.`}</p>}
       <div className="field"><label>Kind</label><Seg options={KINDS} value={kind} onChange={setKind} /></div>
       <Field label="Name the crew uses"><input value={f.name} placeholder="BESCOM login" onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
@@ -169,7 +168,7 @@ function CsvImport({ bots, done }: { bots: BotCard[]; done: () => void }) {
           </label>))}
         </div>
         <div className="field"><label>Crew members who may use them (each asks once per thread)</label>
-          <div className="row" style={{ flexWrap: "wrap" }}>{bots.map((b) => <label key={b.id} className="row small"><input type="checkbox" checked={who.includes(b.id)} onChange={(e) => setWho((w) => (e.target.checked ? [...w, b.id] : w.filter((x) => x !== b.id)))} />{b.name}</label>)}</div>
+          <div className="row" style={{ flexWrap: "wrap", gap: 16 }}>{bots.map((b) => <span key={b.id} className="row small" style={{ gap: 8 }}><Toggle label={b.name} on={who.includes(b.id)} onChange={(on) => setWho((w) => (on ? [...w, b.id] : w.filter((x) => x !== b.id)))} />{b.name}</span>)}</div>
         </div>
         <div className="row"><BusyButton className="pc-pill s" onClick={send}>{`Import ${rows.filter((r) => r.on).length} ticked`}</BusyButton><button className="pc-pill o s" onClick={() => { setRows(null); done(); }}>Cancel</button></div>
       </>}
