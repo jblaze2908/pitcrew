@@ -22,6 +22,7 @@ import { taint, tainted } from "./taint.js";
 import { postLearned } from "./learned.js";
 import { isUsageLimit, armResume, clearResume } from "./resume.js";
 import { nameAfterRun } from "./titles.js";
+import { scheduleRunStarted, scheduleRunEnded, scheduleRunWaiting, scheduleRunCancelled, scheduleRunFailedToStart } from "./schedules.js";
 import { listSkills, skillIndex } from "./skills.js";
 import { CHANGELOG } from "../changelog.js";
 import { runReport, retroReason, retroPrompt, weeklyDue } from "./retro.js";
@@ -57,6 +58,7 @@ export async function sendMessage(threadId: string, { text: given, attachments =
   said();
   startTurn(threadId, text, attachments, trigger).catch((e) => {
     if (e.silent) return;
+    if (trigger === "schedule") scheduleRunFailedToStart(threadId, e.message);
     addEvent(threadId, null, "error", { text: e.message });
     setThreadStatus(threadId, "idle");
   });
@@ -112,6 +114,7 @@ export async function startTurn(threadId: string, text: string, attachments: str
   const turnId = uid("tu");
   active.set(threadId, { turnId, codexTurnId: null, base: null, total: null, last: null, usageFrom: logSize(b.id), editOf: editTarget(text), ...(trigger === "schedule" || trigger === "retro" ? { quietFrom: t.updated_at } : {}) });
   run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,provider,model,started_at) VALUES(?,?,?,?,?,?,?,?)", turnId, threadId, b.id, "starting", trigger, b.provider, b.model, now());
+  if (trigger === "schedule") scheduleRunStarted(threadId, turnId);
   setThreadStatus(threadId, "running");
   try {
     const c = brain(b);
@@ -242,6 +245,8 @@ export async function finishTurn(threadId: string, status: string, error?: strin
     if (ch.length) run("UPDATE turns SET changes=? WHERE id=?", JSON.stringify(ch), a.turnId);
   } catch {}
   postLearned(threadId, a.turnId, b.id);
+  const trig = one<{ trigger: string }>("SELECT trigger FROM turns WHERE id=?", a.turnId)?.trigger;
+  if (trig === "schedule") scheduleRunEnded(a.turnId, status, lastAgentText(threadId, a.turnId) || error || "", u.input, cost.usd + (a.extraUsd || 0));
   // A delegated thread's answer carries what it read, so untrusted content also taints the thread that asked.
   const from = tainted(threadId) && t.origin ? json<{ fromThread?: string }>(t.origin, {}).fromThread : null;
   if (from && taint(from)) addEvent(from, null, "system", { text: `${b.name}'s answer came from a thread with untrusted content. For the next 10 minutes, sending, paying, signing in, sharing and deleting ask you first.` });
@@ -252,7 +257,6 @@ export async function finishTurn(threadId: string, status: string, error?: strin
   bus.emit("turn", { threadId, turnId: a.turnId, status, cost: cost.usd, botId: b.id });
   // A run that stood out, or a scheduled thread's weekly check, queues a retro (retro.ts). Retros never trigger retros,
   // and a usage-limit failure waits for the resume instead.
-  const trig = one<{ trigger: string }>("SELECT trigger FROM turns WHERE id=?", a.turnId)?.trigger;
   if (trig !== "retro" && !(status === "failed" && isUsageLimit(error)) && getSetting("retros", "1") === "1") {
     const rep = runReport(a.turnId), why = rep && (retroReason(rep) || (trig === "schedule" && weeklyDue(threadId) ? "weekly check" : null));
     if (rep && why) enqueue(threadId, { text: retroPrompt(rep, why), attachments: [], trigger: "retro", display: `Retro · ${why}` });
@@ -270,10 +274,10 @@ export function startQueued(threadId: string, quiet = false) {
   const t = getThread(threadId), b = t && getBot(t.bot_id), q = b && peekQueued(threadId);
   if (!q) return false;
   const why = blockedReason(b);
-  if (why) { if (!quiet) addEvent(threadId, null, "error", { text: `${why} Your queued message is still waiting.` }); return false; }
+  if (why) { if (q.via === "schedule") scheduleRunWaiting(threadId, why); if (!quiet) addEvent(threadId, null, "error", { text: `${why} Your queued message is still waiting.` }); return false; }
   takeQueued(threadId, q.id);
   addEvent(threadId, null, "user", { text: q.text, attachments: q.attachments, via: q.via, ...(q.display ? { display: q.display } : {}) });
-  startTurn(threadId, q.text, q.attachments, q.via).catch((e) => { if (!e.silent) { addEvent(threadId, null, "error", { text: e.message }); setThreadStatus(threadId, "idle"); } });
+  startTurn(threadId, q.text, q.attachments, q.via).catch((e) => { if (!e.silent) { if (q.via === "schedule") scheduleRunFailedToStart(threadId, e.message); addEvent(threadId, null, "error", { text: e.message }); setThreadStatus(threadId, "idle"); } });
   return true;
 }
 /** Threads with queued messages and no run, e.g. after a restart or a kill-switch resume. */
@@ -297,7 +301,9 @@ export async function sendQueuedNow(threadId: string, id: string) {
   catch (e) { requeue(threadId, q); throw e; }
 }
 export function removeQueued(threadId: string, id: string) {
+  const q = peekQueued(threadId, id);
   if (!takeQueued(threadId, id)) throw Object.assign(new Error("No such queued message"), { status: 404 });
+  if (q?.via === "schedule") scheduleRunCancelled(threadId);
   return { ok: true };
 }
 

@@ -30,6 +30,12 @@ export interface ScheduleRow {
   id: string; bot_id: string; thread_id: string | null; spec: string; prompt: string;
   next_run: number; last_run: number | null; enabled: number; created_at: number;
 }
+export interface ScheduleRunRow {
+  id: string; schedule_id: string; bot_id: string; thread_id: string | null; turn_id: string | null;
+  kind: "time" | "manual" | "event"; due_at: number; fired_at: number; started_at: number | null; ended_at: number | null;
+  status: "queued" | "running" | "quiet" | "reported" | "failed" | "interrupted" | "cancelled";
+  note: string | null; summary: string | null; input_tokens: number | null; cost_usd: number | null;
+}
 export interface SurfaceRow { id: string; thread_id: string; bot_id: string; title: string; spec: string; saved: number; created_at: number }
 export interface SiteRow { scope: string; domain: string; mode: "allowed" | "read" | "blocked"; overrides: string; by: string; created_at: number; updated_at: number }
 export interface PlanRow {

@@ -79,6 +79,9 @@ export const crewRoutes = new Hono<Env>()
   .post("/api/bots/:id/memory/forget-source", signedIn, async (c) => { const id = c.req.param("id"), b = await jsonBody(c, ForgetSource); const r = run("UPDATE memory SET forgotten_at=? WHERE bot_id=? AND source=? AND forgotten_at IS NULL", now(), id, String(b.source)); audit("driver", "memory.forgot_source", { id, source: b.source }); return c.json({ forgotten: Number(r.changes) }); })
   .post("/api/bots/:id/schedules", signedIn, async (c) => { const b = await jsonBody(c, Schedule); try { return c.json(R.addSchedule(c.req.param("id"), b.threadId as string | null, b.spec, b.prompt)); } catch (e: any) { throw httpErr(400, e.message); } })
   .patch("/api/schedules/:id", signedIn, async (c) => { const b = await jsonBody(c, ScheduleEdit); try { return c.json(R.updateSchedule(c.req.param("id"), null, b, "driver")); } catch (e: any) { throw httpErr(400, e.message); } })
+  .get("/api/schedules", signedIn, (c) => c.json(R.scheduleOverview()))
+  .get("/api/schedules/:id/runs", signedIn, (c) => c.json(R.scheduleRuns(c.req.param("id"), Math.min(200, Number(c.req.query("limit")) || 50))))
+  .post("/api/schedules/:id/run", signedIn, (c) => { try { return c.json({ runId: R.runScheduleNow(c.req.param("id")) }); } catch (e: any) { throw httpErr(404, e.message); } })
   .delete("/api/schedules/:id", signedIn, (c) => { try { R.deleteSchedule(c.req.param("id"), null, "driver"); return c.json({ ok: true }); } catch (e: any) { throw httpErr(404, e.message); } })
 
   // Computers. Watching needs the desktop, so "start" from the UI boots both stages.

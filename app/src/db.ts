@@ -112,6 +112,14 @@ CREATE INDEX IF NOT EXISTS queued_thread ON queued(thread_id, created_at)`);
 db.exec(`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, thread_id TEXT, path TEXT NOT NULL, parent_id TEXT, model TEXT,
   cost REAL, kept_at INTEGER, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS images_path ON images(bot_id, path)`);
+// One row per schedule firing (schedules.ts): when it was due, when its turn started and ended, and how it ended.
+// status: queued → running → quiet | reported | failed | interrupted | cancelled.
+db.exec(`CREATE TABLE IF NOT EXISTS schedule_runs (id TEXT PRIMARY KEY, schedule_id TEXT NOT NULL, bot_id TEXT NOT NULL, thread_id TEXT, turn_id TEXT,
+  kind TEXT NOT NULL, due_at INTEGER NOT NULL, fired_at INTEGER NOT NULL, started_at INTEGER, ended_at INTEGER, status TEXT NOT NULL,
+  note TEXT, summary TEXT, input_tokens INTEGER, cost_usd REAL);
+CREATE INDEX IF NOT EXISTS schedule_runs_sched ON schedule_runs(schedule_id, fired_at);
+CREATE INDEX IF NOT EXISTS schedule_runs_thread ON schedule_runs(thread_id, status);
+CREATE INDEX IF NOT EXISTS schedule_runs_turn ON schedule_runs(turn_id)`);
 // Columns added after v1 shipped; ALTER fails harmlessly once they exist.
 for (const sql of ["ALTER TABLE turns ADD COLUMN changes TEXT", "ALTER TABLE jev_labels ADD COLUMN shadow TEXT",
   "ALTER TABLE threads ADD COLUMN origin TEXT", "ALTER TABLE bots ADD COLUMN private INTEGER NOT NULL DEFAULT 0",
