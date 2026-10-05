@@ -1917,3 +1917,134 @@ test("text helpers: file lines and run errors", async () => {
   assert.equal(errorDetail("Control plane restarted"), null);
   assert.equal(errorLine('{"detail":"Usage limit reached"}'), "Usage limit reached");
 });
+
+test("list params: cursors, limits, ranges, ids and LIKE patterns are validated, never passed through", async () => {
+  const L = await import("../app/dist/src/api/lists.js");
+  assert.deepEqual(L.parseCursor("1700000000000:ps_abc-1"), { ts: 1700000000000, id: "ps_abc-1" });
+  for (const bad of ["", null, "abc:ps_1", "1:", "1:a b", "1:x' OR '1'='1", `1:${"x".repeat(65)}`, "1234567890123456:x"]) assert.equal(L.parseCursor(bad), null, String(bad));
+  assert.equal(L.limitOf(undefined, 12), 12); assert.equal(L.limitOf("0", 12), 12); assert.equal(L.limitOf("-3", 12), 12); assert.equal(L.limitOf("9999", 12), 50); assert.equal(L.limitOf("7.9", 12), 7); assert.equal(L.limitOf("x", 10), 10);
+  const at = 100 * 86400000;
+  assert.equal(L.rangeStart(undefined, at), at - 7 * 86400000); assert.equal(L.rangeStart("30", at), at - 30 * 86400000);
+  assert.equal(L.rangeStart("0", at), 0); assert.equal(L.rangeStart("13", at), at - 7 * 86400000); assert.equal(L.rangeStart("1;DROP", at), at - 7 * 86400000);
+  assert.equal(L.idOf("b_x-1"), "b_x-1"); assert.equal(L.idOf("b x"), null); assert.equal(L.idOf(["b_x"]), null);
+  assert.equal(L.likeOf("50%_off\\"), "%50\\%\\_off\\\\%");
+  assert.equal(L.searchOf(`  ${"q".repeat(300)} `).length, 100);
+});
+
+test("pit stop history pages newest first by cursor, filters on the server and counts on the first page only", async () => {
+  const L = await import("../app/dist/src/api/lists.js");
+  const at = 50 * 86400000, H = 3600000;
+  run("INSERT INTO bots(id,name,created_at) VALUES('b_lh','Lister',0),('b_lh2','Other lister',0)");
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_lh','b_lh','Pay this month''s bills',0,0)");
+  const ps = (id, bot, kind, effect, status, scope, hoursAgo, title) => run("INSERT INTO pitstops(id,bot_id,thread_id,kind,effect,title,detail,status,scope,created_at,expires_at) VALUES(?,?,?,?,?,?,'{}',?,?,?,?)",
+    id, bot, "th_lh", kind, effect, title, status, scope, at - hoursAgo * H, at);
+  for (let i = 0; i < 15; i++) ps(`ps_lh${String(i).padStart(2, "0")}`, "b_lh", "command", "install", "approved", "once", i + 1, `Run: apt install pkg${i}`);
+  ps("ps_lh_pay", "b_lh", "mcp", "pay", "approved", "always", 0.5, "Pay 50%_off at shop");
+  ps("ps_lh_den", "b_lh", "mcp", "send", "denied", null, 0.6, "Send a message");
+  ps("ps_lh_exp", "b_lh", "command", "install", "expired", null, 0.7, "Run: curl x");
+  ps("ps_lh_pend", "b_lh", "command", "install", "pending", null, 0.1, "Run: waiting");
+  ps("ps_lh_old", "b_lh", "command", "install", "approved", "once", 24 * 9, "Run: old");
+  ps("ps_lh_other", "b_lh2", "command", "install", "approved", "once", 2, "Run: elsewhere");
+
+  const p1 = L.pitHistory({ bot: "b_lh", limit: "12" }, at);
+  assert.equal(p1.total, 18, "pending, other members and outside the 7 days are left out");
+  assert.equal(p1.rows.length, 12);
+  assert.deepEqual(p1.rows.slice(0, 3).map((r) => r.id), ["ps_lh_pay", "ps_lh_den", "ps_lh_exp"]);
+  assert.equal(p1.rows[0].thread_title, "Pay this month's bills");
+  const p2 = L.pitHistory({ bot: "b_lh", limit: "12", before: p1.next }, at);
+  assert.equal(p2.total, null, "only the first page counts");
+  assert.equal(p2.next, null);
+  assert.equal(new Set([...p1.rows, ...p2.rows].map((r) => r.id)).size, 18, "pages don't overlap or skip");
+  assert.equal(L.pitHistory({ bot: "b_lh", days: "30" }, at).total, 19);
+  assert.deepEqual(L.pitHistory({ bot: "b_lh", kind: "pay" }, at).rows.map((r) => r.id), ["ps_lh_pay"]);
+  assert.deepEqual(L.pitHistory({ bot: "b_lh", outcome: "standing" }, at).rows.map((r) => r.id), ["ps_lh_pay"]);
+  assert.deepEqual(L.pitHistory({ bot: "b_lh", outcome: "denied" }, at).rows.map((r) => r.id), ["ps_lh_den"]);
+  assert.deepEqual(L.pitHistory({ bot: "b_lh", outcome: "expired" }, at).rows.map((r) => r.id), ["ps_lh_exp"]);
+  assert.equal(L.pitHistory({ bot: "b_lh", outcome: "approved" }, at).total, 15);
+  assert.deepEqual(L.pitHistory({ bot: "b_lh", q: "50%_off" }, at).rows.map((r) => r.id), ["ps_lh_pay"], "% and _ match literally");
+  assert.equal(L.pitHistory({ bot: "b_lh", q: "50_" }, at).total, 0);
+  assert.equal(L.pitHistory({ bot: "b_lh", q: "bills" }, at).total, 18, "the thread's title is searched too");
+  assert.equal(L.pitHistory({ bot: "b_lh", kind: "pay' OR 1=1 --", outcome: "x" }, at).total, 18, "unknown filter values are ignored");
+});
+
+test("thread list: top level only, test threads hidden by default, pinned first, sub-threads nested with who replied", async () => {
+  const L = await import("../app/dist/src/api/lists.js");
+  const { backfillTestThreads } = await import("../app/dist/src/db.js");
+  run("INSERT INTO bots(id,name,created_at) VALUES('b_tl','Threader',0),('b_tl2','Helper',0)");
+  const th = (id, bot, title, at, extra = {}) => run("INSERT INTO threads(id,bot_id,title,pinned,archived,test,origin,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+    id, bot, title, extra.pinned || 0, extra.archived || 0, extra.test || 0, extra.origin ? JSON.stringify(extra.origin) : null, at, at);
+  for (let i = 0; i < 14; i++) th(`th_tl${String(i).padStart(2, "0")}`, "b_tl", `Chore ${i}`, 1000 + i);
+  th("th_tl_pin", "b_tl", "Threader · pinned", 5, { pinned: 1 });
+  th("th_tl_test", "b_tl", "Something", 2000, { test: 1 });
+  th("th_tl_arch", "b_tl", "Old", 2001, { archived: 1 });
+  th("th_tl_k1", "b_tl2", "From Threader: how's it going?", 1500, { origin: { kind: "delegated", fromBot: "b_tl", fromThread: "th_tl13" } });
+  th("th_tl_k2", "b_tl2", "Plan · step", 1501, { origin: { kind: "delegated", fromBot: "b_tl", fromThread: "th_tl13" } });
+  run(`INSERT INTO events(thread_id,kind,data,ts) VALUES('th_tl_k1','user','{"text":"how is it going"}',0),('th_tl_k1','agent','{"text":"**Fine**, mostly reconciling"}',0),('th_tl_k2','user','{"text":"do the step"}',0)`);
+
+  const p1 = L.threadPage({ bot: "b_tl", limit: "12" });
+  assert.deepEqual(p1.pinned.map((r) => r.id), ["th_tl_pin"]);
+  assert.equal(p1.rows.length, 12);
+  assert.equal(p1.rows[0].id, "th_tl13");
+  assert.ok(!p1.rows.some((r) => r.id === "th_tl_test" || r.id === "th_tl_arch"));
+  assert.deepEqual(p1.hidden, { test: 1, sub: 0 }, "sub-threads count under their own member");
+  assert.equal(p1.total, 15);
+  assert.deepEqual(p1.kids.th_tl13.map((k) => [k.id, k.replied, k.snippet]), [["th_tl_k1", true, "Fine, mostly reconciling"], ["th_tl_k2", false, "do the step"]]);
+  const p2 = L.threadPage({ bot: "b_tl", limit: "12", before: p1.next });
+  assert.deepEqual(p2.pinned, [], "pinned come with the first page only");
+  assert.deepEqual(p2.rows.map((r) => r.id), ["th_tl01", "th_tl00"]);
+  assert.equal(p2.next, null); assert.equal(p2.total, null);
+  assert.equal(L.threadPage({ bot: "b_tl2" }).rows.length, 0, "a sub-thread never lists at the top level");
+  assert.equal(L.threadPage({ bot: "b_tl2" }).hidden.sub, 2);
+  const withTest = L.threadPage({ bot: "b_tl", test: "1", limit: "50" });
+  assert.equal(withTest.rows[0].id, "th_tl_test"); assert.equal(withTest.total, 16); assert.equal(withTest.hidden.test, 0);
+  assert.deepEqual(L.threadPage({ bot: "b_tl", archived: "1" }).rows.map((r) => r.id), ["th_tl_arch"]);
+
+  // The one-time backfill for rows from before the flag: by title or by an e2e member, never a lookalike word.
+  run("INSERT INTO bots(id,name,created_at) VALUES('b_e2e','E2E probe',0)");
+  th("th_bf1", "b_tl", "E2E · browser form", 1); th("th_bf2", "b_tl", "Probe: codex upgrade", 1); th("th_bf3", "b_tl", "test", 1); th("th_bf4", "b_e2e", "E2E probe · pinned", 1);
+  th("th_bf5", "b_tl", "Testing the new oven", 1); th("th_bf6", "b_tl", "Codex upgrade health check", 1); th("th_bf7", "b_tl", "Latest tests results", 1);
+  backfillTestThreads();
+  assert.deepEqual(all("SELECT id FROM threads WHERE id LIKE 'th_bf%' AND test=1 ORDER BY id").map((r) => r.id), ["th_bf1", "th_bf2", "th_bf3", "th_bf4"]);
+});
+
+test("telemetry counts every run once as started, splits it the same way everywhere, and pages runs", async () => {
+  const L = await import("../app/dist/src/api/lists.js");
+  const at = 9e12, M = 60000;
+  run("INSERT INTO bots(id,name,created_at) VALUES('b_tm','Meter',0),('b_tm2','Quiet',0)");
+  run("INSERT INTO threads(id,bot_id,title,origin,created_at,updated_at) VALUES('th_tm','b_tm','Monthly spend review',NULL,0,0),('th_tm3','b_tm','Draw the diagram',NULL,0,0),('th_tm2','b_tm2','Asked',?,0,0)", JSON.stringify({ kind: "delegated", fromBot: "b_tm", fromThread: "th_tm" }));
+  const turn = (id, th, bot, status, trigger, minsAgo, error = null, inT = 1000) => run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,error,input_tokens,cached_tokens,output_tokens,cost_usd,cost_basis,started_at,ended_at) VALUES(?,?,?,?,?,?,?,?,?,0,'plan',?,?)",
+    id, th, bot, status, trigger, error, inT, inT / 2, 10, at - minsAgo * M, at - minsAgo * M + 30000);
+  turn("tu_tm1", "th_tm", "b_tm", "failed", "schedule", 100, '400 {"error":{"message":"model not supported"}}');
+  turn("tu_tm2", "th_tm", "b_tm", "completed", "driver", 90);
+  turn("tu_tm3", "th_tm3", "b_tm", "failed", "driver", 80, "Stopped after 30 steps");
+  turn("tu_tm4", "th_tm", "b_tm", "interrupted", "driver", 70, "Control plane restarted");
+  turn("tu_tm5", "th_tm", "b_tm", "completed", "resume", 60);
+  turn("tu_tm6", "th_tm", "b_tm", "interrupted", "driver", 50, "Stopped by you");
+  turn("tu_tm7", "th_tm2", "b_tm2", "running", "delegation", 5);
+  turn("tu_tm8", "th_tm", "b_tm", "completed", "driver", 3 * 24 * 60);
+
+  const s = L.telemetrySummary({ days: "1" }, at);
+  assert.deepEqual(s.runs, { started: 7, finished: 2, failed: 2, cut: 1, stopped: 1, running: 1 });
+  assert.equal(s.runs.finished + s.runs.failed + s.runs.cut + s.runs.stopped + s.runs.running, s.runs.started);
+  assert.deepEqual(s.failures.map((r) => r.id), ["tu_tm3"], "a failure followed by a finished run in its thread needs no look");
+  assert.equal(s.failuresTotal, 1);
+  assert.deepEqual(s.cut, { runs: 1, resumed: 1 });
+  assert.deepEqual(s.busiest, { botId: "b_tm", runs: 6, trigger: "driver" });
+  assert.equal(s.spend.allPlan, true);
+  assert.deepEqual(s.tokens, { input: 7000, cached: 3500, output: 70 });
+  assert.equal(L.telemetrySummary({ days: "7" }, at).runs.started, 8);
+
+  const r1 = L.runPage({ days: "1", limit: "3" }, at);
+  assert.equal(r1.total, 7, "the runs list agrees with the tile");
+  assert.deepEqual(r1.rows.map((r) => r.id), ["tu_tm7", "tu_tm6", "tu_tm5"]);
+  assert.equal(r1.rows[0].from_bot, "b_tm");
+  const seen = [...r1.rows]; let next = r1.next;
+  while (next) { const p = L.runPage({ days: "1", limit: "3", before: next }, at); assert.equal(p.total, null); seen.push(...p.rows); next = p.next; }
+  assert.equal(new Set(seen.map((r) => r.id)).size, 7);
+  assert.deepEqual(L.runPage({ days: "1", outcome: "cut" }, at).rows.map((r) => r.id), ["tu_tm4"]);
+  assert.deepEqual(L.runPage({ days: "1", outcome: "stopped" }, at).rows.map((r) => r.id), ["tu_tm6"]);
+  assert.deepEqual(L.runPage({ days: "1", trigger: "delegation" }, at).rows.map((r) => r.id), ["tu_tm7"]);
+  assert.equal(L.runPage({ days: "1", bot: "b_tm" }, at).total, 6);
+  assert.equal(L.runPage({ days: "1", q: "spend" }, at).total, 5);
+  assert.equal(L.runPage({ days: "1", trigger: "driver'--", outcome: "1=1" }, at).total, 7, "unknown filter values are ignored");
+});

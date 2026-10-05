@@ -11,20 +11,22 @@ import { readBody, jsonBody, raw, text, trimmed, flag, truthy, given, field, pic
 import { AUTONOMY, type Autonomy } from "../runtime/autonomy.js";
 import { addEvent } from "../runtime/threads.js";
 import { threadView } from "./views.js";
+import { threadPage } from "./lists.js";
 import { resolveSurface } from "../ledger.js";
 import { nameFromConversation } from "../runtime/titles.js";
 import type { Ask, Origin, PlanStatus, RoutePick } from "../../shared/types.js";
 import type { SurfaceRow, ThreadRow } from "../models.js";
 
-const NewThread = z.object({ botId: raw, title: text(120, "New thread") });
-const AskBody = z.object({ text: trimmed(20000), botId: raw, dry: raw, crew: raw });
+// test: a probe, e2e or test thread (deploy/e2e.mjs), kept off the Threads page unless asked for.
+const NewThread = z.object({ botId: raw, title: text(120, "New thread"), test: flag });
+const AskBody = z.object({ text: trimmed(20000), botId: raw, dry: raw, crew: raw, test: flag });
 const Reroute = z.object({ botId: raw });
 const AUTONOMY_NOTE: Record<Autonomy, string> = {
   ask: "Ask first: this thread asks before sending, paying, signing in, installing, sharing, deleting or opening a new site.",
   handsfree: "Hands-free: this thread only stops for paying, signing in, sending, sharing, deleting, and sites that look like another or aren't https, or anything that might break a house rule.",
   yolo: "YOLO: this thread runs without pit stops, paying and sending included. Only the safety check's hard blocks, blocked sites and anything that might break a house rule still stop it.",
 };
-const ThreadEdit = z.object({ title: truthy((v) => String(v).slice(0, 120)), archived: given((v) => (v ? 1 : 0)), pinned: given((v) => (v ? 1 : 0)), autonomy: pick(AUTONOMY, undefined) });
+const ThreadEdit = z.object({ title: truthy((v) => String(v).slice(0, 120)), archived: given((v) => (v ? 1 : 0)), pinned: given((v) => (v ? 1 : 0)), test: given((v) => (v ? 1 : 0)), autonomy: pick(AUTONOMY, undefined) });
 const Message = z.object({ text: raw, attachments: field((v): string[] => (Array.isArray(v) ? v.filter((a) => /^uploads\/[\w.-]+$/.test(a)) : [])), mode: raw,
   edit: z.object({ image: z.string().max(300), mask: z.string().max(300).nullish(), marked: z.string().max(300).nullish(), model: z.string().max(120).nullish(),
     pins: z.array(z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), note: z.string().max(200) })).max(9).optional() }).nullish() });
@@ -36,38 +38,18 @@ const rewindMode = (v: unknown): R.RewindMode => (REWIND_MODES as readonly unkno
 const RewindBody = z.object({ mode: pick(REWIND_MODES, "both") });
 
 // Front door: one message, routed to the member whose job covers it. Unsure → the driver picks from the top candidates.
-function openRouted(botId: string, text: string, origin: Origin) {
+function openRouted(botId: string, text: string, origin: Origin, test = false) {
   const id = uid("th");
-  run("INSERT INTO threads(id,bot_id,title,origin,created_at,updated_at) VALUES(?,?,?,?,?,?)", id, botId, "New thread", JSON.stringify(origin), now(), now());
+  run("INSERT INTO threads(id,bot_id,title,origin,test,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", id, botId, "New thread", JSON.stringify(origin), test ? 1 : 0, now(), now());
   return R.sendMessage(id, { text }).then(() => ({ threadId: id, botId }));
 }
 
-type ListRow = { id: string; bot_id: string; title: string; status: string; pinned: number; archived: number; created_at: number; updated_at: number };
-/** The Threads page: every member's threads, newest first, with the last thing said. One query for the rows, one for
- *  their last lines; a search runs findThreads once per member (crews are small). */
-function listAll(q: string, bot: string | null, archived: boolean) {
-  let rows: (ListRow & { snippet?: string })[];
-  if (q.trim()) {
-    const bots = bot ? listBots().filter((b) => b.id === bot) : listBots();
-    const hits = bots.flatMap((b) => R.findThreads(b.id, q, { limit: 50 }).map((f) => ({ ...f, bot_id: b.id })));
-    const ids = hits.map((h) => h.id);
-    const meta = ids.length ? new Map(all<ListRow>(`SELECT id,bot_id,title,status,pinned,archived,created_at,updated_at FROM threads WHERE id IN (${ids.map(() => "?").join(",")})`, ...ids).map((r) => [r.id, r])) : new Map();
-    rows = hits.map((h) => ({ ...meta.get(h.id)!, snippet: h.snippet || undefined })).filter((r) => r.id && !!r.archived === archived);
-  } else rows = all<ListRow>(`SELECT id,bot_id,title,status,pinned,archived,created_at,updated_at FROM threads WHERE archived=?${bot ? " AND bot_id=?" : ""} ORDER BY updated_at DESC LIMIT 300`, archived ? 1 : 0, ...(bot ? [bot] : []));
-  const need = rows.filter((r) => !r.snippet).map((r) => r.id);
-  if (need.length) {
-    const last = all<{ thread_id: string; data: string }>(`SELECT thread_id, data FROM events WHERE id IN (SELECT MAX(id) FROM events WHERE kind IN ('agent','user') AND thread_id IN (${need.map(() => "?").join(",")}) GROUP BY thread_id)`, ...need);
-    const by = new Map(last.map((l) => [l.thread_id, String(json(l.data, {}).text || "").replace(/[*_`#>]+|\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\s+/g, " ").trim().slice(0, 180)]));
-    for (const r of rows) if (!r.snippet) r.snippet = by.get(r.id) || "";
-  }
-  return rows;
-}
-
 export const threadRoutes = new Hono<Env>()
-  .get("/api/threads", signedIn, (c) => c.json(listAll(c.req.query("q") || "", c.req.query("bot") || null, c.req.query("archived") === "1")))
+  // ?q=&bot=&archived=1&test=1&before=<cursor>&limit=; the cost per page is in threadPage()'s comment.
+  .get("/api/threads", signedIn, (c) => c.json(threadPage(c.req.query())))
   .post("/api/threads", signedIn, async (c) => {
     const b = await jsonBody(c, NewThread); if (!getBot(b.botId as string)) throw httpErr(404, "No such crew member");
-    const id = uid("th"); run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES(?,?,?,?,?)", id, b.botId as string, b.title, now(), now());
+    const id = uid("th"); run("INSERT INTO threads(id,bot_id,title,test,created_at,updated_at) VALUES(?,?,?,?,?,?)", id, b.botId as string, b.title, b.test ? 1 : 0, now(), now());
     return c.json({ id });
   })
   .post("/api/ask", signedIn, async (c) => {
@@ -76,7 +58,7 @@ export const threadRoutes = new Hono<Env>()
     if (b.botId) {
       const to = getBot(b.botId as string); if (!to || to.archived) throw httpErr(404, "No such crew member");
       audit("driver", "ask.routed", { botId: to.id, by: "driver" });
-      return c.json(await openRouted(to.id, text, { kind: "routed", by: "driver" }));
+      return c.json(await openRouted(to.id, text, { kind: "routed", by: "driver" }, b.test));
     }
     // dry: routing only, no thread. A dry run may pass a hypothetical crew ([{name, job}]) to try the router before hiring.
     const crew: Candidate[] = b.dry && Array.isArray(b.crew) ? [listBots().find((x) => x.kind === "chief")!, ...b.crew.slice(0, 20).map((x, i) => ({ id: `try${i}`, kind: "specialist", name: String(x.name).slice(0, 60), job: String(x.job || "").slice(0, 300) }))] : listBots();
@@ -88,7 +70,7 @@ export const threadRoutes = new Hono<Env>()
     const sure = pick.confidence == null || pick.confidence >= SURE || !pick.alternatives.length;
     audit("driver", "ask.routed", { botId: pick.botId, by: pick.by, confidence: pick.confidence, ms: pick.ms, asked: !sure });
     if (!sure) return c.json({ choose: [pick.botId, ...pick.alternatives.map((a) => a.botId)] });
-    return c.json(await openRouted(pick.botId, text, { kind: "routed", by: pick.by, confidence: pick.confidence }));
+    return c.json(await openRouted(pick.botId, text, { kind: "routed", by: pick.by, confidence: pick.confidence }, b.test));
   })
   // Your asks on the Pit wall: the latest front-door threads with their live state and a short answer. Per wall render:
   // one indexed query, then two small reads per row (8 rows max).
@@ -123,6 +105,7 @@ export const threadRoutes = new Hono<Env>()
     if (b.title !== undefined) run("UPDATE threads SET title=?, title_auto=0 WHERE id=?", b.title, id);
     if (b.archived !== undefined) run("UPDATE threads SET archived=? WHERE id=?", b.archived, id);
     if (b.pinned !== undefined) run("UPDATE threads SET pinned=? WHERE id=?", b.pinned, id);
+    if (b.test !== undefined) run("UPDATE threads SET test=? WHERE id=?", b.test, id);
     if (b.autonomy !== undefined && R.getThread(id) && R.getThread(id)!.autonomy !== b.autonomy) {
       run("UPDATE threads SET autonomy=? WHERE id=?", b.autonomy, id);
       audit("driver", "thread.autonomy", { id, autonomy: b.autonomy });
