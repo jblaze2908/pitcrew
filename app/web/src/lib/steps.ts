@@ -44,6 +44,8 @@ function browserStep(t: string): StepView | null {
   const key = /\bkey=(\S+)/.exec(rest)?.[1];
   rest = key || rest.replace(/\b[a-z_]+=\S+/gi, "").replace(/\s+/g, " ").trim();
   const [icon, label] = BR_LABEL[tool] || ["browser", words(tool)];
+  // A navigation's "on <host>" is the page it left; the address it opened is the detail.
+  if (tool === "navigate") return { icon, label, detail: rest };
   return { icon, label, detail: [rest, host && `on ${host}`].filter(Boolean).join(" ") };
 }
 
@@ -51,7 +53,8 @@ function browserStep(t: string): StepView | null {
 export function stepView(title: string, connLabel?: string | null): StepView {
   const t = title.trim();
   if (t === "Ran a script") return { icon: "code", label: "Ran a script", detail: "" };
-  if (t.startsWith("$ ")) return { icon: "terminal", label: "Run", detail: t.slice(2) };
+  // Codex titles a shell call with its wrapper: /bin/zsh -lc "curl …" reads as curl ….
+  if (t.startsWith("$ ")) return { icon: "terminal", label: "Run", detail: t.slice(2).replace(/^\/bin\/(ba|z)?sh -l?c /, "").replace(/^(["'])([\s\S]*)\1$/, "$2") };
   if (t.startsWith("Edited ")) return { icon: "file", label: "Edit", detail: t.slice(7) };
   if (t.startsWith("Searched ")) return { icon: "web", label: "Search the web", detail: t.slice(9) };
   const br = browserStep(t);
