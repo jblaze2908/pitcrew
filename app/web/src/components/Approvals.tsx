@@ -8,7 +8,7 @@ import { EffectChip } from "./ui";
 
 const BROWSER_RULE: Record<string, string> = { run_code_unsafe: "Run browser scripts", evaluate: "Run page JavaScript", navigate: "Open pages", click: "Click", type: "Type" };
 /** Rule labels are stored as matched ("browser browser_run_code_unsafe", "run python3 bot/work/x.py"); say them as an action. */
-function RuleLabel({ label }: { label: string }) {
+export function RuleLabel({ label }: { label: string }) {
   const [, core, scope = ""] = /^(.*?)( \(this thread\))?$/.exec(label.replace(/(\/?bot\/work\/)/g, "")) || [];
   const br = /^browser browser_(\w+)$/.exec(core);
   const run = /^run (.+)$/.exec(core);
