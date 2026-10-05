@@ -50,7 +50,7 @@ export function WorkPanel(p: Props) {
         <button className="ib" title="Close the panel" onClick={p.onClose}><Icon name="close" /></button>
       </div>
       <div className="wbody">
-        {p.tab === "plan" && p.plan && <PlanCard P={p.plan} />}
+        {p.tab === "plan" && p.plan && <PlanCard P={p.plan} flat />}
         {p.tab === "screen" && <ScreenTab b={p.b} lease={p.lease} onHandBack={p.onHandBack} />}
         {p.tab === "terminal" && <TerminalTab b={p.b} events={p.events} live={p.live} />}
         {p.tab === "files" && <FilesTab b={p.b} runs={p.runs} />}

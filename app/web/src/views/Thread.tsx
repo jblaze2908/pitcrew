@@ -196,6 +196,7 @@ function LiveThread({ d }: { d: ThreadView }) {
     onMore: (im) => api.post(`/api/threads/${id}/messages`, { text: "Make 4 more variations of this image, same brief.", mode: "queue", edit: { image: im.path } }),
     onKeep: (imageId) => api.post(`/api/images/${imageId}/keep`),
     surface: (sid) => { const s = surfaces[sid]; return s ? <ThreadSurface s={s} /> : null; },
+    onPlan: () => { setTab("plan"); setFollow(false); setOpen(true); },
   };
   const items = layout(events, evCtx);
   // The last group is open on load if the run is still going; groups that arrive live start open.

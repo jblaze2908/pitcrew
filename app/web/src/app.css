@@ -762,3 +762,18 @@ svg text{fill:var(--ink-3);font:10px var(--font-data)}
 /* Pit stop card (Draft F3): a signal ring, a bigger title, the exact action first. */
 .pit:not(.done){border-radius:var(--radius);box-shadow:inset 0 0 0 1.5px var(--signal);background:var(--surface);padding:18px 20px}
 .pit .t{font:700 17px/1.3 var(--font-display)}
+
+/* Plan (Draft F8): flat in the work panel, a chip in the chat that opens it. */
+.plan.flat{background:none;box-shadow:none;border:0;padding:0;gap:10px;overflow:visible}
+.plan.flat .ph{padding:0;border:0;gap:10px}
+.plan.flat .cons{padding:0;border:0;background:none}
+.plan.flat .cons .pc-lab,.plan.flat>.pc-lab{margin-top:6px}
+.plan.flat .pans{padding:12px 14px;border:0;border-radius:10px;background:var(--surface)}
+.plan.flat .it{padding:12px 0}
+.plan.flat .it .ans{margin-top:4px;padding:8px 10px;border-radius:8px;background:var(--surface-2)}
+.plan.flat .sweep{padding:12px 0 0;background:none}
+.plan.flat .plog{padding:8px 0 0}
+.plan .bar,.planchip .bar{display:block;height:4px;border-radius:2px;background:var(--surface-3);overflow:hidden}
+.plan .bar i,.planchip .bar i{display:block;height:100%;background:var(--data);transition:width .3s}
+.planchip{display:flex;flex-direction:column;gap:8px;max-width:520px;padding:12px 14px;text-align:left;cursor:pointer;font:inherit;color:inherit}
+.planchip:hover{box-shadow:inset 0 0 0 1px var(--line-2)}
