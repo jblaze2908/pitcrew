@@ -63,11 +63,8 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
     : p.kind === "teach" ? <TeachSummary d={d} who={who} /> : null;
 
   const outcome = `${p.kind === "engram" && p.note ? p.note : p.status} ${ago(p.decided_at)}`;
-  // gate.ts appends the site to verify, escalation and untrusted-content flags to the title; those stay word for word.
-  const flags = / · (verify: |jev blocked |after untrusted content).*$/.exec(p.title)?.[0] || "";
   const card = d.secret?.kind === "card";
-  const v = pitLabel(p), heading = p.kind === "mcp" ? `${v.label}${v.detail ? ` ${v.detail}` : ""}${plainWords(flags)}`
-    : p.kind === "secret" ? (card ? `Pay on ${d.site?.host} with card “${d.secret?.name}” ••${d.secret?.last4}` : `Sign in to ${d.site?.host} with “${d.secret?.name}”`) : plainWords(p.title);
+  const v = pitLabel(p), heading = pitHeading(p);
   // The safety check's reason, in plain words; who judged it and how long it took stay in the debug details.
   const why = j.reason && <p className="why">{`Safety check: ${plainWords(j.reason)}`}</p>;
   // Decided: one line that opens to the details, so a thread's history doesn't keep full cards around.
@@ -147,6 +144,16 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
       {actions}
     </div>
   );
+}
+
+/** A pit stop's one-line heading, shared with Home's waiting rows. */
+export function pitHeading(p: PitStop): string {
+  const d = p.detail || {};
+  // gate.ts appends the site to verify, escalation and untrusted-content flags to the title; those stay word for word.
+  const flags = / · (verify: |jev blocked |after untrusted content).*$/.exec(p.title)?.[0] || "";
+  const v = pitLabel(p);
+  return p.kind === "mcp" ? `${v.label}${v.detail ? ` ${v.detail}` : ""}${plainWords(flags)}`
+    : p.kind === "secret" ? (d.secret?.kind === "card" ? `Pay on ${d.site?.host} with card “${d.secret?.name}” ••${d.secret?.last4}` : `Sign in to ${d.site?.host} with “${d.secret?.name}”`) : plainWords(p.title);
 }
 
 // A done-check that failed after its retries: each criterion with the grader's verdict, then what would fix it.
