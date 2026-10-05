@@ -112,7 +112,7 @@ function General({ prov }: { prov: Providers }) {
         <select value={S.defaultProvider} onChange={(e) => save({ defaultProvider: e.target.value as ProviderId })}>{Object.entries(prov).map(([k, x]) => <option key={k} value={k}>{x.label}</option>)}</select>
       </Field>
       <label className="row small"><input type="checkbox" checked={S.plainVoice} onChange={(e) => save({ plainVoice: e.target.checked })} />Plain voice for the whole crew</label>
-      <label className="row small" style={{ alignItems: "flex-start" }}>
+      <label className="row small chk">
         <input type="checkbox" checked={S.plans} onChange={(e) => save({ plans: e.target.checked })} />
         <span className="col" style={{ gap: 2 }}>Crew plans<span className="faint">When a message needs several members, the Crew Chief runs it as a todo list. New Chief threads pick this up.</span></span>
       </label>

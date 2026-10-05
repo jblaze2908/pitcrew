@@ -6,7 +6,7 @@ import type { Bot, DelegationCard as Deleg, PitStop, PlanSnapshot, ThreadEvent }
 import { DelegationCard } from "../../components/DelegationCard";
 import { OUTCOME, PitCard } from "../../components/PitCard";
 import { PlanCard, PlanChip } from "../../components/PlanCard";
-import { BusyButton, Face, Md } from "../../components/ui";
+import { BusyButton, Face, Inline, Md } from "../../components/ui";
 import { tidyTitle } from "../../lib/format";
 import { pitLabel, runSummary, stepView } from "../../lib/steps";
 import { Icon } from "../../components/Icon";
@@ -27,7 +27,7 @@ export function UserMsg({ e, botId, fromName, images, onView }: { e: ThreadEvent
   return (
     <div className="msg me">
       {via && <span className="pc-lab">{via}</span>}
-      {ed ? <EditAskView ed={ed} botId={botId} at={e.ts} images={images} onView={onView} /> : d.display || d.text}
+      {ed ? <EditAskView ed={ed} botId={botId} at={e.ts} images={images} onView={onView} /> : <Inline text={d.display || d.text} />}
       {atts.length > 0 && (
         <div className="sent-atts">{atts.map((p) => isImg(p)
           ? <button key={p} className="img-open" title="Open" onClick={() => onView?.(loose(p))}><img src={`/files/${botId}/${p}?inline=1`} alt={p.split("/").pop()} loading="lazy" /></button>
@@ -224,7 +224,7 @@ function CheckLine({ d }: { d: Record<string, any> }) {
   return (
     <div className="ck">
       {src && <a className="th" href={src} target="_blank" rel="noopener"><img src={src} alt="Proof" loading="lazy" /></a>}
-      <div className="tx"><b>Checked</b>{d.evidence ? ` · ${d.evidence}` : ""}
+      <div className="tx"><b>Checked</b>{d.evidence ? <>{" · "}<Inline text={d.evidence} /></> : ""}
         <small>{`Graded by a second model against ${d.n} criteri${d.n === 1 ? "on" : "a"}${d.attempt ? ` after ${d.attempt} ${d.attempt === 1 ? "retry" : "retries"}` : ""}${src ? " · proof kept" : ""}`}</small></div>
     </div>
   );

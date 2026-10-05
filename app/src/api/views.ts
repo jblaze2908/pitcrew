@@ -45,6 +45,7 @@ export function state(): State {
     computersUp: allComputers().filter((c) => c.up).length,
     engram: { linked: linked(), url: engramUrl() },
     unread: R.inbox().unread,
+    formerNames: Object.fromEntries(all<{ id: string; name: string }>("SELECT id, name FROM bots WHERE archived=1").map((b) => [b.id, b.name])),
   };
 }
 export async function threadView(id: string): Promise<ThreadView> {

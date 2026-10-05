@@ -4,7 +4,7 @@ import type { BotCard } from "../../../shared/types";
 import { Icon } from "../components/Icon";
 import { jobLine } from "../components/MemberMenu";
 import { Face, hueStyle } from "../components/ui";
-import { usd } from "../lib/format";
+import { plural, usd } from "../lib/format";
 import { useStore } from "../lib/store";
 
 const STATE: Record<string, string> = { needs: "pit stop", working: "on track", failed: "didn't finish", done: "done", idle: "ready", sleep: "in the garage" };
@@ -23,7 +23,7 @@ export function CrewIndex() {
   return (
     <div className="page crew-index">
       <div className="row"><h1 className="pc-h2">Crew</h1>
-        <span className="pc-m small faint">{`${S.bots.length} members${n("needs") ? ` · ${n("needs")} need you` : ""}${n("working") ? ` · ${n("working")} on track` : ""}`}</span>
+        <span className="pc-m small faint">{`${plural(S.bots.length, "member")}${n("needs") ? ` · ${n("needs")} need you` : ""}${n("working") ? ` · ${n("working")} on track` : ""}`}</span>
         <span style={{ flex: 1 }} />
         <label className="tsearch sm"><Icon name="search" size={14} /><input type="search" placeholder="Find a member" value={q} onChange={(e) => setQ(e.target.value)} /></label>
         <a className="pc-pill s" href="#/hire">+ New crew member</a></div>

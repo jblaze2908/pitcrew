@@ -1,6 +1,6 @@
 // The work panel: what the member is planning, looking at, running and changing in this thread. A tab exists only once
 // there's something in it; the order never changes. Tabs map onto what's awake: Screen = the desktop, Terminal = the shell.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { BotCard, ChangeRun, LiveCommandView, PlanSnapshot, ThreadEvent } from "../../../../shared/types";
 import { useDock } from "../../components/Dock";
 import { Icon } from "../../components/Icon";
@@ -112,7 +112,22 @@ function Gate({ g }: { g?: { effect: string; decision: string } | null }) {
 }
 
 const cwdName = (cwd: string | null | undefined) => (cwd ? cwd.replace(/^\/bot\/work\/?/, "~/work/").replace(/\/$/, "") || "~/work" : "~/work");
+const shownCmd = (s: string) => s.replace(/^\$ /, "");
 const secs = (ms: number | null | undefined) => (ms == null ? "" : ms < 1000 ? `${(ms / 1000).toFixed(1)} s` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms / 60000)} min`);
+const TAIL = 12;
+
+/** One command: its status on a line above so the command keeps the full width (one line until clicked); long output shows its tail. */
+function CmdBlock({ cwd, cmd, meta, output, live }: { cwd?: string | null; cmd: string; meta: ReactNode; output: string; live?: boolean }) {
+  const [wrap, setWrap] = useState(false), [all, setAll] = useState(false);
+  const lines = output.replace(/\n$/, "").split("\n"), cut = !all && lines.length > TAIL;
+  return (
+    <div className={`blk${live ? " hl" : ""}`}>
+      <div className="meta">{meta}</div>
+      <button className={`pr${wrap ? " wrap" : ""}`} title={wrap ? undefined : cmd} onClick={() => setWrap(!wrap)}><span className="cwd">{cwdName(cwd)}</span><span className="cmd">{`$ ${cmd}`}</span></button>
+      {cut && <button className="more" onClick={() => setAll(true)}>{`Show all ${lines.length} lines`}</button>}
+      {(output || live) && <pre className="out">{cut ? lines.slice(-TAIL).join("\n") : output}{live && <span className="cur" />}</pre>}
+    </div>);
+}
 
 /** Every shell command in this thread as one read-only terminal: saved ones from events, running ones from the stream. */
 function TerminalTab({ b, events, live }: { b: BotCard; events: ThreadEvent[]; live: LiveCmd[] }) {
@@ -125,23 +140,15 @@ function TerminalTab({ b, events, live }: { b: BotCard; events: ThreadEvent[]; l
   useLayoutEffect(() => { const el = box.current; if (el) el.scrollTop = el.scrollHeight; }, [lastLen]);
   return (
     <div className="term">
-      <div className="tbar"><i /><i /><i /><span>{`${b.name.toLowerCase().replace(/\s+/g, "-")} · ~/work`}</span><span style={{ marginLeft: "auto" }}>{live.length ? "live · read-only" : b.computer.up ? "read-only" : "asleep · transcript"}</span></div>
+      <div className="tbar"><i /><i /><i /><span>{`${b.name} · ~/work`}</span><span style={{ marginLeft: "auto" }}>{live.length ? "live · read-only" : b.computer.up ? "read-only" : "asleep · transcript"}</span></div>
       <div ref={box} className="tbody">
         {!done.length && !live.length && <p className="faint">No commands yet.</p>}
         {done.filter((e) => match(String(e.data.input || e.data.title))).map((e) => {
-          const code = e.data.exitCode as number | null, cmd = String(e.data.input || e.data.title || "").replace(/^\$ /, "");
-          return (
-            <div key={e.id} className="blk">
-              <div className="pr"><span className="cwd">{cwdName(e.data.cwd)}</span><span className="cmd">{`$ ${cmd}`}</span>
-                <span className="meta"><Gate g={e.data.gate} />{e.data.status === "declined" ? <span className="bad">declined</span> : code != null && <span className={code === 0 ? "ok" : "bad"}>{code}</span>}<span>{secs(e.data.durationMs)}</span><span>{hm(e.ts)}</span></span></div>
-              {e.data.output ? <pre className="out">{String(e.data.output)}</pre> : null}
-            </div>);
+          const code = e.data.exitCode as number | null;
+          return <CmdBlock key={e.id} cwd={e.data.cwd} cmd={shownCmd(String(e.data.input || e.data.title || ""))} output={String(e.data.output || "")}
+            meta={<><Gate g={e.data.gate} />{e.data.status === "declined" ? <span className="bad">declined</span> : code != null && <span className={code === 0 ? "ok" : "bad"}>{code}</span>}<span>{secs(e.data.durationMs)}</span><span>{hm(e.ts)}</span></>} />;
         })}
-        {live.filter((c) => match(c.command)).map((c) => (
-          <div key={c.itemId} className="blk hl">
-            <div className="pr"><span className="cwd">{cwdName(c.cwd)}</span><span className="cmd">{`$ ${c.command}`}</span><span className="meta"><Gate g={c.gate} /><Loader /></span></div>
-            <pre className="out">{c.output}<span className="cur" /></pre>
-          </div>))}
+        {live.filter((c) => match(c.command)).map((c) => <CmdBlock key={c.itemId} live cwd={c.cwd} cmd={shownCmd(c.command)} output={c.output} meta={<><Gate g={c.gate} /><Loader /></>} />)}
       </div>
       <div className="tft"><Icon name="search" size={14} /><input placeholder="Filter commands" value={q} onChange={(e) => setQ(e.target.value)} />
         <span>{`${done.length + live.length} command${done.length + live.length === 1 ? "" : "s"}${failed ? ` · ${failed} failed` : ""}`}</span></div>

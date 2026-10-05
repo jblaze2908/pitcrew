@@ -14,7 +14,7 @@ import { useFetch } from "../lib/useFetch";
 interface Data { pending: PitStop[]; history: PitStop[]; rules: Rule[]; learned: Learned[] }
 
 export function PitStops() {
-  const { bot } = useStore();
+  const { name } = useStore();
   const { data, error, reload } = useFetch(async (): Promise<Data> => {
     const [pending, history, rules, learned] = await Promise.all([
       api.get<PitStop[]>("/api/pitstops?status=pending"), api.get<PitStop[]>("/api/pitstops"), api.get<Rule[]>("/api/rules"), api.get<Learned[]>("/api/learned")]);
@@ -55,8 +55,8 @@ export function PitStops() {
           <thead><tr><th>When</th><th>Crew</th><th>Effect</th><th>What</th><th>Outcome</th><th>Decided by</th></tr></thead>
           <tbody>{data.history.filter((p) => p.status !== "pending").slice(0, 80).map((p) => (
             <tr key={p.id}>
-              <td className="small faint">{when(p.created_at)}</td><td>{bot(p.bot_id)?.name || p.bot_id}</td><td><EffectChip kind={p.effect} /></td><td>{p.title}</td>
-              <td><span className={`pc-chip ${p.status === "approved" ? "ok" : p.status === "denied" ? "bad" : ""}`}>{p.status}</span></td>
+              <td className="small faint nw">{when(p.created_at)}</td><td className="nw">{name(p.bot_id)}</td><td><EffectChip kind={p.effect} /></td><td className="what"><span className="clamp2" title={p.title}>{p.title}</span></td>
+              <td className="nw"><span className={`pc-chip ${p.status === "approved" ? "ok" : p.status === "denied" ? "bad" : ""}`}>{p.status}</span></td>
               <td className="small faint">{p.kind === "engram" ? p.note || "Engram" : p.status === "expired" ? "timeout" : p.scope || "once"}</td>
             </tr>))}
           </tbody>
