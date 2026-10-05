@@ -808,6 +808,22 @@ test("an event schedule fires only on a correctly signed webhook, once per deliv
   R.deleteSchedule(s.id, null, "driver");
 });
 
+test("account sites ask in every thread, even where allowed, and an allow never outlives the thread", async () => {
+  const D = await import("../app/dist/src/domains.js");
+  const bot = { id: "b_sens", name: "Canva Designer", policy: {} };
+  D.setSite("b_sens", "github.com", "allowed", {}, "test");
+  const v = D.siteVerdict(bot, "th_s1", "https://github.com/settings", { navigating: true });
+  assert.equal(v.action, "ask"); assert.equal(v.sensitive, "github.com"); assert.equal(v.detail.sensitive, true);
+  assert.equal(D.siteVerdict(bot, "th_s1", "https://mail.google.com/mail/u/0", { navigating: true }).sensitive, "mail.google.com");
+  assert.equal(D.siteVerdict(bot, "th_s1", "https://netbanking.hdfcbank.com/", { navigating: true }).sensitive, "hdfcbank.com");
+  assert.ok(!D.siteVerdict(bot, "th_s1", "https://www.canva.com/design", { navigating: true }).sensitive, "ordinary sites are untouched");
+  // The driver taps "Allow site" on an account site: it still only opens for this thread.
+  D.applySiteChoice({ id: "ps_s", bot_id: "b_sens", thread_id: "th_s1", detail: JSON.stringify({ site: "google.com", sensitive: true }) }, "approved", "site");
+  assert.equal(D.siteVerdict(bot, "th_s1", "https://mail.google.com/", { navigating: true }).action, "go");
+  assert.equal(D.siteVerdict(bot, "th_s2", "https://mail.google.com/", { navigating: true }).action, "ask");
+  assert.ok(!D.listSites("b_sens").some((r) => r.domain === "google.com"), "no lasting allow is stored");
+});
+
 test("replaying a captured request keeps its headers inside Playwright and applies only the asked change", async () => {
   const Bz = await import("../app/dist/src/runtime/browser.js");
   const details = "### Result\n#7 [POST] https://shop.example/v1/layout/order_history?x=1\n\n  General\n    status:    [200] OK";

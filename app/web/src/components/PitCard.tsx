@@ -81,6 +81,12 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
     <a className="small faint" href={`${S.engram.url}/#/inbox`} target="_blank" rel="noopener noreferrer" style={{ marginLeft: "auto" }}>Open in Engram</a></div>;
   else if (p.kind === "hire") actions = <div className="acts"><a className="pc-pill s" href={`#/hire/${p.id}`}>Review &amp; hire</a>{btn("Decline", () => decide("deny"))}</div>;
   else if (p.kind === "lease") actions = <div className="acts">{btn("Hand it back", () => decide("approve", "once"), true)}{btn("Keep control", () => decide("deny"))}<a className="small faint" href={`#/live/${p.bot_id}`} style={{ marginLeft: "auto" }}>Open live view</a></div>;
+  // An account site (bank, Google, GitHub…) is only ever allowed for this thread (domains.ts SENSITIVE).
+  else if (p.kind === "site" && d.sensitive) actions = <>{noteInput}<div className="acts">
+    {btn("Allow in this thread", () => decide("approve", "thread"), true)}
+    {btn("Not now", () => decide("deny"))}
+    {btn("Block site", () => decide("deny", "block"))}
+    {openLink("Open thread")}</div></>;
   else if (p.kind === "site") actions = <>{noteInput}<div className="acts">
     {p.thread_id && btn("Allow once (this thread)", () => decide("approve", "thread"))}
     {btn("Allow site", () => decide("approve", "site"), true)}
@@ -127,7 +133,7 @@ function SiteSummary({ d }: { d: Record<string, any> }) {
     <div className="col" style={{ gap: 4 }}>
       {warn && <p className="badc small">{`Looks like ${d.lookalike?.brand || d.homograph?.brand || "another site"}${d.lookalike?.domain ? ` (${d.lookalike.domain})` : ""}: ${[d.homograph?.why, d.lookalike?.why].filter(Boolean).join("; ")}${d.homograph?.unicode ? `. Shown as ${d.homograph.unicode}` : ""}.`}</p>}
       <pre>{`${d.url || d.host}\n${d.https ? "https" : "NOT https: anything typed here can be read in transit"}`}</pre>
-      <p className="small faint">Allow site: browse it; other effects follow this member's permissions. Fully: every effect allowed there except paying, which always asks.</p>
+      <p className="small faint">{d.sensitive ? "An account site: it asks in every thread, in every mode, YOLO included." : "Allow site: browse it; other effects follow this member's permissions. Fully: every effect allowed there except paying, which always asks."}</p>
     </div>
   );
 }

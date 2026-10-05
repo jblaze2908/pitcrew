@@ -30,7 +30,7 @@ export async function siteStep(b: Bot, threadId: string, call: Call, auto: Auton
   let sv = siteVerdict(b, threadId, url, opts);
   if (sv.action === "go" || (observing && sv.action === "ask")) return sv;
   // An undecided site opens without asking under YOLO, and under hands-free when it's https and looks like no other site.
-  if (sv.action === "ask" && (auto === "yolo" || (auto === "handsfree" && !sv.warn && sv.site?.https))) return { policy: b.policy, site: sv.site, checkout: sv.checkout, full: false };
+  if (sv.action === "ask" && !sv.sensitive && (auto === "yolo" || (auto === "handsfree" && !sv.warn && sv.site?.https))) return { policy: b.policy, site: sv.site, checkout: sv.checkout, full: false };
   if (sv.action === "ask") {
     const key = `${b.id}|${threadId}|${sv.site!.domain}`;
     if (!siteAsks.has(key)) siteAsks.set(key, pitStop({ botId: b.id, threadId, kind: "site", effect: sv.warn ? "ask" : "browse", title: sv.title!, detail: sv.detail! }).finally(() => siteAsks.delete(key)));
