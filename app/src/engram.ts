@@ -259,7 +259,8 @@ export async function mirrorInbox() {
   for (const raw of inbox.proposals as any[]) {
     if (typeof raw?.id === "string" && (raw.status === undefined || raw.status === "open")) present.add(raw.id);
     const p = ProposalZ.safeParse(raw);
-    if (p.success && p.data.scope !== "private" && (!p.data.status || p.data.status === "open") && openProposal(p.data, agents)) opened++;
+    // Engram's nightly tidy-ups (kind "dream", up to 20 a night) are reviewed in Engram's own inbox, not as pit stops.
+    if (p.success && p.data.kind !== "dream" && p.data.scope !== "private" && (!p.data.status || p.data.status === "open") && openProposal(p.data, agents)) opened++;
   }
   // Global notes wait for the driver (memory tiers, 2026-10-04): nothing here accepts on their behalf.
   for (const ps of all<{ id: string; detail: string }>("SELECT id, detail FROM pitstops WHERE kind='engram' AND status='pending'"))
