@@ -1,7 +1,7 @@
 // A tool step's title (notify.ts toolTitle) as an icon, a plain label and the detail. Parsed from the title, so old
 // threads read the same: "engram.google__gmail_search query=x" → mail · "Search mail" · "x".
 export type StepIcon = "mail" | "calendar" | "drive" | "engram" | "ledger" | "web" | "browser" | "terminal" | "file" | "tool"
-  | "search" | "read" | "add" | "edit" | "remove" | "send" | "code";
+  | "search" | "read" | "add" | "edit" | "remove" | "send" | "code" | "lock";
 export interface StepView { icon: StepIcon; label: string; detail: string }
 
 const GOOGLE: Record<string, [StepIcon, string]> = {
@@ -57,6 +57,9 @@ export function stepView(title: string, connLabel?: string | null): StepView {
   if (t.startsWith("$ ")) return { icon: "terminal", label: "Run", detail: t.slice(2).replace(/^\/bin\/(ba|z)?sh -l?c /, "").replace(/^(["'])([\s\S]*)\1$/, "$2") };
   if (t.startsWith("Edited ")) return { icon: "file", label: "Edit", detail: t.slice(7) };
   if (t.startsWith("Searched ")) return { icon: "web", label: "Search the web", detail: t.slice(9) };
+  // Vault fills (runtime/browser.ts fillSecret) name the secret, never its value.
+  if (t.startsWith("Signed in to ")) return { icon: "lock", label: "Signed in to", detail: t.slice(13) };
+  if (t.startsWith("Used card ")) return { icon: "lock", label: "Used card", detail: t.slice(10) };
   const br = browserStep(t);
   if (br) return br;
   const sp = t.indexOf(" "), head = sp < 0 ? t : t.slice(0, sp), rest = sp < 0 ? "" : tidyArgs(t.slice(sp + 1));
@@ -93,6 +96,9 @@ export function pitLabel(p: { kind: string; title: string; detail?: Record<strin
     return { ...v, detail: on };
   }
   if (p.kind === "mcp" && d.server && tool) { const v = stepView(`${d.server}.${tool}`); return { ...v, detail: "" }; }
+  // Worded like the fill's own step, so an approved ask folds into the row it allowed (Events gatedCalls).
+  if (p.kind === "secret") return d.secret?.kind === "card" ? { icon: "lock", label: "Used card", detail: `${d.secret?.name} on ${d.site?.host}` } : { icon: "lock", label: "Signed in to", detail: `${d.site?.host} with ${d.secret?.name}` };
+  if (p.kind === "vault") return { icon: "lock", label: `${d.secret?.name || "A secret"} failed`, detail: "update it in Vault" };
   return { icon: "tool", label: p.title, detail: "" };
 }
 
@@ -118,6 +124,7 @@ export function runSummary(steps: { type: string; nested: boolean; v: StepView }
     else if (v.label === "Read the page") add("read");
     else if (v.label === "Edit") add("edit", baseName(v.detail));
     else if (v.label === "Search the web") add("search");
+    else if (v.label === "Signed in to") add("signin", / with (.+)$/.exec(v.detail)?.[1]);
     else if (v.icon === "browser") add("browse");
     else add("tool");
   }
@@ -125,8 +132,8 @@ export function runSummary(steps: { type: string; nested: boolean; v: StepView }
   for (const k of order) {
     const c = n.get(k)!, nm = names.get(k) || [];
     if (out.length) out.push(", ");
-    if ((k === "open" || k === "edit") && nm.length <= 2) {
-      out.push(k === "open" ? "opened " : "edited ");
+    if ((k === "open" || k === "edit" || k === "signin") && nm.length <= 2) {
+      out.push(k === "open" ? "opened " : k === "signin" ? "signed in with " : "edited ");
       nm.forEach((x, i) => { if (i) out.push(" and "); out.push({ em: x }); });
       continue;
     }
@@ -134,7 +141,7 @@ export function runSummary(steps: { type: string; nested: boolean; v: StepView }
       command: plural(c, "ran a command", "ran # commands"), script: plural(c, "ran a script", "ran # scripts"),
       bscript: plural(c, "ran a browser script", "ran # browser scripts"), shot: plural(c, "took a screenshot", "took # screenshots"),
       open: `opened ${c} pages`, read: plural(c, "read the page", "read # pages"), edit: `edited ${nm.length} files`,
-      search: plural(c, "searched the web", "searched the web # times"), browse: plural(c, "used the browser", "used the browser # times"),
+      search: plural(c, "searched the web", "searched the web # times"), signin: `signed in ${c} times`, browse: plural(c, "used the browser", "used the browser # times"),
       tool: plural(c, "used a tool", "used # tools"),
     }[k]!);
   }

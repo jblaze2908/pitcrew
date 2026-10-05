@@ -7,7 +7,7 @@ import { DATA, one, run, now, getSetting, setSetting, audit } from "./db.js";
 const SESSION_MS = 30 * 24 * 3600 * 1000;
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
-function fileSecret(name: string, bytes: number) {
+export function fileSecret(name: string, bytes: number) {
   const p = `${DATA}/${name}`;
   if (!existsSync(p)) writeFileSync(p, randomBytes(bytes).toString("base64url"), { mode: 0o600 });
   return readFileSync(p, "utf8").trim();
@@ -59,20 +59,28 @@ export const endAllSessions = () => run("DELETE FROM sessions");
 
 /** A key for one purpose (push links, …), derived from the master key so nothing new is stored. */
 export const macKey = (purpose: string) => createHash("sha256").update(MASTER).update(`pitcrew:${purpose}`).digest();
-export function putSecret(name: string, value: string) {
-  const iv = randomBytes(12);
-  const c = createCipheriv("aes-256-gcm", MASTER, iv);
+// AES-256-GCM as "iv.tag.data" (base64url). aad binds a blob to its row, so a sealed value can't be moved to another.
+export function seal(key: Buffer, value: string, aad = "") {
+  const iv = randomBytes(12), c = createCipheriv("aes-256-gcm", key, iv);
+  if (aad) c.setAAD(Buffer.from(aad));
   const data = Buffer.concat([c.update(String(value), "utf8"), c.final()]);
-  const blob = [iv, c.getAuthTag(), data].map((b) => b.toString("base64url")).join(".");
+  return [iv, c.getAuthTag(), data].map((b) => b.toString("base64url")).join(".");
+}
+export function unseal(key: Buffer, blob: string, aad = "") {
+  const [iv, tag, data] = blob.split(".").map((s) => Buffer.from(s, "base64url"));
+  const d = createDecipheriv("aes-256-gcm", key, iv);
+  if (aad) d.setAAD(Buffer.from(aad));
+  d.setAuthTag(tag);
+  return Buffer.concat([d.update(data), d.final()]).toString("utf8");
+}
+
+export function putSecret(name: string, value: string) {
+  const blob = seal(MASTER, value);
   run("INSERT INTO secrets(name,blob,updated_at) VALUES(?,?,?) ON CONFLICT(name) DO UPDATE SET blob=excluded.blob, updated_at=excluded.updated_at", name, blob, now());
 }
 export function getSecret(name: string): string | null {
   const row = one<{ blob: string }>("SELECT blob FROM secrets WHERE name=?", name);
-  if (!row) return null;
-  const [iv, tag, data] = row.blob.split(".").map((s) => Buffer.from(s, "base64url"));
-  const d = createDecipheriv("aes-256-gcm", MASTER, iv);
-  d.setAuthTag(tag);
-  return Buffer.concat([d.update(data), d.final()]).toString("utf8");
+  return row ? unseal(MASTER, row.blob) : null;
 }
 export const secretMeta = (name: string) => one<{ updated_at: number }>("SELECT updated_at FROM secrets WHERE name=?", name) || null;
 export const deleteSecret = (name: string) => run("DELETE FROM secrets WHERE name=?", name);

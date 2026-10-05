@@ -1,8 +1,9 @@
-// Settings: general, model providers and keys, the Engram link, crew-wide sites, safety (the kill switch), account.
+// Settings: general, model providers and keys, the Engram link, crew-wide sites, the vault, safety (the kill switch), account.
 import { useEffect, useState } from "react";
 import type { ProviderId, ProviderStatus, State } from "../../../shared/types";
 import { EngramSettings } from "../components/Engram";
 import { SitesEditor } from "../components/SitesEditor";
+import { VaultSettings } from "../components/Vault";
 import { BusyButton, ConfirmButton, Field, Loader, Seg } from "../components/ui";
 import { api } from "../lib/api";
 import { when } from "../lib/format";
@@ -11,9 +12,9 @@ import { toast } from "../lib/toast";
 import { useFetch } from "../lib/useFetch";
 
 type Providers = Record<ProviderId, ProviderStatus>;
-const TAB_IDS = ["general", "models", "phone", "engram", "sites", "safety", "account"] as const;
+const TAB_IDS = ["general", "models", "phone", "engram", "sites", "vault", "safety", "account"] as const;
 
-export function Settings({ tab: asked }: { tab: string }) {
+export function Settings({ tab: asked, item }: { tab: string; item?: string }) {
   const { S } = useStore();
   const prov = useFetch(() => api.get<Providers>("/api/providers"), []);
   if (prov.error && !prov.data) return <div className="page"><p className="badc">{prov.error}</p></div>;
@@ -21,7 +22,7 @@ export function Settings({ tab: asked }: { tab: string }) {
   const p = prov.data;
   const tab = (TAB_IDS as readonly string[]).includes(asked) ? asked : "general";
   const anyKey = Object.values(p).some((x) => x.connected);
-  const tabs: [string, string, boolean][] = [["general", "General", false], ["models", "Models and keys", !anyKey], ["phone", "Phone", false], ["engram", "Engram", false], ["sites", "Sites", false], ["safety", "Safety", S.paused], ["account", "Account", false]];
+  const tabs: [string, string, boolean][] = [["general", "General", false], ["models", "Models and keys", !anyKey], ["phone", "Phone", false], ["engram", "Engram", false], ["sites", "Sites", false], ["vault", "Vault", false], ["safety", "Safety", S.paused], ["account", "Account", false]];
   return (
     <div className="page">
       <h1 className="pc-h2">Settings</h1>
@@ -34,6 +35,7 @@ export function Settings({ tab: asked }: { tab: string }) {
       {tab === "phone" && <Phone />}
       {tab === "engram" && <EngramSettings />}
       {tab === "sites" &&<SitesEditor scope="global" help="Every crew member gets these. A member's own entry wins, except a crew-wide block. Loopback (the crew's own file server) is always allowed; private network addresses never are." />}
+      {tab === "vault" && <VaultSettings item={item} />}
       {tab === "safety" && <Safety jev={!!p.openrouter?.connected} />}
       {tab === "account" && <Account />}
     </div>

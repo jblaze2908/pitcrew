@@ -2,6 +2,7 @@
 import { one, run, now, uid, json, audit } from "../db.js";
 import { getBot, normaliseSpec, createBot } from "../crew.js";
 import { applySiteChoice } from "../domains.js";
+import { applySecretChoice } from "../vault.js";
 import type { PitstopRow } from "../models.js";
 import type { PitStop } from "../../shared/types.js";
 import { bus } from "./bus.js";
@@ -57,6 +58,7 @@ export async function decide(id: string, decision: string, { scope = "once", not
     run("INSERT INTO rules(id,bot_id,thread_id,effect,match,label,created_at) VALUES(?,?,?,?,?,?,?)", uid("ru"), ps.bot_id, scope === "thread" ? ps.thread_id : null, ps.effect, match, `${describePattern(match)}${scope === "thread" ? " (this thread)" : ""}`, now());
   }
   if (ps.kind === "site") applySiteChoice(ps, status, scope);
+  if (ps.kind === "secret") applySecretChoice(ps, status, scope);
   if (ps.kind === "soul" && status === "approved") applySoul(detail);
   if (ps.kind === "retire" && status === "approved") applyRetire(detail);
   if (ps.kind === "member" && status === "approved") applyMemberChange(detail);
