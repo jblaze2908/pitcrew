@@ -7,6 +7,7 @@ import * as R from "../runtime/index.js";
 import { getBot, listBots, plansOn } from "../crew.js";
 import { allComputers, allBrains } from "../computer.js";
 import { linked, engramUrl } from "../engramStore.js";
+import { newThreadAutonomy } from "../runtime/autonomy.js";
 import type { Bot, BotCard, Mood, PitStop, ProviderId, State, ThreadSummary, ThreadView, ThreadEvent } from "../../shared/types.js";
 import type { PitstopRow, EventRow, LearnedRow, SurfaceRow } from "../models.js";
 import { liveCommands } from "../runtime/state.js";
@@ -37,7 +38,7 @@ export function state(): State {
   const pending = all<PitstopRow>("SELECT * FROM pitstops WHERE status='pending' ORDER BY created_at").map(pitRow) as PitStop[];
   const dayStart = (() => { const d = new Date(now() + 330 * 60000); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - 330 * 60000; })();
   return {
-    driverName: getSetting("driver_name", "Driver"), paused: getSetting("paused") === "1", defaultProvider: getSetting("default_provider", "openrouter") as ProviderId, plainVoice: getSetting("plain_voice") === "1",
+    driverName: getSetting("driver_name", "Driver"), paused: getSetting("paused") === "1", defaultProvider: getSetting("default_provider", "openrouter") as ProviderId, plainVoice: getSetting("plain_voice") === "1", newThreadMode: newThreadAutonomy(),
     bots: listBots().map((b) => botCard(b, pending, 12)), pitstops: pending, providers: P.providerStatus(), plans: plansOn(),
     today: one<{ usd: number; runs: number }>("SELECT COALESCE(SUM(cost_usd),0) usd, COUNT(*) runs FROM turns WHERE started_at>=?", dayStart)!,
     week: one<{ usd: number; runs: number }>("SELECT COALESCE(SUM(cost_usd),0) usd, COUNT(*) runs FROM turns WHERE started_at>=?", R.weekStart())!,
