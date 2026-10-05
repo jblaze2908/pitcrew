@@ -38,7 +38,29 @@ function openRouted(botId: string, text: string, origin: Origin) {
   return R.sendMessage(id, { text }).then(() => ({ threadId: id, botId }));
 }
 
+type ListRow = { id: string; bot_id: string; title: string; status: string; pinned: number; archived: number; created_at: number; updated_at: number };
+/** The Threads page: every member's threads, newest first, with the last thing said. One query for the rows, one for
+ *  their last lines; a search runs findThreads once per member (crews are small). */
+function listAll(q: string, bot: string | null, archived: boolean) {
+  let rows: (ListRow & { snippet?: string })[];
+  if (q.trim()) {
+    const bots = bot ? listBots().filter((b) => b.id === bot) : listBots();
+    const hits = bots.flatMap((b) => R.findThreads(b.id, q, { limit: 50 }).map((f) => ({ ...f, bot_id: b.id })));
+    const ids = hits.map((h) => h.id);
+    const meta = ids.length ? new Map(all<ListRow>(`SELECT id,bot_id,title,status,pinned,archived,created_at,updated_at FROM threads WHERE id IN (${ids.map(() => "?").join(",")})`, ...ids).map((r) => [r.id, r])) : new Map();
+    rows = hits.map((h) => ({ ...meta.get(h.id)!, snippet: h.snippet || undefined })).filter((r) => r.id && !!r.archived === archived);
+  } else rows = all<ListRow>(`SELECT id,bot_id,title,status,pinned,archived,created_at,updated_at FROM threads WHERE archived=?${bot ? " AND bot_id=?" : ""} ORDER BY updated_at DESC LIMIT 300`, archived ? 1 : 0, ...(bot ? [bot] : []));
+  const need = rows.filter((r) => !r.snippet).map((r) => r.id);
+  if (need.length) {
+    const last = all<{ thread_id: string; data: string }>(`SELECT thread_id, data FROM events WHERE id IN (SELECT MAX(id) FROM events WHERE kind IN ('agent','user') AND thread_id IN (${need.map(() => "?").join(",")}) GROUP BY thread_id)`, ...need);
+    const by = new Map(last.map((l) => [l.thread_id, String(json(l.data, {}).text || "").replace(/[*_`#>]+|\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\s+/g, " ").trim().slice(0, 180)]));
+    for (const r of rows) if (!r.snippet) r.snippet = by.get(r.id) || "";
+  }
+  return rows;
+}
+
 export const threadRoutes = new Hono<Env>()
+  .get("/api/threads", signedIn, (c) => c.json(listAll(c.req.query("q") || "", c.req.query("bot") || null, c.req.query("archived") === "1")))
   .post("/api/threads", signedIn, async (c) => {
     const b = await jsonBody(c, NewThread); if (!getBot(b.botId as string)) throw httpErr(404, "No such crew member");
     const id = uid("th"); run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES(?,?,?,?,?)", id, b.botId as string, b.title, now(), now());

@@ -1,8 +1,8 @@
 // Who a member is (saved with one button) and what it may do without asking (each toggle saves on its own).
 import { useState } from "react";
-import type { BotCard, Decision, EngramScope } from "../../../../shared/types";
+import type { BotCard, Decision, EngramScope, Hue, Shape } from "../../../../shared/types";
 import { ModelPicker } from "../../components/ModelPicker";
-import { ConfirmButton, Field } from "../../components/ui";
+import { ConfirmButton, Face, Field, hueStyle } from "../../components/ui";
 import { api } from "../../lib/api";
 import { go } from "../../lib/router";
 import { useStore } from "../../lib/store";
@@ -11,6 +11,24 @@ import { toast } from "../../lib/toast";
 export const DIALS = ["warmth", "talk", "humour"] as const;
 export const SCOPE_LABEL: Record<EngramScope, string> = { personal: "Personal", finance: "Money", health: "Health" };
 export const splitQuirks = (s: string) => s.split(";").map((x) => x.trim()).filter(Boolean);
+
+const HUES: Hue[] = ["c1", "c2", "c3", "c5", "c6"];
+const SHAPES: Shape[] = ["square", "round", "blob"];
+/** Colour and shape save as you pick: the face shows everywhere at once, so there's nothing to confirm. */
+function FacePicker({ b: page }: { b: BotCard }) {
+  const { refresh, bot } = useStore();
+  const b = bot(page.id) || page; // the page's copy is fetched once; the store follows each save
+  const set = async (patch: { hue?: Hue; shape?: Shape }) => { await api.patch(`/api/bots/${b.id}`, patch); await refresh(); };
+  return (
+    <div className="row" style={{ gap: 18, flexWrap: "nowrap", alignItems: "center" }}>
+      <Face b={b} size="lg" />
+      <div className="col" style={{ gap: 8 }}>
+        <p className="pc-lab">Face <span className="faint" style={{ textTransform: "none", letterSpacing: 0 }}>· saves as you pick</span></p>
+        <div className="swatches">{HUES.map((c) => <button key={c} className={`swatch ${c === b.hue ? "on" : ""}`} style={hueStyle(c)} title={c} aria-pressed={c === b.hue} onClick={() => set({ hue: c })} />)}</div>
+        <div className="shapes">{SHAPES.map((sh) => <button key={sh} className={sh === b.shape ? "on" : ""} title={sh} aria-pressed={sh === b.shape} onClick={() => set({ shape: sh })}><Face b={{ hue: b.hue, shape: sh }} size="sm" /></button>)}</div>
+      </div>
+    </div>);
+}
 
 export function ProfileTab({ b }: { b: BotCard }) {
   const { S, refresh } = useStore();
@@ -34,6 +52,7 @@ export function ProfileTab({ b }: { b: BotCard }) {
     <div className="grid2">
       <div className="pc-card col">
         <p className="pc-lab">Who</p>
+        <FacePicker b={b} />
         <Field label="Name"><input value={f.name} disabled={chief} onChange={(e) => set("name", e.target.value)} /></Field>
         <Field label="Job"><textarea value={f.job} onChange={(e) => set("job", e.target.value)} /></Field>
         <Field label="Weekly cap (USD)" help="The runtime refuses new runs once this week's estimate reaches the cap."><input type="number" min={0} step="0.5" value={f.cap} onChange={(e) => set("cap", e.target.value)} /></Field>

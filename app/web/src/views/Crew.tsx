@@ -7,6 +7,7 @@ import { api } from "../lib/api";
 import { usd } from "../lib/format";
 import { useLiveReload } from "../lib/live";
 import { go } from "../lib/router";
+import { useStore } from "../lib/store";
 import { useFetch } from "../lib/useFetch";
 import { ComputerTab } from "./crew/ComputerTab";
 import { FilesTab } from "./crew/FilesTab";
@@ -15,29 +16,31 @@ import { MemoryTab, SchedulesTab } from "./crew/Lists";
 import { ProfileTab } from "./crew/ProfileTab";
 import { ThreadsTab } from "./crew/ThreadsTab";
 
-const TABS = ["threads", "files", "data", "computer", "profile", "memory", "schedules", "rules", "sites"];
+// Five tabs (Draft F11). The old tab names still open, folded into the tab that now holds them.
+const TABS = ["threads", "files", "computer", "memory", "settings"];
+const OLD: Record<string, string> = { schedules: "threads", data: "files", sites: "computer", profile: "settings", rules: "settings" };
 
-export function Crew({ id, tab, rest }: { id: string; tab: string; rest: (string | undefined)[] }) {
+export function Crew({ id, tab: asked, rest }: { id: string; tab: string; rest: (string | undefined)[] }) {
+  const tab = OLD[asked] || asked;
+  const { bot } = useStore();
   const { data: d, error, reload } = useFetch(() => api.get<BotDetail>(`/api/bots/${id}`), [id]);
   // Only the live tabs follow events: threads (runs and pit stops) and computer (up, down, lease).
   useLiveReload((e) => "botId" in e.data && e.data.botId === id
     && (tab === "threads" ? ["thread", "turn", "pitstop"].includes(e.type) : tab === "computer" && ["computer", "lease"].includes(e.type)), reload);
   if (error && !d) return <div className="page"><p className="badc">{error}</p></div>;
   if (!d) return null;
-  const b = d.bot;
+  // The page fetches the member once (with all its threads); face, mood and computer follow the live store.
+  const live = bot(id);
+  const b = live ? { ...d.bot, hue: live.hue, shape: live.shape, mood: live.mood, computer: live.computer } : d.bot;
   const newThread = async () => { const r = await api.post<{ id: string }>("/api/threads", { botId: id, title: "New thread" }); go(`#/t/${r.id}`); };
 
   let body;
   switch (tab) {
-    case "threads": body = <ThreadsTab b={b} />; break;
-    case "files": body = <FilesTab b={b} rest={rest} />; break;
-    case "data": body = <DataTab b={b} />; break;
-    case "computer": body = <ComputerTab b={b} reload={reload} />; break;
-    case "profile": body = <ProfileTab key={b.id} b={b} />; break;
+    case "threads": body = <div className="col" style={{ gap: 28 }}><ThreadsTab b={b} /><section className="col"><p className="pc-lab">Schedules</p><SchedulesTab b={b} list={d.schedules} reload={reload} /></section></div>; break;
+    case "files": body = <div className="col" style={{ gap: 28 }}><FilesTab b={b} rest={rest} /><section className="col"><p className="pc-lab">Data</p><DataTab b={b} /></section></div>; break;
+    case "computer": body = <div className="col" style={{ gap: 28 }}><ComputerTab b={b} reload={reload} /><section className="col"><p className="pc-lab">Sites</p><SitesEditor scope={b.id} help={`Sites for ${b.name}. These win over the crew-wide list in Settings, except a crew-wide block.`} /></section></div>; break;
     case "memory": body = <MemoryTab b={b} memory={d.memory} global={d.global} error={d.memoryError} reload={reload} />; break;
-    case "schedules": body = <SchedulesTab b={b} list={d.schedules} reload={reload} />; break;
-    case "sites": body = <SitesEditor scope={b.id} help={`Sites for ${b.name}. These win over the crew-wide list in Settings, except a crew-wide block.`} />; break;
-    default: body = <div className="col"><RulesList rules={d.rules} after={reload} /><LearnedList items={d.learned} after={reload} /></div>;
+    default: body = <div className="col" style={{ gap: 28 }}><ProfileTab key={b.id} b={b} /><section className="col"><p className="pc-lab">Standing rules</p><RulesList rules={d.rules} after={reload} /><LearnedList items={d.learned} after={reload} /></section></div>;
   }
   return (
     <div className="page">
