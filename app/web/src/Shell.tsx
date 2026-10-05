@@ -1,5 +1,6 @@
 // The signed-in app: the sidebar (threads, nav, crew) and the routed view.
-import { useLayoutEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
+import { api } from "./lib/api";
 import { DockProvider } from "./components/Dock";
 import { Side } from "./components/Side";
 import { startStream, useRoute, type Route } from "./lib/router";
@@ -37,6 +38,12 @@ export function Shell() {
   const route = useRoute();
   // A layout effect runs before any view's fetch effect, so the stream is open first and less lands between the two.
   useLayoutEffect(() => { startStream(); }, []);
+  // While Pitcrew is in view, phone pushes stay off (runtime/push.ts): a beat every 60 s and on coming back.
+  useEffect(() => {
+    const beat = () => { if (document.visibilityState === "visible") api.post("/api/presence", undefined, { quiet: true }).catch(() => {}); };
+    beat(); const t = setInterval(beat, 60000); document.addEventListener("visibilitychange", beat);
+    return () => { clearInterval(t); document.removeEventListener("visibilitychange", beat); };
+  }, []);
   return (
     <DockProvider>
       <div className="app">

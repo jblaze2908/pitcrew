@@ -57,6 +57,8 @@ export const sessionValid = (token: string | undefined) => !!token && !!one("SEL
 export const endSession = (token: string | undefined) => token && run("DELETE FROM sessions WHERE hash=?", sha(token));
 export const endAllSessions = () => run("DELETE FROM sessions");
 
+/** A key for one purpose (push links, …), derived from the master key so nothing new is stored. */
+export const macKey = (purpose: string) => createHash("sha256").update(MASTER).update(`pitcrew:${purpose}`).digest();
 export function putSecret(name: string, value: string) {
   const iv = randomBytes(12);
   const c = createCipheriv("aes-256-gcm", MASTER, iv);
