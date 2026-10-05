@@ -94,13 +94,18 @@ test("schedules carry a short title: given, backfilled from the prompt, or reset
   assert.equal(R.scheduleTitle("Review today's spending in Tijori. Then compare it with the goals."), "Review today's spending in Tijori.");
   assert.equal(R.scheduleTitle("[Scheduled: daily 09:00]\n\nCheck the BESCOM portal"), "Check the BESCOM portal");
   const long = R.scheduleTitle("every day at 22:00 asia/kolkata run one pass over the grocery ledger and the bank feed and label whatever is new");
-  assert.ok(long.length <= 60 && long.endsWith("…") && long.startsWith("Every day"), long);
+  assert.ok(long.length <= 60 && long.endsWith("…") && long.startsWith("One pass over"), long);
+  assert.equal(R.scheduleTitle("Every day at 22:00 Asia/Kolkata, review spending"), "Review spending");
   assert.equal(R.scheduleTitle("```\nonly code\n```"), "Untitled schedule");
   // Rows from before the column: NULL or empty titles get one; titled rows are left alone.
   run("INSERT INTO schedules(id,bot_id,spec,prompt,next_run,created_at,title) VALUES('sc_old1','b_ttl','daily 08:00','Morning bill check\nLook at the inbox',1,0,NULL),('sc_old2','b_ttl','daily 09:00','x',1,0,''),('sc_old3','b_ttl','daily 10:00','y',1,0,'Kept')");
   assert.equal(R.backfillScheduleTitles(), 2);
   assert.deepEqual(all("SELECT id,title FROM schedules WHERE bot_id='b_ttl' ORDER BY id").map((r) => [r.id, r.title]), [["sc_old1", "Morning bill check"], ["sc_old2", "X"], ["sc_old3", "Kept"]]);
   assert.equal(R.backfillScheduleTitles(), 0, "a second pass finds nothing to name");
+  // A title the first backfill copied from a timing-led line is renamed once.
+  run("INSERT INTO schedules(id,bot_id,spec,prompt,next_run,created_at,title) VALUES('sc_old4','b_ttl','daily 22:00','Every day at 22:00 Asia/Kolkata, review spending',1,0,'Every day at 22:00 Asia/Kolkata, review spending')");
+  assert.equal(R.backfillScheduleTitles(), 1);
+  assert.equal(one("SELECT title FROM schedules WHERE id='sc_old4'").title, "Review spending");
   const a = R.addSchedule("b_ttl", null, "daily 22:00", "Review spend", "  Daily   expense review ");
   assert.equal(a.title, "Daily expense review");
   assert.equal(R.addSchedule("b_ttl", null, "daily 22:00", "Sort new mail\nand flag bills").title, "Sort new mail");
