@@ -126,6 +126,8 @@ CREATE INDEX IF NOT EXISTS schedule_runs_turn ON schedule_runs(turn_id)`);
 db.exec(`CREATE TABLE IF NOT EXISTS vault (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, site TEXT NOT NULL DEFAULT '',
   kind TEXT NOT NULL CHECK (kind IN ('login','login+totp','card')), note TEXT NOT NULL DEFAULT '', last4 TEXT, blob TEXT NOT NULL, has TEXT NOT NULL DEFAULT '[]',
   allowed TEXT NOT NULL DEFAULT '[]', always TEXT NOT NULL DEFAULT '[]', last_used INTEGER, last_used_by TEXT, needs_update TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`);
+// Member email (runtime/mail.ts): one address per member and who may wake it.
+db.exec(`CREATE TABLE IF NOT EXISTS mailboxes (bot_id TEXT PRIMARY KEY, handle TEXT NOT NULL UNIQUE, senders TEXT NOT NULL DEFAULT '[]', others TEXT NOT NULL DEFAULT 'hold', created_at INTEGER NOT NULL)`);
 // Columns added after v1 shipped; ALTER fails harmlessly once they exist.
 for (const sql of ["ALTER TABLE turns ADD COLUMN changes TEXT", "ALTER TABLE jev_labels ADD COLUMN shadow TEXT",
   "ALTER TABLE threads ADD COLUMN origin TEXT", "ALTER TABLE bots ADD COLUMN private INTEGER NOT NULL DEFAULT 0",

@@ -12,7 +12,7 @@ import { toast } from "../lib/toast";
 import { useFetch } from "../lib/useFetch";
 
 type Providers = Record<ProviderId, ProviderStatus>;
-const TAB_IDS = ["general", "models", "phone", "engram", "sites", "vault", "safety", "account"] as const;
+const TAB_IDS = ["general", "models", "phone", "email", "engram", "sites", "vault", "safety", "account"] as const;
 
 export function Settings({ tab: asked, item }: { tab: string; item?: string }) {
   const { S } = useStore();
@@ -22,7 +22,7 @@ export function Settings({ tab: asked, item }: { tab: string; item?: string }) {
   const p = prov.data;
   const tab = (TAB_IDS as readonly string[]).includes(asked) ? asked : "general";
   const anyKey = Object.values(p).some((x) => x.connected);
-  const tabs: [string, string, boolean][] = [["general", "General", false], ["models", "Models and keys", !anyKey], ["phone", "Phone", false], ["engram", "Engram", false], ["sites", "Sites", false], ["vault", "Vault", false], ["safety", "Safety", S.paused], ["account", "Account", false]];
+  const tabs: [string, string, boolean][] = [["general", "General", false], ["models", "Models and keys", !anyKey], ["phone", "Phone", false], ["email", "Email", false], ["engram", "Engram", false], ["sites", "Sites", false], ["vault", "Vault", false], ["safety", "Safety", S.paused], ["account", "Account", false]];
   return (
     <div className="page">
       <h1 className="pc-h2">Settings</h1>
@@ -33,6 +33,7 @@ export function Settings({ tab: asked, item }: { tab: string; item?: string }) {
         <p className="small faint">jev (the pit-stop decider) runs on TypeSafe Jev through your OpenRouter key. Without one, every consequential action becomes a pit stop.</p>
       </div>}
       {tab === "phone" && <Phone />}
+      {tab === "email" && <Email />}
       {tab === "engram" && <EngramSettings />}
       {tab === "sites" &&<SitesEditor scope="global" help="Every crew member gets these. A member's own entry wins, except a crew-wide block. Loopback (the crew's own file server) is always allowed; private network addresses never are." />}
       {tab === "vault" && <VaultSettings item={item} />}
@@ -56,6 +57,43 @@ function Phone() {
       <Field label="ntfy topic URL"><input placeholder="https://ntfy.example.com/pitcrew-crew" value={u} onChange={(e) => setUrl(e.target.value)} /></Field>
       <Field label={`Access token${f.data.token ? " (saved)" : ""}`}><input type="password" placeholder={f.data.token ? "Leave empty to keep it" : "Only if the topic is protected"} value={token} onChange={(e) => setToken(e.target.value)} /></Field>
       <div className="row"><BusyButton className="pc-pill s" onClick={save}>Save</BusyButton><BusyButton className="pc-pill o s" onClick={test}>Send a test</BusyButton></div>
+    </div>
+  );
+}
+
+// Member email (runtime/mail.ts): the driver's own addresses, the worker's address and secret, each member's mailbox.
+function Email() {
+  const { S } = useStore();
+  const f = useFetch(() => api.get<{ domain: string; driverEmails: string[]; boxes: { bot_id: string; handle: string }[] }>("/api/mail"), []);
+  const [mine, setMine] = useState<string | null>(null), [hook, setHook] = useState<{ url: string; secret: string } | null>(null);
+  if (!f.data) return null;
+  const saveMine = async () => { await api.put("/api/mail", { driverEmails: mine ?? f.data!.driverEmails.join(", ") }); f.reload(); toast("Saved"); };
+  return (
+    <div className="col" style={{ maxWidth: 760, gap: 16 }}>
+      <div className="pc-card col">
+        <p className="small muted">{`Each member can have an address at ${f.data.domain}. Forward or CC bills there and the member wakes on its own. Email text reaches it as untrusted data; mail from someone not listed waits for you.`}</p>
+        <Field label="Your addresses (mail from these always wakes a member)"><input placeholder="you@gmail.com, you@work.com" value={mine ?? f.data.driverEmails.join(", ")} onChange={(e) => setMine(e.target.value)} onBlur={saveMine} /></Field>
+        {hook ? <div className="col" style={{ gap: 4 }}><span className="small faint">Cloudflare Email Worker settings (integrations/cloudflare-email):</span><code className="small">{`PITCREW_MAIL_URL=${hook.url}`}</code><code className="small">{`PITCREW_MAIL_SECRET=${hook.secret}`}</code></div>
+          : <div className="row"><BusyButton className="pc-pill o s" onClick={async () => setHook(await api.get("/api/mail/secret"))}>Show worker settings</BusyButton></div>}
+      </div>
+      {S.bots.filter((b) => !b.archived).map((b) => <MailboxCard key={b.id} botId={b.id} name={b.name} domain={f.data!.domain} onSaved={f.reload} />)}
+    </div>
+  );
+}
+function MailboxCard({ botId, name, domain, onSaved }: { botId: string; name: string; domain: string; onSaved: () => void }) {
+  const f = useFetch(() => api.get<{ box: { handle: string; senders: string[]; others: "hold" | "drop" } | null }>(`/api/bots/${botId}/mailbox`), [botId]);
+  const [handle, setHandle] = useState<string | null>(null), [senders, setSenders] = useState<string | null>(null), [others, setOthers] = useState<"hold" | "drop" | null>(null);
+  if (!f.data) return null;
+  const box = f.data.box, h = handle ?? box?.handle ?? name.toLowerCase().replace(/[^a-z0-9]+/g, ""), snd = senders ?? (box?.senders || []).join(", "), oth = others ?? box?.others ?? "hold";
+  const save = async () => { await api.put(`/api/bots/${botId}/mailbox`, { handle: h, senders: snd.split(/[\s,]+/).filter(Boolean), others: oth }); f.reload(); onSaved(); toast("Saved"); };
+  const off = async () => { await api.put(`/api/bots/${botId}/mailbox`, { off: true }); f.reload(); onSaved(); };
+  return (
+    <div className="pc-card col">
+      <div className="spread"><b className="pc-h3">{name}</b><span className={`pc-chip ${box ? "ok" : ""}`}>{box ? `${box.handle}@${domain}` : "no address"}</span></div>
+      <div className="row" style={{ alignItems: "flex-end" }}><Field label="Address"><input value={h} onChange={(e) => setHandle(e.target.value)} /></Field><span className="small faint" style={{ paddingBottom: 10 }}>{`@${domain}`}</span></div>
+      <Field label="Who else may wake it" help="Addresses, or a whole domain as @bescom.co.in"><input placeholder="@bescom.co.in, billing@airtel.in" value={snd} onChange={(e) => setSenders(e.target.value)} /></Field>
+      <Field label="Anyone else"><Seg options={[["hold", "Hold for me"], ["drop", "Drop"]] as const} value={oth} onChange={setOthers} /></Field>
+      <div className="row"><BusyButton className="pc-pill s" onClick={save}>{box ? "Save" : "Give it an address"}</BusyButton>{box && <BusyButton className="pc-pill o s" onClick={off}>Turn off</BusyButton>}</div>
     </div>
   );
 }

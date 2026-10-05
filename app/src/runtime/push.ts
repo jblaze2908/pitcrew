@@ -8,7 +8,7 @@ import { getSecret, putSecret, deleteSecret, macKey } from "../auth.js";
 import type { PitstopRow } from "../models.js";
 
 const HOST = process.env.PITCREW_HOST || "pitcrew.example.com";
-const PHONE_APPROVES = new Set(["command", "mcp", "file", "site", "secret"]);
+const PHONE_APPROVES = new Set(["command", "mcp", "file", "site", "secret", "mail"]);
 const NEVER_FROM_PHONE = new Set(["pay"]);
 const PRESENT_MS = 90000;
 let seenAt = 0;

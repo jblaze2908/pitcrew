@@ -92,7 +92,8 @@ export type ThreadStatus = "idle" | "running" | "needs";
 export type Origin =
   | { kind: "routed"; by: string; confidence?: number | null; from?: string }
   | { kind: "delegated"; fromBot: string; fromThread: string; delegationId?: string; planId?: string; itemKey?: string }
-  | { kind: "schedule"; scheduleId: string; runId: string; spec?: string };
+  | { kind: "schedule"; scheduleId: string; runId: string; spec?: string }
+  | { kind: "email"; from: string; subject: string };
 
 export interface Thread {
   id: string; bot_id: string; title: string; codex_id: string | null; pinned: number; status: ThreadStatus;

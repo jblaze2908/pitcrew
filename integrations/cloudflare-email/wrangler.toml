@@ -1,0 +1,5 @@
+name = "pitcrew-email"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+# Secrets, set with `wrangler secret put` (values from Pitcrew → Settings → Email → Show worker settings):
+#   PITCREW_MAIL_URL, PITCREW_MAIL_SECRET
