@@ -16,8 +16,9 @@ export interface TurnRow {
   id: string; thread_id: string; bot_id: string; codex_turn_id: string | null; status: string; trigger: string;
   provider: string | null; model: string | null; input_tokens: number; cached_tokens: number; output_tokens: number;
   cost_usd: number; cost_basis: string; error: string | null; started_at: number; ended_at: number | null; changes: string | null;
+  criteria: string | null; grade: string | null; rewound_at: number | null;
 }
-export interface EventRow { id: number; thread_id: string; turn_id: string | null; kind: string; data: string; ts: number }
+export interface EventRow { id: number; thread_id: string; turn_id: string | null; kind: string; data: string; ts: number; rewound: number | null }
 export interface PitstopRow {
   id: string; bot_id: string; thread_id: string | null; turn_id: string | null; kind: string; effect: string;
   title: string; detail: string; jev: string; status: "pending" | "approved" | "denied" | "expired";

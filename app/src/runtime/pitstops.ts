@@ -11,6 +11,7 @@ import { getThread, addEvent, setThreadStatus } from "./threads.js";
 import { describePattern, learnable, learn, learnProgress } from "./rules.js";
 import { addSchedule } from "./schedules.js";
 import { applySoul, applyRetire, applyMemberChange, applyFileDeletion } from "./manage.js";
+import { applyCheckDecision } from "./donecheck.js";
 
 // similar: what "allow similar" (scope thread or always) would cover, named the way the rules list names it.
 export const pitRow = (p: PitstopRow | undefined): PitStop | undefined => {
@@ -60,6 +61,7 @@ export async function decide(id: string, decision: string, { scope = "once", not
   if (ps.kind === "retire" && status === "approved") applyRetire(detail);
   if (ps.kind === "member" && status === "approved") applyMemberChange(detail);
   if (ps.kind === "files" && status === "approved") applyFileDeletion(detail);
+  if (ps.kind === "check") applyCheckDecision(ps, status, scope);
   if (detail.pattern && ps.kind !== "hire" && (status === "approved" || status === "denied") && note !== "Kill switch" && learnable(getBot(ps.bot_id)?.policy, ps.effect, json(ps.jev, {}).by)) learn(ps, detail, status);
   run("UPDATE pitstops SET status=?, scope=?, note=?, decided_at=? WHERE id=?", status, scope, String(note).slice(0, 500), now(), id);
   // A kill-switch denial judges nothing about the call, so it trains as no answer.
@@ -69,7 +71,8 @@ export async function decide(id: string, decision: string, { scope = "once", not
   const row = one<PitstopRow>("SELECT * FROM pitstops WHERE id=?", id);
   bus.emit("pitstop", { id, botId: ps.bot_id, threadId: ps.thread_id, status, pitstop: pitRow(row) });
   if (ps.thread_id && active.has(ps.thread_id)) setThreadStatus(ps.thread_id, "running");
-  if (ps.thread_id && status === "expired") addEvent(ps.thread_id, null, "system", { text: `Pit stop expired after 30 minutes: nothing was done. (${ps.title})` });
+  const waited = Math.round((ps.expires_at - ps.created_at) / 60000);
+  if (ps.thread_id && status === "expired") addEvent(ps.thread_id, null, "system", { text: `Pit stop expired after ${waited >= 2880 ? `${Math.round(waited / 1440)} days` : waited >= 120 ? `${Math.round(waited / 60)} hours` : `${waited} minutes`}: nothing was done. (${ps.title})` });
   // Codex reports a declined command as "rejected by user"; the member also hears it was only unanswered. Lazy import:
   // turns.ts depends on this module.
   if (ps.thread_id && status === "expired" && ps.kind === "command" && active.has(ps.thread_id))

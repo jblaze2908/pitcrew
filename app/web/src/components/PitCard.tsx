@@ -7,10 +7,11 @@ import { pitLabel } from "../lib/steps";
 import { useStore } from "../lib/store";
 import { toast } from "../lib/toast";
 import { ProposalSummary } from "./Engram";
+import { Icon } from "./Icon";
 import { StepIcon } from "./StepIcon";
 import { EffectChip, Face } from "./ui";
 
-type Scope = "once" | "thread" | "always" | "site" | "full" | "block";
+type Scope = "once" | "thread" | "always" | "site" | "full" | "block" | "retry";
 
 /** What a decided pit stop came to, as a short tag. */
 export const OUTCOME: Record<PitStop["status"], string> = { pending: "waiting", approved: "approved", denied: "denied", expired: "no answer" };
@@ -54,7 +55,8 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
     : p.kind === "soul" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><pre>{d.soul}</pre>{d.before && <details><summary className="small faint">Current SOUL</summary><pre>{d.before}</pre></details>}</div>
     : p.kind === "retire" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><p className="small faint">{d.memberName}: {d.job || "no job set"}{d.schedules ? ` · ${d.schedules} schedule${d.schedules === 1 ? "" : "s"} will stop` : ""}. Threads and memory stay.</p></div>
     : p.kind === "member" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p>{(d.diff || []).map((x: { field: string; before: string; after: string }) => <div key={x.field}><b className="small">{x.field}</b><pre>{`${x.before || "(empty)"}\n→ ${x.after || "(empty)"}`}</pre></div>)}</div>
-    : p.kind === "files" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><pre>{(d.paths || []).map((x: { path: string; dir: boolean; size: number }) => `${x.path}${x.dir ? "/ (folder and everything in it)" : ` · ${x.size} B`}`).join("\n")}</pre></div> : null;
+    : p.kind === "files" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><pre>{(d.paths || []).map((x: { path: string; dir: boolean; size: number }) => `${x.path}${x.dir ? "/ (folder and everything in it)" : ` · ${x.size} B`}`).join("\n")}</pre></div>
+    : p.kind === "check" ? <CheckSummary d={d} who={who} /> : null;
 
   const outcome = `${p.kind === "engram" && p.note ? p.note : p.status} ${ago(p.decided_at)}`;
   // gate.ts appends the site to verify, escalation and untrusted-content flags to the title; those stay word for word.
@@ -97,6 +99,11 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
   else if (p.kind === "retire") actions = <div className="acts">{btn(`Retire ${d.memberName || "member"}`, () => decide("approve", "once"), true)}{btn("Keep", () => decide("deny"))}{openLink("Open thread")}</div>;
   else if (p.kind === "member") actions = <div className="acts">{btn("Apply changes", () => decide("approve", "once"), true)}{btn("Keep as is", () => decide("deny"))}{openLink("Open thread")}</div>;
   else if (p.kind === "files") actions = <div className="acts">{btn("Delete", () => decide("approve", "once"), true)}{btn("Keep files", () => decide("deny"))}{openLink("Open thread")}</div>;
+  // Done-check: approve once accepts the run as is; approve with scope retry sends the member back once more.
+  else if (p.kind === "check") actions = <div className="acts">
+    {p.thread_id && <a className="pc-pill s" href={`#/t/${p.thread_id}`}>Open the thread</a>}
+    {btn("Accept as is", () => decide("approve", "once"))}
+    {btn("Try again", () => decide("approve", "retry"))}</div>;
   else if (p.kind === "plan") actions = <div className="acts">
     {btn(p.effect === "browse" ? "Allow for this plan" : "Allow", () => decide("approve", "once"), true)}
     {btn(p.effect === "browse" ? "Use what they know" : "Finish with what it has", () => decide("deny"))}
@@ -111,7 +118,7 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
   return (
     <div className="pit">
       <div className="spread">
-        <div className="row"><Face b={b} size="sm" mood="needs" /><b>{b?.name || p.bot_id}</b><EffectChip kind={p.effect} /></div>
+        <div className="row"><Face b={b} size="sm" mood="needs" /><b>{b?.name || p.bot_id}</b>{p.kind === "check" ? <span className="eff-tag">Done-check</span> : <EffectChip kind={p.effect} />}</div>
         <span className="pc-m small faint">{p.kind === "engram" ? "from Engram" : `expires ${when(p.expires_at)}`}</span>
       </div>
       <p className="t">{heading}</p>
@@ -122,6 +129,18 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
         ? `Approve this and ${who} stops asking for “${p.learn.label}”.`
         : `Approve “${p.learn.label}” ${p.learn.need - p.learn.streak} times in a row and ${who} stops asking.`}</p>}
       {actions}
+    </div>
+  );
+}
+
+// A done-check that failed after its retries: each criterion with the grader's verdict, then what would fix it.
+function CheckSummary({ d, who }: { d: Record<string, any>; who: string }) {
+  const crit = (d.criteria || []) as { text: string; verdict: string; why: string }[];
+  return (
+    <div className="col" style={{ gap: 8 }}>
+      <div className="crit">{crit.map((c, i) => <div key={i}><span className={c.verdict === "pass" ? "y" : "n"}><Icon name={c.verdict === "pass" ? "check" : "close"} size={12} /></span>
+        <span>{c.text}{c.verdict !== "pass" && c.why ? <span className="faint">{` · ${c.why}`}</span> : null}</span></div>)}</div>
+      <p className="small faint">{`${who} tried ${d.attempts ? `${d.attempts + 1} times` : "once"}.${d.fix ? ` ${d.fix}` : ""}`}</p>
     </div>
   );
 }
