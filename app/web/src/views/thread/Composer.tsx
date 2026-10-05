@@ -46,8 +46,8 @@ function QueuedStack({ threadId, queued, fromName, onEdit }: { threadId: string;
 // never on by accident or forgotten.
 export const AUTONOMY = [
   ["ask", "Ask me", "Asks before sending, paying, signing in, installing, sharing, deleting or a new site."],
-  ["handsfree", "Hands-free", "Stops only for paying, signing in, sending, sharing, deleting, look-alike or non-https sites, and your don'ts."],
-  ["yolo", "YOLO", "No pit stops, paying and sending included. Only hard blocks, blocked sites and your don'ts stop it."],
+  ["handsfree", "Hands-free", "Stops only for paying, signing in, sending, sharing, deleting, look-alike or non-https sites, and house rules."],
+  ["yolo", "YOLO", "No pit stops, paying and sending included. Only hard blocks, blocked sites and house rules stop it."],
 ] as const;
 
 function ModePicker({ threadId, value, onChange }: { threadId: string; value: string; onChange: (a: string) => void }) {
