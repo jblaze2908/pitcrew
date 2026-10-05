@@ -21,3 +21,5 @@ export { stopPlan } from "./plans.js";
 export { nextRun, addSchedule, listSchedules, updateSchedule, deleteSchedule } from "./schedules.js";
 export { takeControl, handBack, leaseHeld } from "./lease.js";
 export { killSwitch, resumeCrew, bootRuntime, settleCutTurns, resumable, resumeCut } from "./lifecycle.js";
+export { doneCheck, parseGrade, normCriteria, setDoneCriteria, gatherEvidence, retryPrompt, MAX_RETRIES } from "./donecheck.js";
+export { rewind, rewindPlan, boundaryOf, type RewindMode } from "./rewind.js";

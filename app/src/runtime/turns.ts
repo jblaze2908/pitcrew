@@ -5,7 +5,8 @@ import { one, all, run, now, uid, json, getSetting } from "../db.js";
 import { getBot, instructions, dynamicTools, engramBlock } from "../crew.js";
 import { botDir, toolManifest } from "../computer.js";
 import { providerReady, estimateCost } from "../providers.js";
-import { snapshot, changes } from "../snapshot.js";
+import { snapshot, changes, pruneShadow } from "../snapshot.js";
+import { doneCheck } from "./donecheck.js";
 import { bus } from "./bus.js";
 import { active, byCodex, turnWaiters, wakeFor, type TurnEnd } from "./state.js";
 import { enqueue, peekQueued, takeQueued, requeue, queuedThreads } from "./queue.js";
@@ -91,9 +92,10 @@ export function blockedReason(b: Bot) {
 // A tool set's identity: its names, sorted. Descriptions can change without a restart; a new or removed tool can't.
 export const toolsSig = (tools: { name?: string }[]) => createHash("sha1").update(tools.map((x) => x.name).sort().join("\n")).digest("hex").slice(0, 12);
 // What a fresh Codex thread is told about the one it replaces: the latest user and agent messages, newest kept whole
-// first, about 8,000 chars in all. One indexed query of at most 40 rows.
-export function recap(threadId: string, carry: string | null = null, current = "", max = 8000) {
-  const rows = all<{ kind: string; data: string }>("SELECT kind, data FROM events WHERE thread_id=? AND kind IN ('user','agent') ORDER BY id DESC LIMIT 40", threadId);
+// first, about 8,000 chars in all. One indexed query of at most 40 rows. Rewound messages are left out (rewind.ts).
+export const TOOLS_CHANGED = "This thread continues an earlier conversation. Your tools changed since it started, so it was restarted. Files in /bot/work are as you left them.";
+export function recap(threadId: string, carry: string | null = null, current = "", max = 8000, head = TOOLS_CHANGED) {
+  const rows = all<{ kind: string; data: string }>("SELECT kind, data FROM events WHERE thread_id=? AND kind IN ('user','agent') AND rewound IS NULL ORDER BY id DESC LIMIT 40", threadId);
   // The message starting this turn goes in as the turn's own input, not the recap.
   if (rows[0]?.kind === "user" && json(rows[0].data, {}).text === current) rows.shift();
   const lines: string[] = []; let size = 0;
@@ -103,7 +105,7 @@ export function recap(threadId: string, carry: string | null = null, current = "
     lines.unshift(line); size += line.length;
   }
   const notes = getThread(threadId)?.notes;
-  return [carry, notes ? `Notes you kept for this thread:\n${notes}` : "", `This thread continues an earlier conversation. Your tools changed since it started, so it was restarted. Files in /bot/work are as you left them. The latest messages, oldest first:\n\n${lines.join("\n\n")}`].filter(Boolean).join("\n\n");
+  return [carry, notes ? `Notes you kept for this thread:\n${notes}` : "", `${head} The latest messages, oldest first:\n\n${lines.join("\n\n")}`].filter(Boolean).join("\n\n");
 }
 export async function startTurn(threadId: string, text: string, attachments: string[], trigger: string) {
   const t = getThread(threadId)!, b = getBot(t.bot_id)!;
@@ -243,6 +245,7 @@ export async function finishTurn(threadId: string, status: string, error?: strin
     // Kept on the turn for Crew → Files; not drawn in the thread, where there's nothing to do with it. What matters is
     // committed in the task's git repo, and deliverables land in /bot/work/out (Library).
     if (ch.length) run("UPDATE turns SET changes=? WHERE id=?", JSON.stringify(ch), a.turnId);
+    pruneShadow(b.id);
   } catch {}
   postLearned(threadId, a.turnId, b.id);
   const trig = one<{ trigger: string }>("SELECT trigger FROM turns WHERE id=?", a.turnId)?.trigger;
@@ -255,6 +258,8 @@ export async function finishTurn(threadId: string, status: string, error?: strin
   // the web app folds the run to one line. Anything else is news and surfaces as usual.
   if (a.quietFrom != null && status === "completed" && isQuiet(lastAgentText(threadId, a.turnId))) run("UPDATE threads SET updated_at=? WHERE id=?", a.quietFrom, threadId);
   bus.emit("turn", { threadId, turnId: a.turnId, status, cost: cost.usd, botId: b.id });
+  // A separate grader checks a finished task against its criteria (donecheck.ts); async, so nothing here waits on it.
+  if (status === "completed") doneCheck(threadId, a.turnId).catch(() => {});
   // A run that stood out, or a scheduled thread's weekly check, queues a retro (retro.ts). Retros never trigger retros,
   // and a usage-limit failure waits for the resume instead.
   if (trig !== "retro" && !(status === "failed" && isUsageLimit(error)) && getSetting("retros", "1") === "1") {

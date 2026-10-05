@@ -30,19 +30,27 @@ export function Thread({ id }: { id?: string }) {
 
 const parseOrigin = (s: string | null): Origin | null => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
 
-type Item = { key: string; el: ReactNode } | { key: string; steps: ThreadEvent[] };
+type Item = { key: string; el: ReactNode } | { key: string; steps: ThreadEvent[] } | { key: string; rewound: ThreadEvent[] };
 
 /** Lays events out in order. Consecutive tool calls of one run share a Steps group, and so do pit stops already decided
  * (a pending one is a card that breaks the group until it's answered). Events that draw nothing don't break a group, and
- * a plan or delegation card draws once, where it first appeared, with its newest snapshot. */
-function layout(events: ThreadEvent[], ctx: EventCtx): Item[] {
+ * a plan or delegation card draws once, where it first appeared, with its newest snapshot. A run of rewound events
+ * folds into one "Rewound" item (inner: laying out that fold's own contents). */
+function layout(events: ThreadEvent[], ctx: EventCtx, inner = false): Item[] {
   const items: Item[] = [];
   const drawn = new Set<string>();
   let group: { turn: string | null; steps: ThreadEvent[] } | null = null;
+  let fold: ThreadEvent[] | null = null;
   let lastAgent = false;  // the last drawn item, steps aside, was this member's message
   let lastUser = -1;
   events.forEach((e, i) => { if (e.kind === "user") lastUser = i; });
   events.forEach((e, i) => {
+    if (!inner && e.rewound) {
+      if (!fold) { fold = []; items.push({ key: `r${e.id}`, rewound: fold }); }
+      fold.push(e); group = null; lastAgent = false;
+      return;
+    }
+    fold = null;
     // A script's output is drawn inside its script step (Steps results), never as a row of its own.
     if (e.kind === "tool" && e.data.type === "scriptResult") return;
     const p = e.kind === "pitstop" ? ctx.pits[e.data.id] : undefined;
@@ -195,8 +203,16 @@ function LiveThread({ d }: { d: ThreadView }) {
   const lastUserAt = useMemo(() => { for (let i = events.length - 1; i >= 0; i--) if (events[i].kind === "user") return events[i].ts; return 0; }, [events]);
   const auto = images.latest && images.latest.at >= lastUserAt && images.latest.id !== dismissed ? images.latest : null;
   const label = (im: Img) => `${imgName(im.path)} · v${images.chain(im.id).length}`;
+  // Copy and Rewind sit under the last reply of each finished run that isn't rewound yet (the running one has none).
+  const rewindIds = useMemo(() => {
+    const lastOf = new Map<string, number>();
+    for (const e of events) if (e.kind === "agent" && e.turn_id && !e.rewound) lastOf.set(e.turn_id, e.id);
+    if (running) { const cur = [...events].reverse().find((e) => e.turn_id)?.turn_id; if (cur) lastOf.delete(cur); }
+    return new Set(lastOf.values());
+  }, [events, running]);
+  const onRewound = async () => { const fresh = await api.get<ThreadView>(`/api/threads/${id}`, { quiet: true }).catch(() => null); if (fresh) setEvents(fresh.events); };
   const evCtx: EventCtx = {
-    b, fromName, pits, latest, images,
+    b, fromName, pits, latest, images, rewind: { ids: rewindIds, onRewound },
     onView: (im) => setViewing({ im }), onCompare: (im) => setViewing({ im, cmp: true }), onEdit: (im) => { setViewing(null); setEditing(im); },
     onMore: (im) => api.post(`/api/threads/${id}/messages`, { text: "Make 4 more variations of this image, same brief.", mode: "queue", edit: { image: im.path } }),
     onKeep: (imageId) => api.post(`/api/images/${imageId}/keep`),
@@ -230,9 +246,15 @@ function LiveThread({ d }: { d: ThreadView }) {
           {!showPanel && tabs.length > 0 && <button className="reo" title="Open the work panel" onClick={() => setOpen(true)}><Icon name="panel" size={14} />{TAB_LABEL[cur!]}</button>}
         </header>
         <div ref={stream} className="stream">
-          {items.map((it) => "steps" in it
-            ? <Steps key={it.key} events={it.steps} pits={pits} results={scriptResults} closeSignal={closeSteps} initialOpen={it.key === openOnLoad.current || liveIds.current.has(it.steps[0].id)} />
-            : <Fragment key={it.key}>{it.el}</Fragment>)}
+          {items.map(function draw(it): ReactNode {
+            if ("steps" in it) return <Steps key={it.key} events={it.steps} pits={pits} results={scriptResults} closeSignal={closeSteps} initialOpen={it.key === openOnLoad.current || liveIds.current.has(it.steps[0].id)} />;
+            if ("rewound" in it) {
+              const n = it.rewound.filter((e) => e.kind === "user" || e.kind === "agent").length;
+              return <details key={it.key} className="rewound"><summary>{`Rewound · ${n} message${n === 1 ? "" : "s"}`}<Icon name="chev" size={12} /></summary>
+                <div className="rw-body">{layout(it.rewound, { ...evCtx, rewind: undefined, onContinue: undefined }, true).map(draw)}</div></details>;
+            }
+            return <Fragment key={it.key}>{it.el}</Fragment>;
+          })}
           {streaming && <div className={`msg bot${endsWithAgent(events, pits) ? " cont" : ""}`}>{endsWithAgent(events, pits) ? <span /> : <Face b={b} size="sm" mood="working" />}<div className="md">{streaming.text}</div></div>}
           {painting.map((p) => <CatchThePaint key={p.id} p={p} b={b} />)}
           <div className={`live ${running ? "" : "hidden"}`}><Loader /><span>{activity}</span></div>

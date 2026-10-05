@@ -30,6 +30,9 @@ const Message = z.object({ text: raw, attachments: field((v): string[] => (Array
     pins: z.array(z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), note: z.string().max(200) })).max(9).optional() }).nullish() });
 const SurfaceAction = z.object({ action: raw, values: field((v): Record<string, unknown> => (v && typeof v === "object" ? v : {})) });
 const Save = z.object({ saved: flag });
+const REWIND_MODES = ["both", "chat", "files"] as const;
+const rewindMode = (v: unknown): R.RewindMode => (REWIND_MODES as readonly unknown[]).includes(v) ? v as R.RewindMode : "both";
+const RewindBody = z.object({ mode: pick(REWIND_MODES, "both") });
 
 // Front door: one message, routed to the member whose job covers it. Unsure → the driver picks from the top candidates.
 function openRouted(botId: string, text: string, origin: Origin) {
@@ -142,6 +145,9 @@ export const threadRoutes = new Hono<Env>()
     return c.json({ title: (await nameFromConversation(id, { latest: true })) ?? R.getThread(id)!.title });
   })
   .post("/api/threads/:id/compact", signedIn, async (c) => { await R.compact(c.req.param("id")); return c.json({ ok: true }); })
+  // Rewind (runtime/rewind.ts): what would change back, then the driver's go. No crew tool reaches these.
+  .get("/api/turns/:id/rewind", signedIn, (c) => { const { boundary: _, ...p } = R.rewindPlan(c.req.param("id"), rewindMode(c.req.query("mode"))); return c.json(p); })
+  .post("/api/turns/:id/rewind", signedIn, async (c) => { const b = await jsonBody(c, RewindBody); return c.json(await R.rewind(c.req.param("id"), rewindMode(b.mode))); })
   .post("/api/threads/:id/fresh", signedIn, (c) => {
     const id = c.req.param("id"), t = R.getThread(id); if (!t) throw httpErr(404, "No such thread");
     const last = one<{ data: string }>("SELECT data FROM events WHERE thread_id=? AND kind='agent' ORDER BY id DESC LIMIT 1", id);
