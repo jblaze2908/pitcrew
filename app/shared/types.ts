@@ -72,6 +72,8 @@ export interface State {
   engram: { linked: boolean; url: string };
   /** Runs that ended since the driver last opened their thread (Home's "Since you last looked"). */
   unread: number;
+  /** Retired members' names by id, so their old threads and pit stops show a name rather than an id. */
+  formerNames: Record<string, string>;
 }
 
 /** A finished run on Home's "Since you last looked". kind: how it started; status: how it ended (schedule runs say

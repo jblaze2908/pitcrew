@@ -58,7 +58,7 @@ export function ProfileTab({ b }: { b: BotCard }) {
         <Field label="Weekly cap (USD)" help="The runtime refuses new runs once this week's estimate reaches the cap."><input type="number" min={0} step="0.5" value={f.cap} onChange={(e) => set("cap", e.target.value)} /></Field>
         <ModelPicker provider={f.provider} model={f.model} onProvider={(v) => set("provider", v)} onModel={(v) => set("model", v)} />
         {!chief && (
-          <label className="row" style={{ gap: 8, alignItems: "flex-start" }}>
+          <label className="row chk">
             <input type="checkbox" checked={f.priv} onChange={(e) => set("priv", e.target.checked)} />
             <span className="col" style={{ gap: 2 }}><b className="small">Private</b><span className="small faint">Only you talk to it. The Crew Chief can't ask it anything, so nothing it knows reaches other members.</span></span>
           </label>)}
@@ -93,7 +93,7 @@ export function ProfileTab({ b }: { b: BotCard }) {
 // Plain-language effects, in rising order of consequence. Each toggle saves on its own: there's no half-edited policy.
 export function HouseholdBox({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label className="row" style={{ gap: 8, alignItems: "flex-start" }}>
+    <label className="row chk">
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
       <span className="col" style={{ gap: 2 }}><b className="small">Household facts</b><span className="small faint">Reads Engram's household facts: addresses, account last-4s, family. Off unless you tick it.</span></span>
     </label>

@@ -64,7 +64,7 @@ function HireForm({ ps }: { ps: PitStop | null }) {
         <h1 className="pc-h2">{ps ? "The Crew Chief proposes a crew member" : "New crew member"}</h1>
         {ps && spec.reason && <p className="pc-quote">{spec.reason}</p>}
       </div>
-      <div className="grid2">
+      <div className="grid2" style={{ alignItems: "start" }}>
         <div className="pc-card col">
           <div className="row" style={{ gap: 18 }}>
             <Face b={f} size="xl" mood="idle" />

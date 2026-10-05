@@ -9,6 +9,8 @@ interface Store {
   setS: (s: State) => void;
   refresh: () => Promise<void>;
   bot: (id: string | null | undefined) => BotCard | undefined;
+  /** A member's display name, a retired one's included; never the raw id. */
+  name: (id: string | null | undefined) => string;
   chief: BotCard | undefined;
   /** The member whose thread is open, so the sidebar can mark it before /api/state knows the thread. */
   threadBot: string | null;
@@ -39,6 +41,7 @@ export function StoreProvider({ initial, children }: { initial: State; children:
     return {
       S, setS, refresh, threadBot, setThreadBot,
       bot: (id) => (id ? byId.get(id) : undefined),
+      name: (id) => (id && (byId.get(id)?.name || S.formerNames?.[id])) || "A former member",
       chief: S.bots.find((b) => b.kind === "chief"),
     };
   }, [S, refresh, threadBot]);

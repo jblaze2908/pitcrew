@@ -1,8 +1,9 @@
 // Memory and schedules: a small add row over a table.
 import { useState } from "react";
 import type { BotCard, Memory, Schedule } from "../../../../shared/types";
+import { Inline } from "../../components/ui";
 import { api } from "../../lib/api";
-import { when } from "../../lib/format";
+import { flat, when } from "../../lib/format";
 import { toast } from "../../lib/toast";
 import { SCOPE_LABEL } from "./ProfileTab";
 
@@ -74,7 +75,8 @@ function ScheduleRow({ s, reload }: { s: Schedule; reload: () => void }) {
     <tr>
       <td className="pc-m">{s.spec}</td><td>{s.prompt}</td>
       <td className="small faint">{s.enabled ? (s.next_run ? `next ${when(s.next_run)}` : "") : "paused"}
-        {s.last && <><br /><a className={s.last.status === "failed" ? "badc" : "faint"} href={s.last.threadId ? `#/t/${s.last.threadId}` : undefined} title={s.last.summary}>{`last ${when(s.last.at)} · ${s.last.status}${s.last.summary ? ` · ${s.last.summary.slice(0, 60)}` : ""}`}</a></>}</td>
+        {s.last && <a className={`clamp2 sch-last ${s.last.status === "failed" ? "badc" : "faint"}`} href={s.last.threadId ? `#/t/${s.last.threadId}` : undefined} title={flat(s.last.summary)}>
+          {`last ${when(s.last.at)} · ${s.last.status}`}{s.last.summary && <>{" · "}<Inline text={flat(s.last.summary)} /></>}</a>}</td>
       <td className="num"><div className="row" style={{ justifyContent: "flex-end" }}>
         <button className="small faint" onClick={() => setEdit({ spec: s.spec, prompt: s.prompt })}>Edit</button>
         <button className="small faint" onClick={() => patch({ enabled: !s.enabled })}>{s.enabled ? "Pause" : "Resume"}</button>
