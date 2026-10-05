@@ -1,4 +1,4 @@
-// View models: what the web app's main reads (state, a thread, a member card, telemetry) assemble from the store.
+// View models: what the web app's main reads (state, a thread, a member card) assemble from the store. Telemetry is in lists.ts.
 import { one, all, now, json, getSetting } from "../db.js";
 import { resolveSurface } from "../ledger.js";
 import { httpErr } from "../auth.js";
@@ -61,16 +61,4 @@ export async function threadView(id: string): Promise<ThreadView> {
     .map(({ bot_id, ...s }) => resolveSurface({ ...s, spec: json(s.spec) }, bot_id))) : [];
   return { thread: { ...t, running: R.isRunning(id) }, bot: getBot(t.bot_id)!, events, pitstops: pits, surfaces, queued: R.listQueued(id), painting: R.paintings(id),
     commands: [...liveCommands.values()].filter((c) => c.threadId === id).map(({ threadId: _, ...c }) => c) };
-}
-export function telemetry() {
-  const ws = R.weekStart();
-  return {
-    bots: listBots().map((b) => ({ id: b.id, name: b.name, hue: b.hue, shape: b.shape, cap: b.weekly_cap_usd, spend: R.weekSpend(b.id),
-      runs: one<{ n: number }>("SELECT COUNT(*) n FROM turns WHERE bot_id=? AND started_at>=?", b.id, ws)!.n,
-      failed: one<{ n: number }>("SELECT COUNT(*) n FROM turns WHERE bot_id=? AND started_at>=? AND status='failed'", b.id, ws)!.n })),
-    runs: all("SELECT t.*, th.title thread_title, b.name bot_name, b.hue FROM turns t JOIN threads th ON th.id=t.thread_id JOIN bots b ON b.id=t.bot_id ORDER BY t.started_at DESC LIMIT 150"),
-    pitstops: one("SELECT COUNT(*) total, SUM(status='approved') approved, SUM(status='denied') denied, SUM(status='expired') expired, COALESCE(SUM(CASE WHEN decided_at IS NOT NULL AND status!='expired' THEN decided_at-created_at END),0) wait_ms FROM pitstops WHERE created_at>=?", ws),
-    handled: one<{ n: number }>("SELECT COUNT(*) n FROM turns WHERE status='completed' AND started_at>=?", ws)!.n,
-    byModel: all("SELECT provider, model, COUNT(*) runs, SUM(cost_usd) usd, SUM(input_tokens) input, SUM(output_tokens) output FROM turns WHERE started_at>=? GROUP BY provider, model ORDER BY usd DESC", ws),
-  };
 }
