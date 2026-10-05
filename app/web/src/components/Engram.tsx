@@ -1,73 +1,8 @@
-// Engram, the user's memory app (shown as "shared memory"): the link, the crew's tokens, the memory copy, Home's digest.
-import { useEffect, useState } from "react";
-import type { EngramDigest, EngramProposal, EngramStatus } from "../../../shared/types";
+// Engram, the user's memory app (shown as "shared memory"): proposals and Home's digest. The link lives in Settings → Connections.
+import type { EngramDigest, EngramProposal } from "../../../shared/types";
 import { api } from "../lib/api";
-import { ago, plural, when } from "../lib/format";
-import { useStore } from "../lib/store";
-import { toast } from "../lib/toast";
+import { plural } from "../lib/format";
 import { useFetch } from "../lib/useFetch";
-import { BusyButton, ConfirmButton, Face, Field } from "./ui";
-
-export function EngramSettings() {
-  const { refresh } = useStore();
-  const st = useFetch(() => api.get<EngramStatus>("/api/engram"), []);
-  const [url, setUrl] = useState<string | null>(null);
-  const [token, setToken] = useState("");
-  const running = !!st.data?.migration.running;
-  // The move has no stream event, so while it runs this rereads its progress every 1.5 s.
-  useEffect(() => {
-    if (!running) return;
-    const t = setInterval(st.reload, 1500);
-    return () => clearInterval(t);
-  }, [running, st.reload]);
-  if (st.error && !st.data) return <p className="badc">{st.error}</p>;
-  if (!st.data) return null;
-  const s = st.data, m = s.migration;
-  const after = (r: EngramStatus, ok?: string) => { if (r.test && !r.test.ok) toast(r.test.detail, true); else if (ok) toast(ok); st.reload(); refresh(); };
-  const save = async () => { const r = await api.put<EngramStatus>("/api/engram", { url: url ?? s.url, token }); setToken(""); after(r, r.linked ? "Memory linked" : undefined); };
-  return (
-    <div className="col">
-      <div className="pc-card col" style={{ maxWidth: 640 }}>
-        <div className="spread"><b className="pc-h3">Shared memory</b><span className={`pc-chip ${s.linked ? "ok" : ""}`}>{s.linked ? "Linked" : "Off"}</span></div>
-        <p className="small muted">Your memory app (Engram) holds what the crew knows about you. Linked, its review inbox shows up here as pit stops, Home shows its weekly digest, and each crew member reaches your accounts through it instead of its own connectors. Private members stay out.</p>
-        <Field label="Address"><input value={url ?? s.url} placeholder={s.defaultUrl} onChange={(e) => setUrl(e.target.value)} /></Field>
-        <Field label="Link token" help="In the memory app: Agents → Link Pitcrew. Stored encrypted and never shown again.">
-          <input type="password" autoComplete="off" placeholder={s.linked ? "Replace token" : "Paste the link token"} value={token} onChange={(e) => setToken(e.target.value)} />
-        </Field>
-        <div className="row">
-          <BusyButton className="pc-pill s" onClick={save}>Save and test</BusyButton>
-          {s.linked && <BusyButton className="pc-pill o s" onClick={async () => after(await api.post<EngramStatus>("/api/engram/test"), "Memory answered")}>Test</BusyButton>}
-          {s.linked && <ConfirmButton className="small faint" ask="Unlink?" onConfirm={async () => after(await api.del<EngramStatus>("/api/engram"), "Unlinked")}>Unlink</ConfirmButton>}
-        </div>
-        {s.test && <p className={`small ${s.test.ok ? "muted" : "badc"}`}>{`${s.test.detail} · ${ago(s.test.at)}`}</p>}
-        {s.linked && s.poll && <p className={`small ${s.poll.ok ? "faint" : "badc"}`}>{`Inbox checked ${ago(s.poll.at)}: ${s.poll.detail}`}</p>}
-      </div>
-      {s.linked && <div className="pc-card col" style={{ maxWidth: 640 }}>
-        <p className="pc-lab">Crew access</p>
-        {s.members.map((x) => (
-          <div key={x.id} className="row">
-            <Face b={x} size="xs" /><b style={{ flex: 1 }}>{x.name}</b>
-            <span className="small faint">{!x.eligible ? "Private: give it Money or Health memories to link it" : x.linked ? `Own token${x.prefix ? ` ${x.prefix}…` : ""} · ${when(x.at)}` : x.revoked ? "Revoked in the memory app" : "No token yet"}</span>
-            {x.eligible && <BusyButton className="pc-pill o s" onClick={async () => after(await api.post<EngramStatus>(`/api/engram/members/${x.id}/rotate`), "New token")}>{x.linked ? "Rotate" : "Link"}</BusyButton>}
-          </div>))}
-        <p className="small faint">A new token reaches a member the next time it starts.</p>
-      </div>}
-      {s.linked && <div className="pc-card col" style={{ maxWidth: 640 }}>
-        <p className="pc-lab">Copy memories over</p>
-        <p className="small muted">Sends each member's memories, with their dates, to shared memory. Private members without Money or Health memories are skipped, and nothing here is deleted. Run it again any time: only what's new is sent. Files go over only when a member publishes them.</p>
-        <div className="row">
-          <BusyButton className="pc-pill s" onClick={async () => { await api.post("/api/engram/migrate"); st.reload(); }}>{running ? "Copying…" : "Copy memories over"}</BusyButton>
-          <span className="small faint">{`${plural(s.sent.memories, "memory")} sent so far`}</span>
-        </div>
-        {m.line && <p className="small">{m.line}</p>}
-        {!running && m.summary && m.summary.length > 0 && <table className="tbl"><tbody>{m.summary.map((r) => (
-          <tr key={r.name}><td>{r.name}</td><td className="small">{plural(r.memories, "memory")}</td>
-            <td className="small faint">{[r.skipped && `${r.skipped} already there`, r.failed && `${r.failed} failed`].filter(Boolean).join(" · ")}</td></tr>))}
-        </tbody></table>}
-      </div>}
-    </div>
-  );
-}
 
 // The proposal as Engram holds it: what it would store, why it's held, and what it would replace.
 export function ProposalSummary({ x }: { x: EngramProposal }) {

@@ -91,7 +91,7 @@ const ENVS = [{ environmentId: "computer", cwd: "/bot/work" }];
 export function blockedReason(b: Bot) {
   if (getSetting("paused") === "1") return "The crew is stopped (kill switch). Resume the crew in Settings first.";
   if (weekSpend(b.id) >= b.weekly_cap_usd) return `${b.name} has reached this week's cap ($${b.weekly_cap_usd.toFixed(2)}). Raise the cap to continue.`;
-  if (!providerReady(b.provider)) return `${b.name} uses ${b.provider === "openai" ? "the ChatGPT plan" : b.provider}, which isn't connected. Add it in Settings → Providers.`;
+  if (!providerReady(b.provider)) return `${b.name} uses ${b.provider === "openai" ? "the ChatGPT plan" : b.provider}, which isn't connected. Add it in Settings → Models.`;
   return null;
 }
 // A tool set's identity: its names, sorted. Descriptions can change without a restart; a new or removed tool can't.
