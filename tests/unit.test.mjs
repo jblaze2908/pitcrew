@@ -824,6 +824,20 @@ test("account sites ask in every thread, even where allowed, and an allow never 
   assert.ok(!D.listSites("b_sens").some((r) => r.domain === "google.com"), "no lasting allow is stored");
 });
 
+test("a phone button is a signed link for one pit stop and one decision, dead when forged or expired; money never approves from the phone", async () => {
+  const P = await import("../app/dist/src/runtime/push.js");
+  const exp = Date.now() + 60000, tok = P.actToken("ps_abc", "approve", exp);
+  assert.deepEqual(P.readActToken(tok), { id: "ps_abc", decision: "approve" });
+  assert.equal(P.readActToken(tok.replace(".approve.", ".deny.")), null, "the decision can't be swapped");
+  assert.equal(P.readActToken(tok.replace("ps_abc", "ps_abd")), null, "nor the pit stop");
+  assert.equal(P.readActToken(P.actToken("ps_abc", "deny", Date.now() - 1)), null, "an expired link is dead");
+  assert.equal(P.readActToken("ps_abc.approve.1.x"), null);
+  assert.ok(P.phoneMayApprove({ kind: "command", effect: "exec" }));
+  assert.ok(!P.phoneMayApprove({ kind: "mcp", effect: "pay" }), "paying opens Pitcrew");
+  assert.ok(!P.phoneMayApprove({ kind: "hire", effect: "hire" }));
+  assert.throws(() => P.setPushConfig("http://ntfy.example.com/x"), /topic URL/);
+});
+
 test("replaying a captured request keeps its headers inside Playwright and applies only the asked change", async () => {
   const Bz = await import("../app/dist/src/runtime/browser.js");
   const details = "### Result\n#7 [POST] https://shop.example/v1/layout/order_history?x=1\n\n  General\n    status:    [200] OK";

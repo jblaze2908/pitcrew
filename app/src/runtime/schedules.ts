@@ -7,6 +7,7 @@ import { IST } from "./util.js";
 import { dueResumes, sentResume } from "./resume.js";
 import { isEventSpec, newHookSecret, EVENT_SPEC, payloadText } from "./hooks.js";
 import { taint } from "./taint.js";
+import { pushRunFailed } from "./push.js";
 
 const DOW = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 export function nextRun(spec: string, from = now()): number | null {
@@ -126,6 +127,11 @@ export function scheduleRunStarted(threadId: string, turnId: string) {
 export function scheduleRunEnded(turnId: string, status: string, reply: string, tokens: number, cost: number) {
   const st = status === "completed" ? (/^\s*QUIET\b/.test(reply) ? "quiet" : "reported") : status === "interrupted" ? "interrupted" : "failed";
   run("UPDATE schedule_runs SET status=?, ended_at=?, summary=?, input_tokens=?, cost_usd=? WHERE turn_id=?", st, now(), reply.replace(/^\s*QUIET:?\s*/, "").split("\n")[0].slice(0, 200) || null, tokens, cost, turnId);
+  if (st === "failed") pushFailed(turnId);
+}
+function pushFailed(turnId: string) {
+  const r = one<ScheduleRunRow & { spec: string; name: string }>("SELECT r.*, s.spec, b.name FROM schedule_runs r JOIN schedules s ON s.id=r.schedule_id JOIN bots b ON b.id=r.bot_id WHERE r.turn_id=? OR r.id=?", turnId, turnId);
+  if (r) pushRunFailed(r.name, r.spec, r.summary || r.note || "", r.thread_id);
 }
 /** Why a queued run hasn't started (kill switch, cap, provider), kept on the run until it does. */
 export function scheduleRunWaiting(threadId: string, why: string) {
@@ -133,7 +139,10 @@ export function scheduleRunWaiting(threadId: string, why: string) {
 }
 /** The run's turn couldn't start (cap, provider, kill switch at start time); the thread shows the same error. */
 export function scheduleRunFailedToStart(threadId: string, why: string) {
-  run("UPDATE schedule_runs SET status='failed', ended_at=?, note=? WHERE id=(SELECT id FROM schedule_runs WHERE thread_id=? AND status='queued' ORDER BY fired_at LIMIT 1)", now(), String(why).slice(0, 300), threadId);
+  const r = one<{ id: string }>("SELECT id FROM schedule_runs WHERE thread_id=? AND status='queued' ORDER BY fired_at LIMIT 1", threadId);
+  if (!r) return;
+  run("UPDATE schedule_runs SET status='failed', ended_at=?, note=? WHERE id=?", now(), String(why).slice(0, 300), r.id);
+  pushFailed(r.id);
 }
 /** The driver removed the queued prompt before it ran. */
 export function scheduleRunCancelled(threadId: string) {

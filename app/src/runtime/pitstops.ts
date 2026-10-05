@@ -5,6 +5,7 @@ import { applySiteChoice } from "../domains.js";
 import type { PitstopRow } from "../models.js";
 import type { PitStop } from "../../shared/types.js";
 import { bus } from "./bus.js";
+import { pushPitStop } from "./push.js";
 import { active, waits } from "./state.js";
 import { getThread, addEvent, setThreadStatus } from "./threads.js";
 import { describePattern, learnable, learn, learnProgress } from "./rules.js";
@@ -29,6 +30,7 @@ export function pitStop({ id = uid("ps"), botId, threadId, kind, effect, title, 
   const row = pitRow(one<PitstopRow>("SELECT * FROM pitstops WHERE id=?", id));
   if (threadId) { addEvent(threadId, active.get(threadId)?.turnId, "pitstop", { id }, { pitstop: row }); setThreadStatus(threadId, "needs"); }
   bus.emit("pitstop", { id, botId, threadId, status: "pending", pitstop: row });
+  pushPitStop(one<PitstopRow>("SELECT * FROM pitstops WHERE id=?", id)!, getBot(botId)?.name || "A crew member");
   audit("jev", "pitstop.opened", { id, botId, kind, effect, title });
   if (kind === "hire") return Promise.resolve("pending");
   return new Promise((resolve) => {

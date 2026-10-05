@@ -20,8 +20,25 @@ const Settings = z.object({
 });
 const Key = z.object({ key: raw });
 
+const Push = z.object({ url: given((v) => String(v)), token: given((v) => (v === null ? "" : String(v))) });
+
 export const systemRoutes = new Hono<Env>()
   .get("/api/state", signedIn, (c) => c.json(state()))
+  // Phone push (runtime/push.ts): the topic, a test, the presence beat that keeps pushes off while Pitcrew is in view.
+  .get("/api/push", signedIn, (c) => c.json(R.pushConfig()))
+  .put("/api/push", signedIn, async (c) => { const b = await jsonBody(c, Push); R.setPushConfig(b.url ?? R.pushConfig().url, b.token); return c.json(R.pushConfig()); })
+  .post("/api/push/test", signedIn, async (c) => c.json({ ok: await R.pushTest().catch(() => false) }))
+  .post("/api/presence", signedIn, (c) => { R.markPresent(); return c.json({ ok: true }); })
+  // A phone button: no session, the link itself is the proof (one pit stop, one decision, until it's decided or expires).
+  .post("/api/push/act/:token", async (c) => {
+    const t = R.readActToken(c.req.param("token")), p = t && R.pitForAct(t.id);
+    if (!t || !p) throw httpErr(404, "Not found");
+    if (p.status !== "pending") return c.text(`Already ${p.status}.`, 410);
+    if (t.decision === "approve" && !R.phoneMayApprove(p)) return c.text("Open Pitcrew to approve this one.", 403);
+    await R.decide(p.id, t.decision, { scope: p.kind === "site" ? "thread" : "once", note: "from your phone" });
+    audit("driver", "pitstop.phone", { id: p.id, decision: t.decision });
+    return c.text(t.decision === "approve" ? "Approved." : "Denied.");
+  })
   // ?thread=<id> also subscribes to that thread's transcript (events, deltas, activity, context); the rest is global.
   .get("/api/stream", signedIn, (c) => {
     const thread = c.req.query("thread"), res = c.env.outgoing;

@@ -11,7 +11,7 @@ import { toast } from "../lib/toast";
 import { useFetch } from "../lib/useFetch";
 
 type Providers = Record<ProviderId, ProviderStatus>;
-const TAB_IDS = ["general", "models", "engram", "sites", "safety", "account"] as const;
+const TAB_IDS = ["general", "models", "phone", "engram", "sites", "safety", "account"] as const;
 
 export function Settings({ tab: asked }: { tab: string }) {
   const { S } = useStore();
@@ -21,7 +21,7 @@ export function Settings({ tab: asked }: { tab: string }) {
   const p = prov.data;
   const tab = (TAB_IDS as readonly string[]).includes(asked) ? asked : "general";
   const anyKey = Object.values(p).some((x) => x.connected);
-  const tabs: [string, string, boolean][] = [["general", "General", false], ["models", "Models and keys", !anyKey], ["engram", "Engram", false], ["sites", "Sites", false], ["safety", "Safety", S.paused], ["account", "Account", false]];
+  const tabs: [string, string, boolean][] = [["general", "General", false], ["models", "Models and keys", !anyKey], ["phone", "Phone", false], ["engram", "Engram", false], ["sites", "Sites", false], ["safety", "Safety", S.paused], ["account", "Account", false]];
   return (
     <div className="page">
       <h1 className="pc-h2">Settings</h1>
@@ -31,10 +31,29 @@ export function Settings({ tab: asked }: { tab: string }) {
         <div className="grid3"><KeyCard id="openrouter" hint="sk-or-…" p={p.openrouter} reload={prov.reload} /><KeyCard id="aigateway" hint="AI Gateway key" p={p.aigateway} reload={prov.reload} /><ChatGpt p={p.openai} reload={prov.reload} /></div>
         <p className="small faint">jev (the pit-stop decider) runs on TypeSafe Jev through your OpenRouter key. Without one, every consequential action becomes a pit stop.</p>
       </div>}
+      {tab === "phone" && <Phone />}
       {tab === "engram" && <EngramSettings />}
       {tab === "sites" &&<SitesEditor scope="global" help="Every crew member gets these. A member's own entry wins, except a crew-wide block. Loopback (the crew's own file server) is always allowed; private network addresses never are." />}
       {tab === "safety" && <Safety jev={!!p.openrouter?.connected} />}
       {tab === "account" && <Account />}
+    </div>
+  );
+}
+
+// Pit stops and failed scheduled runs on the phone, through an ntfy topic the driver subscribes to. The token is write-only.
+function Phone() {
+  const f = useFetch(() => api.get<{ url: string; token: boolean }>("/api/push"), []);
+  const [url, setUrl] = useState<string | null>(null), [token, setToken] = useState("");
+  if (!f.data) return null;
+  const u = url ?? f.data.url;
+  const save = async () => { await api.put("/api/push", { url: u, ...(token ? { token } : {}) }); setToken(""); f.reload(); toast("Saved"); };
+  const test = async () => { const r = await api.post<{ ok: boolean }>("/api/push/test"); toast(r.ok ? "Sent. Check your phone" : "Couldn't reach the topic"); };
+  return (
+    <div className="pc-card col" style={{ maxWidth: 640 }}>
+      <p className="small muted">Pit stops come with Approve and Deny buttons; paying, hiring and plan changes only open Pitcrew. Nothing is pushed while Pitcrew is open in front of you.</p>
+      <Field label="ntfy topic URL"><input placeholder="https://ntfy.example.com/pitcrew-crew" value={u} onChange={(e) => setUrl(e.target.value)} /></Field>
+      <Field label={`Access token${f.data.token ? " (saved)" : ""}`}><input type="password" placeholder={f.data.token ? "Leave empty to keep it" : "Only if the topic is protected"} value={token} onChange={(e) => setToken(e.target.value)} /></Field>
+      <div className="row"><BusyButton className="pc-pill s" onClick={save}>Save</BusyButton><BusyButton className="pc-pill o s" onClick={test}>Send a test</BusyButton></div>
     </div>
   );
 }
