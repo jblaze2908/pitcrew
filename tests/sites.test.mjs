@@ -356,6 +356,7 @@ test("jev reads the driver's own words and house rules: an explicit ask allows, 
   run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('t_ctx',NULL,'user',?,0)", JSON.stringify({ text: "find flights" }));
   run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('t_ctx',NULL,'agent',?,0)", JSON.stringify({ text: "I'll book the cheapest" }));
   run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('t_ctx',NULL,'user',?,0)", JSON.stringify({ text: "submit the httpbin form" }));
+  run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('t_ctx',NULL,'user',?,0)", JSON.stringify({ text: "Pitcrew restarted… Don't redo steps that already finished.", via: "resume" }));
   assert.deepEqual(jevContext("t_ctx", "- Never place orders on Blinkit\n\n* Uploading to Canva is fine"), { driver_said: ["find flights", "submit the httpbin form"], house_rules: ["Never place orders on Blinkit", "Uploading to Canva is fine"] });
 
   let sent = null;
