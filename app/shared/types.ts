@@ -55,6 +55,16 @@ export interface PitStop {
   similar?: string | null;
 }
 
+// A vault secret as the API shows it: never a value, only which fields are set (has).
+export type VaultKind = "login" | "login+totp" | "card";
+export interface VaultEntry {
+  id: string; name: string; site: string; kind: VaultKind; note: string; last4: string | null; has: string[];
+  /** Members that may use it; always: those that skip the per-thread ask (never for a card). */
+  allowed: string[]; always: string[]; last_used: number | null; last_used_by: string | null; updated_at: number;
+  /** Why a sign-in with it failed, until the driver saves a new value. */
+  needs_update: string | null;
+}
+
 export interface State {
   driverName: string; paused: boolean; defaultProvider: ProviderId; plainVoice: boolean; plans: boolean;
   bots: BotCard[]; pitstops: PitStop[]; providers: Record<ProviderId, ProviderStatus>;

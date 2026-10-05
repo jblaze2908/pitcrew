@@ -17,7 +17,7 @@ export function freeHue(prefer?: string | null): Hue {
 }
 // The computer's loopback-only, read-only view of /bot/work (computer/files.mjs, started by desktop.sh).
 export { FILES_URL } from "./manual.js";
-import { FILES_URL, TOPICS } from "./manual.js";
+import { FILES_URL, TOPICS, HELP_TOPICS } from "./manual.js";
 export const SHAPES: Shape[] = ["square", "round", "blob"];
 export const ENGRAM_SCOPES: EngramScope[] = ["personal", "finance", "health"];
 const CONN_ID = /^[a-z0-9][a-z0-9-]{0,11}$/;
@@ -259,11 +259,15 @@ const BROWSER_READ = { type: "function", name: "browser_read", description: "Rea
   inputSchema: { type: "object", properties: { target: { type: "string", description: "Ref of the element to read, from the latest snapshot. Omit for the whole page." }, element: { type: "string", description: "What that element is, in words." } } } };
 const BROWSER_REPLAY = { type: "function", name: "browser_replay_request", description: "Re-send request #index from browser_network_requests from the page's own logged-in session, with its original headers (you never see them), optionally changing it: body replaces the body, merge sets fields in a JSON body (e.g. a next-page cursor), query sets URL parameters. The way to page through a site's own API in bulk. Returns status and body (24 KB; pass save, a path under /bot/work, for the whole body). Checked like page JS: anything that orders, pays, posts or sends waits for the driver.",
   inputSchema: { type: "object", properties: { index: { type: "integer", minimum: 1 }, body: { description: "New body: a string, or an object sent as JSON." }, merge: { type: "object", description: "Fields to set in the original JSON body." }, query: { type: "object", description: "URL parameters to set." }, method: { type: "string" }, save: { type: "string", description: "Write the full response body to this path under /bot/work." } }, required: ["index"] } };
+const BROWSER_FILL_SECRET = { type: "function", name: "browser_fill_secret", description: "Sign in (or pay with a card) using a secret from the driver's vault, by name: Pitcrew types the values into the fields you name and submits, in one step; you never see them. The page must be the secret's own site. Details: harness_help vault.",
+  inputSchema: { type: "object", properties: { secret: { type: "string", description: "The secret's name, e.g. BESCOM login" },
+    fields: { type: "array", items: { type: "object", properties: { field: { type: "string", enum: ["username", "password", "totp", "card_number", "card_expiry", "card_cvc", "card_name"] }, target: { type: "string", description: "Ref of that box from the latest snapshot" } }, required: ["field", "target"] } },
+    submit: { type: "string", description: "Ref of the sign-in or pay button; omit to press Enter (logins only)" } }, required: ["secret", "fields"] } };
 export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { browser: [], computer: [] }, { engram = false, images = false } = {}) {
   const runtime = [
     ...manifest.browser.filter((x) => !HIDDEN.has(x.name)).map(browserTool),
     ...(manifest.browser.some((x) => x.name === "browser_snapshot") ? [BROWSER_READ] : []),
-    ...(manifest.browser.some((x) => x.name === "browser_run_code_unsafe") ? [BROWSER_REPLAY] : []),
+    ...(manifest.browser.some((x) => x.name === "browser_run_code_unsafe") ? [BROWSER_REPLAY, BROWSER_FILL_SECRET] : []),
     ...manifest.computer.filter((x) => !HIDDEN.has(`computer_${x.name}`)).map((x) => ({ type: "function", name: `computer_${x.name}`, description: `${x.description || x.name} (${x.name === "screenshot" ? `pixel control of the computer's screen. ${SHOT_HINT}` : PIXEL})`, inputSchema: x.inputSchema || { type: "object", properties: {} } })),
   ];
   const tools: Record<string, any>[] = [...runtime,
@@ -281,8 +285,8 @@ export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { br
       inputSchema: { type: "object", properties: { rule: { type: "string", description: "One line, e.g. Never post or send anything on my behalf" }, why: { type: "string", description: "What the driver said" } }, required: ["rule", "why"] } },
     { type: "function", name: "suggest_improvement", description: "Suggest a change only Pitcrew can make (a missing tool, a rule that got in the way, a confusing result), with the evidence: runs, numbers, what happened. The driver reviews suggestions; you can't change the harness yourself.",
       inputSchema: { type: "object", properties: { area: { type: "string", enum: ["tool", "approvals", "prompt", "runtime", "other"] }, title: { type: "string" }, evidence: { type: "string" }, proposal: { type: "string" } }, required: ["title", "evidence"] } },
-    { type: "function", name: "harness_help", description: "How part of Pitcrew works, in detail: browser, dashboards, schedules, memory, skills, approvals, files, images or crew.",
-      inputSchema: { type: "object", properties: { topic: { type: "string", enum: TOPICS } }, required: ["topic"] } },
+    { type: "function", name: "harness_help", description: "How part of Pitcrew works, in detail: browser, dashboards, schedules, memory, skills, approvals, files, images, crew or vault.",
+      inputSchema: { type: "object", properties: { topic: { type: "string", enum: HELP_TOPICS } }, required: ["topic"] } },
     { type: "function", name: "whats_new", description: "Harness changes you haven't seen yet (new tools, rules, ways of working). Marks them seen.", inputSchema: { type: "object", properties: {} } },
     { type: "function", name: "skill_view", description: "Load one of your skills (/bot/work/skills/<name>/SKILL.md), or a file inside it (file: references/x.md, scripts/y.py). Load the skill before doing a task it covers.",
       inputSchema: { type: "object", properties: { name: { type: "string" }, file: { type: "string" } }, required: ["name"] } },
