@@ -4,7 +4,7 @@ FROM node:22-bookworm-slim
 # Pinned to releases at least 7 days old (release-age cooldown). Codex verifies TLS against the OS CA store.
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN npm install -g @openai/codex@0.156.1 @playwright/mcp@0.0.82 \
+RUN npm install -g @openai/codex@0.158.0 @playwright/mcp@0.0.82 \
  && cd "$(npm root -g)/@playwright/mcp" \
  && npx playwright install-deps chromium \
  && npx @playwright/mcp install-browser chrome-for-testing \
