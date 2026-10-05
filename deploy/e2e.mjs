@@ -68,8 +68,9 @@ try {
   check("Crew Chief is built in", !!chief, chief ? `${chief.provider} · ${chief.model}` : "");
   // --probe: run the browser chore on a temporary OpenRouter/Claude crew member (retired afterwards), leaving the Chief alone.
   let botId = "chief";
-  if (process.argv.includes("--probe")) { const b = await api("POST", "/api/hire", { name: "E2E probe", job: "Temporary test crew member", provider: "openrouter", model: "anthropic/claude-sonnet-5.5", weekly_cap_usd: 2 }); botId = b.id; globalThis.probeId = b.id; }
-  const { id: th } = await api("POST", "/api/threads", { botId, title: "E2E · browser form" });
+  if (process.argv.includes("--probe")) { const b = await api("POST", "/api/hire", { name: "E2E probe", job: "Temporary test crew member", provider: "openrouter", model: "anthropic/claude-sonnet-5.5", weekly_cap_usd: 2 }); botId = b.id; globalThis.probeId = b.id;
+    for (const t of (await api("GET", `/api/bots/${b.id}`)).bot.threads) await api("PATCH", `/api/threads/${t.id}`, { test: true }); }
+  const { id: th } = await api("POST", "/api/threads", { botId, title: "E2E · browser form", test: true });
   globalThis.e2eThreads = [th];
   const comp = async () => (await api("GET", `/api/bots/${botId}`)).bot.computer;
   if (process.argv.includes("--probe")) {
@@ -93,7 +94,7 @@ try {
   check("jev raised a pit stop for the submit", r1.approved.length > 0, r1.approved.join(" | ") || "none");
   if (process.argv.includes("--probe")) { const c2 = await comp(); check("browser turn booted the desktop", c2.desktop, `desktop=${c2.desktop}`); }
   check("form submitted, result read back", /custname=Pitcrew v1/i.test(lastAgent(r1.evs)) && /size=medium/i.test(lastAgent(r1.evs)), lastAgent(r1.evs).slice(0, 100));
-  const run1 = (await api("GET", "/api/telemetry")).runs.find((r) => r.thread_id === th);
+  const run1 = (await api("GET", "/api/telemetry/runs?limit=50")).rows.find((r) => r.thread_id === th);
   check("run recorded with tokens and cost", run1 && run1.input_tokens > 0, run1 ? `${run1.status} in=${run1.input_tokens} cached=${run1.cached_tokens} out=${run1.output_tokens} cost=$${run1.cost_usd.toFixed(4)} (${run1.cost_basis})` : "missing");
 
   if (want("browser")) {
@@ -116,7 +117,7 @@ try {
   }
 
   // 3. Memory and the Crew Chief's hire proposal (HITL).
-  const { id: th2 } = await api("POST", "/api/threads", { botId: "chief", title: "E2E · crew" });
+  const { id: th2 } = await api("POST", "/api/threads", { botId: "chief", title: "E2E · crew", test: true });
   const r4 = await runAndWait(th2, "Remember this: my electricity provider is BESCOM. Also, I ask you about my utility bills every week; propose a dedicated crew member for bills with propose_crew_member. Keep your reply to one line.");
   const mem = (await api("GET", "/api/bots/chief")).memory;
   check("remember tool stored a memory", mem.some((m) => /BESCOM/i.test(m.text)), mem.map((m) => m.text).join(" | ").slice(0, 100));

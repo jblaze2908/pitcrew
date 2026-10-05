@@ -141,6 +141,19 @@ for (const sql of ["ALTER TABLE turns ADD COLUMN changes TEXT", "ALTER TABLE jev
 // When the driver last opened each thread (runtime/inbox.ts). Set to now on the boot that adds it, so the inbox starts
 // empty instead of listing a week of runs nobody marked seen.
 try { db.exec("ALTER TABLE threads ADD COLUMN seen_at INTEGER"); db.prepare("UPDATE threads SET seen_at=?").run(Date.now()); } catch {}
+// Probe, e2e and test threads (created with test: true); the Threads page hides them. Rows from before the flag are
+// guessed once, by title or member name, on the boot that adds the column.
+export function backfillTestThreads() {
+  return db.prepare(`UPDATE threads SET test=1 WHERE test=0 AND (lower(title) LIKE 'e2e%' OR lower(title) LIKE '%probe%' OR lower(title) LIKE 'smoke test%'
+    OR lower(title) = 'test' OR lower(title) LIKE 'test %' OR lower(title) LIKE 'test:%' OR lower(title) LIKE '[test]%'
+    OR bot_id IN (SELECT id FROM bots WHERE lower(name) LIKE 'e2e%' OR lower(name) LIKE '%probe%'))`).run().changes;
+}
+try { db.exec("ALTER TABLE threads ADD COLUMN test INTEGER NOT NULL DEFAULT 0"); backfillTestThreads(); } catch {}
+// The list pages walk these newest first from a cursor (api/lists.ts); threads_parent must match the expression there.
+db.exec(`CREATE INDEX IF NOT EXISTS threads_updated ON threads(updated_at);
+CREATE INDEX IF NOT EXISTS threads_parent ON threads(json_extract(origin,'$.fromThread'));
+CREATE INDEX IF NOT EXISTS turns_thread ON turns(thread_id, started_at);
+CREATE INDEX IF NOT EXISTS pitstops_created ON pitstops(created_at)`);
 // The inbox reads turns by end time; the activity log pages jev_labels newest first, per member or per effect.
 db.exec(`CREATE INDEX IF NOT EXISTS turns_ended ON turns(ended_at);
 CREATE INDEX IF NOT EXISTS jev_labels_bot ON jev_labels(bot_id, ts);

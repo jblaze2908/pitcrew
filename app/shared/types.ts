@@ -178,7 +178,14 @@ export interface EngramConnection { id: string; name: string; status: "ok" | "wa
 export interface ThreadRow { id: string; title: string; status?: ThreadStatus; pinned?: number; archived?: number; snippet?: string; created_at: number; updated_at: number }
 
 /** GET /api/threads: a thread on the Threads page, any member's, with the last thing said (or the search hit). */
-export interface ThreadListRow { id: string; bot_id: string; title: string; status: ThreadStatus; pinned: number; archived: number; created_at: number; updated_at: number; snippet?: string }
+export interface ThreadListRow { id: string; bot_id: string; title: string; status: ThreadStatus; pinned: number; archived: number; test: number; created_at: number; updated_at: number; snippet?: string }
+/** A sub-thread (a delegation or plan step) nested under its parent; replied: the member spoke last. */
+export interface ThreadKid { id: string; bot_id: string; title: string; status: ThreadStatus; updated_at: number; snippet: string; replied: boolean }
+/** GET /api/threads. pinned and the counts come with the first page; a search returns one unpaged list. */
+export interface ThreadPage { pinned: ThreadListRow[]; rows: ThreadListRow[]; kids: Record<string, ThreadKid[]>; next: string | null; total: number | null; hidden: { test: number; sub: number } | null }
+/** GET /api/pitstops/history: decided pit stops, newest first. */
+export type PitHistoryRow = PitStop & { thread_title: string | null };
+export interface PitHistoryPage { rows: PitHistoryRow[]; next: string | null; total: number | null }
 
 export type SiteMode = "allowed" | "read" | "blocked";
 export interface SiteRow { scope: string; domain: string; mode: SiteMode; overrides: Record<string, Decision>; by: string; created_at: number; updated_at: number }
@@ -193,18 +200,26 @@ export interface FsEntry { name: string; dir: boolean; size: number; mtime: numb
 export type FsNode = { type: "dir"; path: string; entries: FsEntry[] } | { type: "file"; path: string; size: number; mtime: number; image: boolean; text?: string };
 export interface Project { path: string; git?: boolean }
 
-export interface Run {
-  id: string; thread_id: string; bot_id: string; bot_name: string; thread_title: string; trigger: string; status: string; error: string | null;
-  started_at: number; input_tokens: number | null; output_tokens: number | null; cost_usd: number | null; cost_basis: string;
+/** A row of GET /api/telemetry/runs. from_bot: who asked, when another member started it. */
+export interface RunRow {
+  id: string; thread_id: string; bot_id: string; thread_title: string; trigger: string; status: string; error: string | null; from_bot: string | null;
+  started_at: number; ended_at: number | null; input_tokens: number | null; cached_tokens: number | null; output_tokens: number | null; cost_usd: number | null; cost_basis: string;
 }
+/** total: matching rows in the range, sent with the first page only. next: the cursor for the older page. */
+export interface RunPage { rows: RunRow[]; next: string | null; total: number | null }
 export interface OpenRouterUsage { balance?: number | null; limit?: number | null; limit_remaining?: number | null; limit_reset?: string | null; usage?: number; usage_daily?: number; usage_weekly?: number }
 export interface PlanWindow { usedPercent: number; windowMins?: number; resetsAt?: number | null }
 export interface PlanLimits { connected?: boolean; plan?: string; reached?: boolean; primary?: PlanWindow | null; secondary?: PlanWindow | null; credits?: { has: boolean; unlimited?: boolean; balance?: string | number | null } | null; at?: number }
-export interface Telemetry {
-  bots: { id: string; name: string; hue: Hue; shape: Shape; cap: number; spend: number; runs: number; failed: number }[];
-  runs: Run[]; handled: number;
-  pitstops: { total: number; approved: number | null; denied: number | null; expired: number | null; wait_ms: number } | null;
-  byModel: { provider: string; model: string; runs: number; usd: number | null; input: number | null; output: number | null }[];
+/** GET /api/telemetry?days=: runs counted once as started, then split finished/failed/cut/stopped/running. */
+export interface TelemetrySummary {
+  since: number;
+  runs: { started: number; finished: number; failed: number; cut: number; stopped: number; running: number };
+  spend: { usd: number; cap: number; allPlan: boolean };
+  tokens: { input: number; cached: number; output: number };
+  busiest: { botId: string; runs: number; trigger: string | null } | null;
+  /** Failed runs in the range not followed by a finished one in the same thread. */
+  failures: RunRow[]; failuresTotal: number;
+  cut: { runs: number; resumed: number };
   openrouter: OpenRouterUsage | null; chatgpt: PlanLimits | null;
 }
 export interface LibraryBot { id: string; name: string; hue: Hue; shape: Shape; files: { path: string; size: number; mtime: number }[] }

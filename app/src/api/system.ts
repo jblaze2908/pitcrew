@@ -9,7 +9,8 @@ import * as P from "../providers.js";
 import * as R from "../runtime/index.js";
 import { signedIn, type Env } from "../http/guard.js";
 import { readJson, jsonBody, given, pick, raw } from "../http/body.js";
-import { state, telemetry } from "./views.js";
+import { state } from "./views.js";
+import { telemetrySummary } from "./lists.js";
 import { AUTONOMY } from "../runtime/autonomy.js";
 
 const PROVIDER_IDS = ["openrouter", "aigateway", "openai"] as const;
@@ -79,7 +80,7 @@ export const systemRoutes = new Hono<Env>()
   .post("/api/resume", signedIn, (c) => { R.resumeCrew(); return c.json(state()); })
 
   // Telemetry, export
-  .get("/api/telemetry", signedIn, async (c) => { const [openrouter, chatgpt] = await Promise.all([P.openrouterUsage(), R.planLimits()]); return c.json({ ...telemetry(), openrouter, chatgpt }); })
+  .get("/api/telemetry", signedIn, async (c) => { const [openrouter, chatgpt] = await Promise.all([P.openrouterUsage(), R.planLimits()]); return c.json({ ...telemetrySummary(c.req.query()), openrouter, chatgpt }); })
   .get("/api/export", signedIn, (c) => {
     const dump = { exportedAt: new Date().toISOString(), note: "Pitcrew export. Provider keys and auth tokens are never included.",
       settings: all("SELECT key,value FROM settings WHERE key!='password'"), bots: all("SELECT * FROM bots"), threads: all("SELECT * FROM threads"), turns: all("SELECT * FROM turns"),
