@@ -6,26 +6,30 @@ import { api, fileUrl } from "../../lib/api";
 import { dayLabel, hm, kb, plural, usd, when } from "../../lib/format";
 import { go } from "../../lib/router";
 import { useFetch } from "../../lib/useFetch";
+import { DataTab } from "./DataTab";
 
-// Routes: files[/<turnId>[/<path>]] · files/workspace[/<path>] · files/projects[/<path>]
+// Routes: files[/<turnId>[/<path>]] · files/workspace[/<path>] · files/projects[/<path>] · files/tables
+const VIEWS = [["changes", "Changes", "Every file a run changed, however it changed it. Newest first."], ["workspace", "Workspace", "Its own files."],
+  ["projects", "Code projects", "Folders in its workspace that hold code, read-only."], ["tables", "Tables", "The small databases it keeps for recurring work, and the dashboards built on them."]] as const;
+
 export function FilesTab({ b, rest }: { b: BotCard; rest: (string | undefined)[] }) {
-  const mode = rest[0] === "projects" ? "projects" : rest[0] === "workspace" ? "workspace" : "changes";
+  const mode = VIEWS.find(([k]) => k !== "changes" && k === rest[0])?.[0] || "changes";
   const runs = useFetch(() => api.get<ChangeRun[]>(`/api/bots/${b.id}/changes`), [b.id]);
   const base = `#/crew/${b.id}/files`;
+  const [, title, intro] = VIEWS.find(([k]) => k === mode)!;
   return (
-    <div className="col">
-      <div className="row">
-        <div className="seg">
-          <a className={mode === "changes" ? "on" : ""} href={base}>Changes{runs.data?.length ? <em>{runs.data.length}</em> : null}</a>
-          <a className={mode === "workspace" ? "on" : ""} href={`${base}/workspace`}>Workspace</a>
-          <a className={mode === "projects" ? "on" : ""} href={`${base}/projects`}>Projects</a>
-        </div>
-        <span style={{ flex: 1 }} />
-        <span className="small faint">{mode === "changes" ? "Every run's file changes, however they were made" : mode === "workspace" ? "Its own files" : ""}</span>
+    <div className="fset">
+      <div>
+        <nav className="sn">{VIEWS.map(([k, l]) => <a key={k} className={mode === k ? "on" : ""} href={k === "changes" ? base : `${base}/${k}`}>{l}</a>)}</nav>
+        <p className="moved">How-tos it has written now live under Memory.</p>
       </div>
-      {mode === "projects" ? <Projects key={rest[1] || ""} b={b} encPath={rest[1]} />
-        : mode === "workspace" ? <Workspace b={b} runs={runs.data || []} path={rest[1] ? decodeURIComponent(rest[1]) : ""} />
-        : <Changes b={b} runs={runs.data} error={runs.error} turnId={rest[0]} path={rest[1] ? decodeURIComponent(rest[1]) : ""} />}
+      <div className="fc">
+        <div className="tabhead"><h2>{title}</h2><p className="intro">{intro}</p></div>
+        {mode === "projects" ? <Projects key={rest[1] || ""} b={b} encPath={rest[1]} />
+          : mode === "workspace" ? <Workspace b={b} runs={runs.data || []} path={rest[1] ? decodeURIComponent(rest[1]) : ""} />
+          : mode === "tables" ? <DataTab b={b} />
+          : <Changes b={b} runs={runs.data} error={runs.error} turnId={rest[0]} path={rest[1] ? decodeURIComponent(rest[1]) : ""} />}
+      </div>
     </div>
   );
 }
@@ -40,66 +44,72 @@ export function Tally({ cs }: { cs: FileChange[] }) {
 const split = (p: string) => { const i = p.lastIndexOf("/"); return [i < 0 ? "" : p.slice(0, i + 1), p.slice(i + 1)]; };
 const Path = ({ p }: { p: string }) => { const [dir, name] = split(p); return <span className="pc-m small trunc"><span className="faint">{dir}</span>{name}</span>; };
 
-// Day, then thread: repeat runs of one thread nest as time rows instead of repeating its title.
-function group(runs: ChangeRun[]) {
-  const days: { day: string; threads: { id: string; title: string; runs: ChangeRun[] }[]; n: number }[] = [];
-  for (const r of runs) {
-    const day = dayLabel(r.started_at);
-    let d = days.at(-1);
-    if (d?.day !== day) days.push((d = { day, threads: [], n: 0 }));
-    d.n++;
-    const t = d.threads.find((x) => x.id === r.thread_id);
-    t ? t.runs.push(r) : d.threads.push({ id: r.thread_id, title: r.thread_title, runs: [r] });
-  }
-  return days;
+// Each day once (a Map, so a run that arrives out of order still joins its day), then that day's runs.
+function byDay(runs: ChangeRun[]) {
+  const days = new Map<string, ChangeRun[]>();
+  for (const r of runs) { const d = dayLabel(r.started_at); days.set(d, [...(days.get(d) || []), r]); }
+  return [...days];
 }
 
+let splitPref = false; // kept across runs for the session
 function Changes({ b, runs, error, turnId, path }: { b: BotCard; runs: ChangeRun[] | null; error: string | null; turnId?: string; path: string }) {
+  const [split, setSplit] = useState(splitPref);
+  const [open, setOpen] = useState<Set<string>>(() => new Set(turnId ? [turnId] : []));
+  useEffect(() => { if (runs?.length && !turnId) setOpen((s) => (s.size ? s : new Set([runs[0].id]))); }, [runs, turnId]);
   if (error && !runs) return <p className="badc">{error}</p>;
   if (!runs) return null;
-  if (!runs.length) return <div className="pc-card"><p className="empty">No changes recorded yet. Every run's file changes land here, whether made by a patch, a command or a script.</p></div>;
-  const run = turnId ? runs.find((r) => r.id === turnId) : runs[0];
-  const open = (id: string) => go(`#/crew/${b.id}/files/${id}`);
+  if (!runs.length) return <p className="none">No changes yet. Every run's file changes land here, whether made by a patch, a command or a script.</p>;
+  const toggle = (id: string) => setOpen((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const onSplit = (v: boolean) => { splitPref = v; setSplit(v); };
   return (
-    <div className="files">
-      <aside className="rail">
-        {group(runs).map((d) => (
-          <div key={d.day}>
-            <p className="day"><span>{d.day}</span><span>{plural(d.n, "run")}</span></p>
-            {d.threads.map((t) => (
-              <div key={t.id} className={`th ${t.runs.some((r) => r === run) ? "on" : ""}`}>
-                {t.runs.length === 1
-                  ? <button className="thb" onClick={() => open(t.runs[0].id)}><b>{t.title}</b><RunLine r={t.runs[0]} /></button>
-                  : <><button className="thb" onClick={() => open(t.runs[0].id)}><b>{t.title}</b></button>
-                    {t.runs.map((r) => <button key={r.id} className={`thr ${r === run ? "on" : ""}`} onClick={() => open(r.id)}><i />{<RunLine r={r} />}</button>)}</>}
-              </div>))}
-          </div>))}
-      </aside>
-      {run ? <RunView key={run.id} b={b} run={run} nth={runs.filter((r) => r.thread_id === run.thread_id).reverse().indexOf(run) + 1} of={runs.filter((r) => r.thread_id === run.thread_id).length} path={path} />
-        : <div className="pc-card"><p className="empty">This run is older than the 40 kept here.</p></div>}
+    <div className="changes2">
+      {turnId && !runs.some((r) => r.id === turnId) && <p className="none">That run is older than the 40 kept here.</p>}
+      {byDay(runs).map(([day, rs]) => (
+        <div key={day}>
+          <p className="grp">{day}</p>
+          {rs.map((r) => <Run key={r.id} b={b} r={r} open={open.has(r.id)} onToggle={() => toggle(r.id)} path={r.id === turnId ? path : ""} split={split} onSplit={onSplit} />)}
+        </div>))}
+      <p className="foot">Changes from the last 40 runs are kept here. Older files are still in Workspace.</p>
     </div>
   );
 }
-const RunLine = ({ r }: { r: ChangeRun }) => <span className="rn"><span className="t">{hm(r.started_at)}</span><span>{plural(r.changes.length, "file")}</span><Tally cs={r.changes} /></span>;
 
-let splitPref = false; // kept across runs for the session
-function RunView({ b, run, nth, of, path }: { b: BotCard; run: ChangeRun; nth: number; of: number; path: string }) {
-  const [split, setSplit] = useState(splitPref);
-  const [open, setOpen] = useState<Set<string>>(() => new Set([path || run.changes[0]?.path]));
-  const toggle = (p: string) => setOpen((s) => { const n = new Set(s); n.has(p) ? n.delete(p) : n.add(p); return n; });
+function Run({ b, r, open, onToggle, path, split, onSplit }: { b: BotCard; r: ChangeRun; open: boolean; onToggle: () => void; path: string; split: boolean; onSplit: (v: boolean) => void }) {
+  const [file, setFile] = useState<string | null>(path || r.changes[0]?.path || null);
+  const [add, del] = net(r.changes);
   return (
-    <section className="col runview">
-      <div className="row" style={{ alignItems: "flex-start" }}>
-        <div className="col" style={{ gap: 4, minWidth: 0, flex: 1 }}>
-          <p className="pc-h3 trunc">{run.thread_title}</p>
-          <p className="pc-m small faint">{`run ${when(run.started_at)} · ${plural(run.changes.length, "file")} `}<Tally cs={run.changes} />{run.cost_usd ? ` · ${usd(run.cost_usd)}` : ""}{of > 1 ? ` · run ${nth} of ${of} in this thread` : ""}</p>
-        </div>
-        <a className="small lk" href={`#/t/${run.thread_id}`}>Open thread</a>
-        <Seg options={[["unified", "Unified"], ["split", "Split"]] as const} value={split ? "split" : "unified"} onChange={(m) => { splitPref = m === "split"; setSplit(splitPref); }} />
-        <button className="pc-pill o s" onClick={() => setOpen(open.size ? new Set() : new Set(run.changes.map((c) => c.path)))}>{open.size ? "Collapse all" : "Expand all"}</button>
+    <div className="run">
+      <div className="runh">
+        <button className="rt" onClick={onToggle} aria-expanded={open}>
+          <span className={`rc${open ? " on" : ""}`} />
+          <span className="mn"><span className="t">{r.thread_title}</span>
+            <span className="m">{`${hm(r.started_at)} · ${plural(r.changes.length, "file")}${add || del ? " · " : ""}`}<Tally cs={r.changes} />{r.cost_usd ? ` · ${usd(r.cost_usd)}` : ""}</span></span>
+        </button>
+        <a className="lk2" href={`#/t/${r.thread_id}`}>Open thread</a>
       </div>
-      {run.changes.map((c) => <FileBlock key={c.path} b={b} turnId={run.id} c={c} open={open.has(c.path)} focus={c.path === path} split={split} onToggle={() => toggle(c.path)} />)}
-    </section>
+      {open && r.changes.map((c) => <FileRow key={c.path} b={b} turnId={r.id} c={c} open={file === c.path} focus={c.path === path} onToggle={() => setFile(file === c.path ? null : c.path)} split={split} onSplit={onSplit} />)}
+    </div>
+  );
+}
+
+// While a file's diff is open, the +/− comes from that diff alone, so the row hides its own count.
+function FileRow({ b, turnId, c, open, focus, onToggle, split, onSplit }: { b: BotCard; turnId: string; c: FileChange; open: boolean; focus: boolean; onToggle: () => void; split: boolean; onSplit: (v: boolean) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (focus) ref.current?.scrollIntoView({ block: "start" }); }, [focus]);
+  const gone = c.status === "deleted", word = c.status === "added" ? "new" : gone ? "deleted" : "";
+  return (
+    <div ref={ref} className="fl2">
+      <button className="flh" onClick={onToggle} aria-expanded={open}>
+        <span className={`n${gone ? " gone" : ""}`}><Path p={c.path} /></span>
+        <span className="c">{word}{!open && c.lines ? <>{word ? " · " : ""}<Delta n={c.lines} /></> : null}</span>
+      </button>
+      {open && <div className="dbox">
+        <div className="dh"><span className="trunc">{c.path}</span>
+          <span className="acts">{!gone && <><a className="lk2" href={`#/crew/${b.id}/files/workspace/${encodeURIComponent(c.path)}`}>Open in workspace</a><a className="lk2" href={fileUrl(b.id, c.path)}>Download</a></>}
+            <Seg options={[["unified", "Unified"], ["split", "Split"]] as const} value={split ? "split" : "unified"} onChange={(m) => onSplit(m === "split")} /></span></div>
+        <RunDiff turnId={turnId} path={c.path} split={split} />
+      </div>}
+    </div>
   );
 }
 
@@ -202,7 +212,7 @@ function ProjectFrame({ b, list, path }: { b: BotCard; list: Project[]; path: st
         <select className="projsel" value={path} onChange={(e) => go(`#/crew/${b.id}/files/projects/${encodeURIComponent(e.target.value)}`)}>
           {list.map((p) => <option key={p.path} value={p.path}>{`${p.path}${p.git ? " · git" : ""}`}</option>)}
         </select>
-        <span className="pc-chip ok">Read-only</span>
+        <span className="small faint">Read-only</span>
         {opened.error ? <span className="small badc">{opened.error}</span> : !opened.data && <span className="small faint">Starting the code view…</span>}
         <span style={{ flex: 1 }} />
         {opened.data && <a className="small" href={opened.data.url} target="_blank" rel="noopener noreferrer">Open in a new tab</a>}

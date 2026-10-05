@@ -1,4 +1,4 @@
-// What a member keeps: its ledgers (tables, row counts, a look at the rows) and the dashboards it built on them.
+// Files › Tables: its ledgers (tables, row counts, a look at the rows) and the dashboards built on them. Memory › How-tos: its skills.
 import { useState } from "react";
 import type { BotCard, Surface as SurfaceRow } from "../../../../shared/types";
 import { Surface } from "../../components/Surface";
@@ -12,30 +12,39 @@ interface Ledger { path: string; size: number; asOf: number | null; tables: Tabl
 interface Skill { name: string; description: string; size: number; uses: number; last_used: number | null; stale: boolean }
 interface Board { id: string; title: string; saved: number; thread_id: string; created_at: number; source: string; queries: string[] }
 type Preview = { columns: string[]; rows: Record<string, unknown>[] } | { error: string };
+type Data = { ledgers: Ledger[]; dashboards: Board[]; skills: Skill[] };
+const load = (id: string) => api.get<Data>(`/api/bots/${id}/data`);
 
 export function DataTab({ b }: { b: BotCard }) {
-  const { data, reload } = useFetch(() => api.get<{ ledgers: Ledger[]; dashboards: Board[]; skills: Skill[] }>(`/api/bots/${b.id}/data`), [b.id]);
+  const { data, reload } = useFetch(() => load(b.id), [b.id]);
   if (!data) return null;
   return (
-    <div className="col">
+    <div className="col tables">
       <section className="col">
-        <p className="pc-lab">{`Ledgers · ${data.ledgers.length}`}</p>
+        <h3>{`Databases · ${data.ledgers.length}`}</h3>
         {data.ledgers.length ? data.ledgers.map((l) => <LedgerCard key={l.path} b={b} l={l} />)
-          : <div className="pc-card tight"><p className="empty">{`${b.name} keeps no ledgers yet. A recurring task keeps its data in a small database in its workspace.`}</p></div>}
+          : <p className="none">{`${b.name} keeps no databases yet. A recurring task keeps its data in a small database in its workspace.`}</p>}
       </section>
       <section className="col">
-        <p className="pc-lab">{`Skills · ${data.skills.length}`}</p>
-        {data.skills.length ? <div className="pc-card tight"><table className="tbl"><tbody>{data.skills.map((k) => (
-          <tr key={k.name}><td className="pc-m">{k.name}</td><td className="small muted">{k.description}</td>
-            <td className="num small faint">{k.uses ? `Used ${k.uses} time${k.uses === 1 ? "" : "s"} · last ${ago(k.last_used)}` : "Not used yet"}{k.stale ? " · out of date" : ""}</td></tr>))}</tbody></table>
-          <p className="small faint" style={{ padding: "0 12px 10px" }}>{`Kept in its workspace under skills, with history under Files → Projects.`}</p></div>
-          : <div className="pc-card tight"><p className="empty">{`No skills yet. ${b.name} writes them as it learns how a task runs.`}</p></div>}
-      </section>
-      <section className="col">
-        <p className="pc-lab">{`Dashboards · ${data.dashboards.length}`}</p>
+        <h3>{`Dashboards · ${data.dashboards.length}`}</h3>
         {data.dashboards.length ? data.dashboards.map((d) => <BoardRow key={d.id} d={d} onChange={reload} />)
-          : <div className="pc-card tight"><p className="empty">No dashboards on its ledgers yet.</p></div>}
+          : <p className="none">No dashboards on its databases yet.</p>}
       </section>
+    </div>
+  );
+}
+
+/** How-tos: the skills it wrote as it learned how a task runs. */
+export function HowTos({ b }: { b: BotCard }) {
+  const { data } = useFetch(() => load(b.id), [b.id]);
+  if (!data) return null;
+  if (!data.skills.length) return <p className="none">{`None yet. ${b.name} writes one when it works out how a task runs.`}</p>;
+  return (
+    <div className="mrows">{data.skills.map((k) => (
+      <div key={k.name} className="mrow">
+        <div className="grow"><p className="ms-l pc-m">{k.name}</p><p className="ms-h">{k.description}</p></div>
+        <span className="ms-h nw">{k.uses ? `Used ${plural(k.uses, "time")} · last ${ago(k.last_used)}` : "Not used yet"}{k.stale ? " · out of date" : ""}</span>
+      </div>))}
     </div>
   );
 }
