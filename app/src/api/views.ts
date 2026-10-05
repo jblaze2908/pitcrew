@@ -25,7 +25,7 @@ function mood(b: Bot, threads: ThreadSummary[], pending: { bot_id: string; kind?
 export function botCard(b: Bot, pending: { bot_id: string; kind?: string }[], limit = -1): BotCard {
   // A scheduled run's own thread shows only while it runs, waits on the driver, or reported news or failed in the last 48 h;
   // quiet runs live on the Schedules page.
-  const threads = all<ThreadSummary>(`SELECT id,title,status,created_at,updated_at,pinned FROM threads WHERE bot_id=? AND archived=0 AND (origin IS NULL OR json_extract(origin,'$.kind') IS NOT 'schedule'
+  const threads = all<ThreadSummary>(`SELECT id,title,status,created_at,updated_at,pinned FROM threads WHERE bot_id=? AND archived=0 AND test=0 AND (origin IS NULL OR json_extract(origin,'$.kind') IS NOT 'schedule'
     OR status IN ('running','needs') OR EXISTS (SELECT 1 FROM schedule_runs r WHERE r.thread_id=threads.id AND r.status IN ('reported','failed') AND r.fired_at>?)) ORDER BY pinned DESC, updated_at DESC LIMIT ?`, b.id, Date.now() - 48 * 3600000, limit);
   const c = allComputers().find((x) => x.bot.id === b.id), br = allBrains().find((x) => x.bot.id === b.id);
   return { ...b, threads, mood: mood(b, threads, pending, !!c?.up || !!br?.up), spend: R.weekSpend(b.id), computer: { up: !!c?.up, desktop: !!c?.desktopUp, startedAt: c?.startedAt ?? null, lease: R.leaseHeld(b.id) } };
