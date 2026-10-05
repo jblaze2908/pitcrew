@@ -330,6 +330,7 @@ function OriginChip({ origin: o, threadId, b }: { origin: Origin; threadId: stri
   const { bot } = useStore();
   const pill = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState(false);
+  if (o.kind === "email") return <span className="pc-chip" title={o.subject}>{`Woken by an email from ${o.from}`}</span>;
   if (o.kind === "schedule") return <a className="pc-chip" href="#/schedules" title="This run's schedule">{`Scheduled run${o.spec ? ` · ${o.spec}` : ""}`}</a>;
   if (o.kind === "delegated") {
     const f = bot(o.fromBot);

@@ -1,0 +1,6 @@
+{
+  "name": "pitcrew-email-worker",
+  "private": true,
+  "type": "module",
+  "dependencies": { "postal-mime": "3.0.1" }
+}

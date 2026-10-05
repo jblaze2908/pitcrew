@@ -80,6 +80,20 @@ export const crewRoutes = new Hono<Env>()
   .post("/api/bots/:id/memory/forget-source", signedIn, async (c) => { const id = c.req.param("id"), b = await jsonBody(c, ForgetSource); const r = run("UPDATE memory SET forgotten_at=? WHERE bot_id=? AND source=? AND forgotten_at IS NULL", now(), id, String(b.source)); audit("driver", "memory.forgot_source", { id, source: b.source }); return c.json({ forgotten: Number(r.changes) }); })
   .post("/api/bots/:id/schedules", signedIn, async (c) => { const b = await jsonBody(c, Schedule); try { return c.json(R.addSchedule(c.req.param("id"), b.threadId as string | null, b.spec, b.prompt)); } catch (e: any) { throw httpErr(400, e.message); } })
   .patch("/api/schedules/:id", signedIn, async (c) => { const b = await jsonBody(c, ScheduleEdit); try { return c.json(R.updateSchedule(c.req.param("id"), null, b, "driver")); } catch (e: any) { throw httpErr(400, e.message); } })
+  // Member email (runtime/mail.ts). The worker's POST has no session: it proves itself with the mail secret.
+  .post("/api/mail", async (c) => {
+    const body = await readBody(c, 512 << 10);
+    if (verifyHook(R.mailSecret(), (n) => c.req.header(n), body)) throw httpErr(404, "Not found");
+    let m: any; try { m = JSON.parse(body.toString()); } catch { throw httpErr(400, "Bad JSON"); }
+    const mail = { to: String(m.to || ""), from: String(m.from || ""), subject: String(m.subject || "").slice(0, 300), text: String(m.text || ""), attachments: Array.isArray(m.attachments) ? m.attachments.slice(0, 20).map((a: any) => ({ name: String(a?.name || "file").slice(0, 120), size: Number(a?.size) || 0 })) : [] };
+    R.receiveMail(mail).catch(() => {});
+    return c.json({ ok: true }, 202);
+  })
+  .get("/api/mail", signedIn, (c) => c.json({ domain: R.MAIL_DOMAIN, driverEmails: R.driverEmails(), boxes: R.mailboxes() }))
+  .put("/api/mail", signedIn, async (c) => { const b = await readJson(c); if (typeof b.driverEmails === "string") R.setDriverEmails(b.driverEmails); return c.json({ domain: R.MAIL_DOMAIN, driverEmails: R.driverEmails(), boxes: R.mailboxes() }); })
+  .get("/api/mail/secret", signedIn, (c) => c.json({ secret: R.mailSecret(), url: `https://${c.req.header("host")}/api/mail` }))
+  .get("/api/bots/:id/mailbox", signedIn, (c) => c.json({ box: R.mailbox(c.req.param("id")), domain: R.MAIL_DOMAIN }))
+  .put("/api/bots/:id/mailbox", signedIn, async (c) => { const b = await readJson(c); if (!getBot(c.req.param("id"))) throw httpErr(404, "No such crew member"); return c.json({ box: R.setMailbox(c.req.param("id"), b), domain: R.MAIL_DOMAIN }); })
   .get("/api/schedules", signedIn, (c) => c.json(R.scheduleOverview()))
   .get("/api/schedules/:id/hook", signedIn, (c) => { try { return c.json(R.scheduleHook(c.req.param("id"))); } catch (e: any) { throw httpErr(404, e.message); } })
   // A webhook for an "on event" schedule: no session (the sender is another service), so it proves itself with the

@@ -27,3 +27,4 @@ export { killSwitch, resumeCrew, bootRuntime, settleCutTurns, resumable, resumeC
 export { pushConfig, setPushConfig, pushTest, markPresent, readActToken, phoneMayApprove, pitForAct } from "./push.js";
 export { doneCheck, parseGrade, normCriteria, setDoneCriteria, gatherEvidence, retryPrompt, MAX_RETRIES } from "./donecheck.js";
 export { rewind, rewindPlan, boundaryOf, type RewindMode } from "./rewind.js";
+export { MAIL_DOMAIN, mailbox, setMailbox, mailSecret, driverEmails, setDriverEmails, receiveMail, mailboxes, senderKind } from "./mail.js";

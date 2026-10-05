@@ -55,6 +55,7 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
     : p.kind === "vault" ? <p className="small muted">{`${d.why || "The site rejected it"}. The member stopped instead of retrying; save the current value from your password manager and it can sign in again.`}</p>
     : p.kind === "engram" && d.proposal ? <ProposalSummary x={d.proposal} />
     : p.kind === "soul" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><pre>{d.soul}</pre>{d.before && <details><summary className="small faint">Current SOUL</summary><pre>{d.before}</pre></details>}</div>
+    : p.kind === "mail" ? <div className="col" style={{ gap: 4 }}><p className="small faint">{`From ${d.from} · not on ${who}'s sender list. Its text reaches ${who} as untrusted data.`}</p><pre>{String(d.preview || "")}</pre></div>
     : p.kind === "retire" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><p className="small faint">{d.memberName}: {d.job || "no job set"}{d.schedules ? ` · ${d.schedules} schedule${d.schedules === 1 ? "" : "s"} will stop` : ""}. Threads and memory stay.</p></div>
     : p.kind === "member" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p>{(d.diff || []).map((x: { field: string; before: string; after: string }) => <div key={x.field}><b className="small">{x.field}</b><pre>{`${x.before || "(empty)"}\n→ ${x.after || "(empty)"}`}</pre></div>)}</div>
     : p.kind === "files" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><pre>{(d.paths || []).map((x: { path: string; dir: boolean; size: number }) => `${x.path}${x.dir ? "/ (folder and everything in it)" : ` · ${x.size} B`}`).join("\n")}</pre></div>
@@ -105,6 +106,7 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
     {btn("Deny", () => decide("deny"))}
     {openLink("Open thread")}</div>;
   else if (p.kind === "vault") actions = <div className="acts"><a className="pc-pill s" href={`#/settings/vault/${d.secret?.id || ""}`}>Update in Vault</a>{btn("Dismiss", () => decide("deny"))}{openLink("Open thread")}</div>;
+  else if (p.kind === "mail") actions = <div className="acts">{btn(`Let it wake ${who}`, () => decide("approve", "once"), true)}{btn("Ignore", () => decide("deny"))}</div>;
   else if (p.kind === "soul") actions = <div className="acts">{btn("Use this SOUL", () => decide("approve", "once"), true)}{btn("Keep current", () => decide("deny"))}{openLink("Open thread")}</div>;
   else if (p.kind === "retire") actions = <div className="acts">{btn(`Retire ${d.memberName || "member"}`, () => decide("approve", "once"), true)}{btn("Keep", () => decide("deny"))}{openLink("Open thread")}</div>;
   else if (p.kind === "member") actions = <div className="acts">{btn("Apply changes", () => decide("approve", "once"), true)}{btn("Keep as is", () => decide("deny"))}{openLink("Open thread")}</div>;
