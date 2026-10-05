@@ -1,7 +1,7 @@
 // Schedules: recurring prompts in Asia/Kolkata time, run by a 30 s tick.
 import { one, all, run, now, uid, audit, getSetting, pruneLabels, json } from "../db.js";
 import type { ScheduleRow, ScheduleRunRow } from "../models.js";
-import { getThread, addEvent } from "./threads.js";
+import { getThread, addEvent, titleFrom, UNTITLED } from "./threads.js";
 import { getBot } from "../crew.js";
 import { computer } from "./machines.js";
 import { createHash } from "node:crypto";
@@ -47,17 +47,32 @@ export function nextRun(spec: string, from = now()): number | null {
   }
   throw new Error(`Use "daily HH:MM", "weekdays HH:MM", "weekly mon HH:MM", "monthly 1 HH:MM" (day 1–28), "every N minutes|hours" or "${EVENT_SPEC}"`);
 }
-export function addSchedule(botId: string, threadId: string | null, spec: string, prompt: string) {
+/** A schedule's name from its prompt: the first line, cut to 60 characters on a word. No model call. */
+export function scheduleTitle(prompt: string) {
+  const line = String(prompt || "").split("\n").map((l) => l.replace(/^\s*\[[^\]]{0,40}\]\s*/, "").trim()).find(Boolean) || "";
+  const t = titleFrom(line);
+  return t === UNTITLED ? "Untitled schedule" : t;
+}
+const cleanTitle = (t: string | null | undefined) => String(t || "").replace(/\s+/g, " ").trim().slice(0, 80);
+/** Names schedules saved before titles existed; bootRuntime runs it once and it touches only untitled rows. */
+export function backfillScheduleTitles() {
+  const rows = all<{ id: string; prompt: string }>("SELECT id,prompt FROM schedules WHERE title IS NULL OR title=''");
+  for (const r of rows) run("UPDATE schedules SET title=? WHERE id=?", scheduleTitle(r.prompt), r.id);
+  return rows.length;
+}
+
+export function addSchedule(botId: string, threadId: string | null, spec: string, prompt: string, title?: string | null) {
   spec = spec.trim().toLowerCase();
   if (!prompt.trim()) throw new Error("A schedule needs a prompt");
   const next = nextRun(spec);
   const id = uid("sc");
-  run("INSERT INTO schedules(id,bot_id,thread_id,spec,prompt,next_run,created_at,hook_secret) VALUES(?,?,?,?,?,?,?,?)", id, botId, threadId, spec, prompt.trim().slice(0, 2000), next, now(), isEventSpec(spec) ? newHookSecret() : null);
+  run("INSERT INTO schedules(id,bot_id,thread_id,spec,prompt,next_run,created_at,hook_secret,title) VALUES(?,?,?,?,?,?,?,?,?)", id, botId, threadId, spec, prompt.trim().slice(0, 2000), next, now(),
+    isEventSpec(spec) ? newHookSecret() : null, cleanTitle(title) || scheduleTitle(prompt));
   audit("crew", "schedule.added", { id, botId, spec });
   return one<ScheduleRow>("SELECT * FROM schedules WHERE id=?", id)!;
 }
 // The webhook secret stays out of every list; the driver reads it with scheduleHook.
-const COLS = "id,bot_id,thread_id,spec,prompt,next_run,last_run,enabled,created_at,check_cmd";
+const COLS = "id,bot_id,thread_id,spec,prompt,next_run,last_run,enabled,created_at,check_cmd,title";
 export const listSchedules = (botId: string) => all<ScheduleRow>(`SELECT ${COLS} FROM schedules WHERE bot_id=? ORDER BY created_at`, botId);
 /** An event schedule's address and secret, for the driver to give the sender. */
 export function scheduleHook(id: string) {
@@ -71,9 +86,11 @@ function own(id: string, botId: string | null) {
   if (!s || (botId && s.bot_id !== botId)) throw new Error(`No schedule ${id}. list_schedules shows yours.`);
   return s;
 }
-/** Change the time, prompt or paused state. A new time, or resuming, recomputes the next run so a stale one doesn't fire at once. */
-export function updateSchedule(id: string, botId: string | null, ch: { spec?: string; prompt?: string; enabled?: boolean; check?: string | null }, who: "crew" | "driver") {
+/** Change the time, prompt, title or paused state. A new time, or resuming, recomputes the next run so a stale one doesn't fire at once. */
+export function updateSchedule(id: string, botId: string | null, ch: { spec?: string; prompt?: string; enabled?: boolean; check?: string | null; title?: string | null }, who: "crew" | "driver") {
   const s = own(id, botId);
+  // An emptied title falls back to the prompt's first line, so a row is never nameless.
+  if (ch.title !== undefined) run("UPDATE schedules SET title=? WHERE id=?", cleanTitle(ch.title) || scheduleTitle(ch.prompt ?? s.prompt), id);
   // The check runs a shell command on the member's computer without jev looking, so only the driver writes it.
   if (ch.check !== undefined) {
     if (who !== "driver") throw new Error("Only the driver sets a schedule's check");
@@ -90,7 +107,7 @@ export function updateSchedule(id: string, botId: string | null, ch: { spec?: st
 export function deleteSchedule(id: string, botId: string | null, who: "crew" | "driver") {
   const s = own(id, botId);
   run("DELETE FROM schedules WHERE id=?", id);
-  audit(who, "schedule.deleted", { id, botId: s.bot_id, spec: s.spec, prompt: s.prompt });
+  audit(who, "schedule.deleted", { id, botId: s.bot_id, spec: s.spec, prompt: s.prompt, title: s.title });
   return s;
 }
 let nextPrune = 0;

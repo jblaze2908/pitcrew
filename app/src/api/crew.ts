@@ -10,7 +10,7 @@ import { memberChanged, listMemories, remember, forget } from "../engram.js";
 import { memberLinked } from "../engramStore.js";
 import { learnedFor, undoLearned } from "../runtime/learned.js";
 import { signedIn, type Env } from "../http/guard.js";
-import { readBody, readJson, jsonBody, raw, text, trimmed, flag, field, pick } from "../http/body.js";
+import { readBody, readJson, jsonBody, raw, text, trimmed, flag, field, pick, given } from "../http/body.js";
 import { verifyHook, overHookLimit } from "../runtime/hooks.js";
 import { botCard, LEARNED, liveLearned } from "./views.js";
 import { ledgerOverview, tablePreview } from "../ledger.js";
@@ -21,8 +21,9 @@ import type { LearnedRow, PitstopRow, ScheduleRow } from "../models.js";
 const Memory = z.object({ text: trimmed(500), scope: pick(["agent", "global"] as const, "agent") });
 const MemoryEdit = z.object({ text: text(500) });
 const ForgetSource = z.object({ source: raw });
-const Schedule = z.object({ threadId: field((v) => v || null), spec: text(), prompt: text() });
-const ScheduleEdit = z.object({ enabled: z.boolean().optional(), spec: z.string().max(100).optional(), prompt: z.string().max(2000).optional(), check: z.string().max(500).nullable().optional() });
+const optText = (max: number) => given((v) => (v == null ? null : String(v).slice(0, max)));
+const Schedule = z.object({ threadId: field((v) => v || null), spec: text(100), prompt: text(), title: optText(80), check: optText(500) });
+const ScheduleEdit = z.object({ enabled: z.boolean().optional(), spec: z.string().max(100).optional(), prompt: z.string().max(2000).optional(), check: z.string().max(500).nullable().optional(), title: optText(80) });
 const Project = z.object({ path: text() });
 const HandBack = z.object({ note: text() });
 
@@ -78,7 +79,15 @@ export const crewRoutes = new Hono<Env>()
   .get("/api/turns/:id/learned", signedIn, (c) => c.json({ items: learnedFor(c.req.param("id")) }))
   .post("/api/turns/:id/learned/:mid/undo", signedIn, async (c) => c.json({ items: await undoLearned(c.req.param("id"), c.req.param("mid")) }))
   .post("/api/bots/:id/memory/forget-source", signedIn, async (c) => { const id = c.req.param("id"), b = await jsonBody(c, ForgetSource); const r = run("UPDATE memory SET forgotten_at=? WHERE bot_id=? AND source=? AND forgotten_at IS NULL", now(), id, String(b.source)); audit("driver", "memory.forgot_source", { id, source: b.source }); return c.json({ forgotten: Number(r.changes) }); })
-  .post("/api/bots/:id/schedules", signedIn, async (c) => { const b = await jsonBody(c, Schedule); try { return c.json(R.addSchedule(c.req.param("id"), b.threadId as string | null, b.spec, b.prompt)); } catch (e: any) { throw httpErr(400, e.message); } })
+  // The Schedules page's "New schedule" and a member's own page; the check is the driver's alone, like on PATCH.
+  .post("/api/bots/:id/schedules", signedIn, async (c) => {
+    const id = c.req.param("id"), b = await jsonBody(c, Schedule), bot = member(id);
+    if (bot.archived) throw httpErr(400, "That member has retired");
+    try {
+      const s = R.addSchedule(id, b.threadId as string | null, b.spec, b.prompt, b.title);
+      return c.json(b.check?.trim() ? R.updateSchedule(s.id, null, { check: b.check }, "driver") : s);
+    } catch (e: any) { throw httpErr(400, e.message); }
+  })
   .patch("/api/schedules/:id", signedIn, async (c) => { const b = await jsonBody(c, ScheduleEdit); try { return c.json(R.updateSchedule(c.req.param("id"), null, b, "driver")); } catch (e: any) { throw httpErr(400, e.message); } })
   // Member email (runtime/mail.ts). The worker's POST has no session: it proves itself with the mail secret.
   .post("/api/mail", async (c) => {
