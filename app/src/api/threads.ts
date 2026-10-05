@@ -22,7 +22,7 @@ const Reroute = z.object({ botId: raw });
 const AUTONOMY_NOTE: Record<Autonomy, string> = {
   ask: "Ask first: this thread asks before sending, paying, signing in, installing, sharing, deleting or opening a new site.",
   handsfree: "Hands-free: this thread only stops for paying, signing in, sending, sharing, deleting, and sites that look like another or aren't https, or anything that might break a house rule.",
-  yolo: "Full auto: this thread runs without pit stops, paying and sending included. Only the safety check's hard blocks, blocked sites and anything that might break a house rule still stop it.",
+  yolo: "YOLO: this thread runs without pit stops, paying and sending included. Only the safety check's hard blocks, blocked sites and anything that might break a house rule still stop it.",
 };
 const ThreadEdit = z.object({ title: truthy((v) => String(v).slice(0, 120)), archived: given((v) => (v ? 1 : 0)), pinned: given((v) => (v ? 1 : 0)), autonomy: pick(AUTONOMY, undefined) });
 const Message = z.object({ text: raw, attachments: field((v): string[] => (Array.isArray(v) ? v.filter((a) => /^uploads\/[\w.-]+$/.test(a)) : [])), mode: raw,

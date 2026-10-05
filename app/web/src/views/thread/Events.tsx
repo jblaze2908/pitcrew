@@ -248,7 +248,7 @@ export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
     // A restart cut the run (runtime/lifecycle.ts): a divider, since nothing broke on the member's side.
     case "system": return /^Pitcrew restarted/.test(d.text || "") ? <p className="sys rule"><span>{d.text}</span></p>
       : d.text === "Say continue to pick it up." ? (c.onContinue ? <p className="sys rule"><button className="pc-pill o s" onClick={c.onContinue}>Pick up where it left off</button></p> : null)
-      // A mode change isn't a failure: older Full auto notes were stored with the bad tone.
+      // A mode change isn't a failure: older YOLO notes were stored with the bad tone.
       : <p className={`sys ${d.tone === "bad" && !/^YOLO:/.test(d.text || "") ? "bad" : ""}`}>{plainWords(d.text)}</p>;
     case "error": return <p className="err">{d.text}</p>;
     // Older runs recorded a changed-files card; threads no longer draw it (Crew → Files keeps the history).
