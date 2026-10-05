@@ -66,7 +66,8 @@ export type ThreadStatus = "idle" | "running" | "needs";
 /** Where a thread came from: the front door, or another member (a delegation or a plan step). */
 export type Origin =
   | { kind: "routed"; by: string; confidence?: number | null; from?: string }
-  | { kind: "delegated"; fromBot: string; fromThread: string; delegationId?: string; planId?: string; itemKey?: string };
+  | { kind: "delegated"; fromBot: string; fromThread: string; delegationId?: string; planId?: string; itemKey?: string }
+  | { kind: "schedule"; scheduleId: string; runId: string; spec?: string };
 
 export interface Thread {
   id: string; bot_id: string; title: string; codex_id: string | null; pinned: number; status: ThreadStatus;

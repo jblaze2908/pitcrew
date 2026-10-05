@@ -45,7 +45,13 @@ export function retroReason(r: RunReport) {
   return null;
 }
 // A scheduled thread gets one retro a week even when nothing stood out, so slow drift gets looked at.
-export const weeklyDue = (threadId: string) => !one("SELECT 1 FROM turns WHERE thread_id=? AND trigger='retro' AND started_at>?", threadId, now() - 7 * 86400000);
+// A scheduled run has a thread of its own, so its weekly check counts retros across every run of that schedule.
+export function weeklyDue(threadId: string) {
+  const sched = one<{ s: string | null }>("SELECT json_extract(origin,'$.scheduleId') s FROM threads WHERE id=? AND json_extract(origin,'$.kind')='schedule'", threadId)?.s;
+  return sched
+    ? !one("SELECT 1 FROM turns t JOIN threads th ON th.id=t.thread_id WHERE json_extract(th.origin,'$.scheduleId')=? AND t.trigger='retro' AND t.started_at>?", sched, now() - 7 * 86400000)
+    : !one("SELECT 1 FROM turns WHERE thread_id=? AND trigger='retro' AND started_at>?", threadId, now() - 7 * 86400000);
+}
 
 export function reportText(r: RunReport) {
   const k = (n: number) => `${(n / 1000).toFixed(0)}k`;

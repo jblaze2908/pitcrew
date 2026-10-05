@@ -297,6 +297,8 @@ export class Computer {
   up = false; desktopUp = false; startedAt: number | null = null; viewers = 0; lastActive = Date.now();
   constructor(bot: Bot, hooks: ComputerHooks) { this.bot = bot; this.hooks = hooks; }
   get name() { return `pc-bot-${this.bot.id}`; }
+  /** A schedule's "only wake when" check: a driver-written shell command in /bot/work, no model. Starts the computer if asleep. */
+  async check(cmd: string, timeout = 60000) { await this.ensure(); this.touch(); return docker(["exec", "-w", "/bot/work", this.name, "sh", "-lc", cmd], { timeout }); }
   touch() { this.lastActive = Date.now(); }
   ensure() {
     this.touch();

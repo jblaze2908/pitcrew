@@ -113,7 +113,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, bot_id TEXT NOT
   cost REAL, kept_at INTEGER, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS images_path ON images(bot_id, path)`);
 // One row per schedule firing (schedules.ts): when it was due, when its turn started and ended, and how it ended.
-// status: queued → running → quiet | reported | failed | interrupted | cancelled.
+// status: queued → running → quiet | reported | failed | interrupted | cancelled, or skipped (the check saw no change).
 db.exec(`CREATE TABLE IF NOT EXISTS schedule_runs (id TEXT PRIMARY KEY, schedule_id TEXT NOT NULL, bot_id TEXT NOT NULL, thread_id TEXT, turn_id TEXT,
   kind TEXT NOT NULL, due_at INTEGER NOT NULL, fired_at INTEGER NOT NULL, started_at INTEGER, ended_at INTEGER, status TEXT NOT NULL,
   note TEXT, summary TEXT, input_tokens INTEGER, cost_usd REAL);
@@ -127,7 +127,7 @@ for (const sql of ["ALTER TABLE turns ADD COLUMN changes TEXT", "ALTER TABLE jev
   "ALTER TABLE plans ADD COLUMN limits TEXT", "ALTER TABLE plans ADD COLUMN log TEXT", "ALTER TABLE plans ADD COLUMN sweep TEXT",
   "ALTER TABLE bots ADD COLUMN engram_scope TEXT NOT NULL DEFAULT 'personal'", "ALTER TABLE engram_members ADD COLUMN scope TEXT",
   "ALTER TABLE bots ADD COLUMN engram_household INTEGER NOT NULL DEFAULT 0", "ALTER TABLE engram_members ADD COLUMN household INTEGER NOT NULL DEFAULT 0",
-  "ALTER TABLE threads ADD COLUMN autonomy TEXT NOT NULL DEFAULT 'ask'", "ALTER TABLE threads ADD COLUMN tools_sig TEXT", "ALTER TABLE bots ADD COLUMN house_rules TEXT NOT NULL DEFAULT ''", "ALTER TABLE threads ADD COLUMN title_auto INTEGER NOT NULL DEFAULT 1", "ALTER TABLE schedules ADD COLUMN hook_secret TEXT", "ALTER TABLE threads ADD COLUMN notes TEXT", "ALTER TABLE bots ADD COLUMN soul TEXT NOT NULL DEFAULT ''", "ALTER TABLE bots ADD COLUMN changelog_seen INTEGER NOT NULL DEFAULT 0"]) { try { db.exec(sql); } catch {} }
+  "ALTER TABLE threads ADD COLUMN autonomy TEXT NOT NULL DEFAULT 'ask'", "ALTER TABLE threads ADD COLUMN tools_sig TEXT", "ALTER TABLE bots ADD COLUMN house_rules TEXT NOT NULL DEFAULT ''", "ALTER TABLE threads ADD COLUMN title_auto INTEGER NOT NULL DEFAULT 1", "ALTER TABLE schedules ADD COLUMN hook_secret TEXT", "ALTER TABLE schedules ADD COLUMN check_cmd TEXT", "ALTER TABLE schedules ADD COLUMN check_last TEXT", "ALTER TABLE threads ADD COLUMN notes TEXT", "ALTER TABLE bots ADD COLUMN soul TEXT NOT NULL DEFAULT ''", "ALTER TABLE bots ADD COLUMN changelog_seen INTEGER NOT NULL DEFAULT 0"]) { try { db.exec(sql); } catch {} }
 
 // A row as SQLite returns it; callers name the shape they expect (models.ts).
 export type Row = Record<string, any>;
