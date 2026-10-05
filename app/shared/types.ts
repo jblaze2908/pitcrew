@@ -60,7 +60,22 @@ export interface State {
   bots: BotCard[]; pitstops: PitStop[]; providers: Record<ProviderId, ProviderStatus>;
   today: { usd: number; runs: number }; week: { usd: number; runs: number }; weekCap: number; computersUp: number;
   engram: { linked: boolean; url: string };
+  /** Runs that ended since the driver last opened their thread (Home's "Since you last looked"). */
+  unread: number;
 }
+
+/** A finished run on Home's "Since you last looked". kind: how it started; status: how it ended (schedule runs say
+ *  reported or quiet, the rest completed or failed). sub: the schedule's prompt, the asking member's id, or the thread title. */
+export interface InboxItem {
+  turnId: string; threadId: string; botId: string; kind: "scheduled" | "delegation" | "run"; status: "reported" | "quiet" | "completed" | "failed";
+  sub: string; fromBot: string | null; text: string; endedAt: number; unread: boolean; waiting: boolean;
+}
+export interface Inbox { items: InboxItem[]; unread: number }
+/** One thing done on the driver's behalf. by.cat: once/always (the driver), autonomy (thread hands-free/YOLO), learned,
+ *  jev, rules (policy, site list, a script allowed before). */
+export type AllowedBy = "once" | "always" | "autonomy" | "learned" | "jev" | "rules";
+export interface ActivityRow { id: string; at: number; botId: string; threadId: string | null; effect: string; what: string; by: { cat: AllowedBy; who: string; how: string } }
+export interface ActivityPage { rows: ActivityRow[]; next: string | null }
 
 export type ThreadStatus = "idle" | "running" | "needs";
 /** Where a thread came from: the front door, or another member (a delegation or a plan step). */

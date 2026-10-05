@@ -6,7 +6,7 @@ import { getBot, instructions, dynamicTools, engramBlock } from "../crew.js";
 import { botDir, toolManifest } from "../computer.js";
 import { providerReady, estimateCost } from "../providers.js";
 import { snapshot, changes } from "../snapshot.js";
-import { bus } from "./bus.js";
+import { bus, activityNow } from "./bus.js";
 import { active, byCodex, turnWaiters, wakeFor, type TurnEnd } from "./state.js";
 import { enqueue, peekQueued, takeQueued, requeue, queuedThreads } from "./queue.js";
 import { getThread, addEvent, setThreadStatus, nameThread } from "./threads.js";
@@ -93,17 +93,21 @@ export const toolsSig = (tools: { name?: string }[]) => createHash("sha1").updat
 // What a fresh Codex thread is told about the one it replaces: the latest user and agent messages, newest kept whole
 // first, about 8,000 chars in all. One indexed query of at most 40 rows.
 export function recap(threadId: string, carry: string | null = null, current = "", max = 8000) {
+  const notes = getThread(threadId)?.notes;
+  return [carry, notes ? `Notes you kept for this thread:\n${notes}` : "", `This thread continues an earlier conversation. Your tools changed since it started, so it was restarted. Files in /bot/work are as you left them. The latest messages, oldest first:\n\n${recentLines(threadId, current, max).join("\n\n")}`].filter(Boolean).join("\n\n");
+}
+/** The latest driver and member messages, oldest first, within max chars (recap, side questions). */
+export function recentLines(threadId: string, current = "", max = 8000, me = "You") {
   const rows = all<{ kind: string; data: string }>("SELECT kind, data FROM events WHERE thread_id=? AND kind IN ('user','agent') ORDER BY id DESC LIMIT 40", threadId);
   // The message starting this turn goes in as the turn's own input, not the recap.
   if (rows[0]?.kind === "user" && json(rows[0].data, {}).text === current) rows.shift();
   const lines: string[] = []; let size = 0;
   for (const r of rows) {
-    const line = `${r.kind === "user" ? "Driver" : "You"}: ${String(json(r.data, {}).text || "").trim().slice(0, 1500)}`;
+    const line = `${r.kind === "user" ? "Driver" : me}: ${String(json(r.data, {}).text || "").trim().slice(0, 1500)}`;
     if (size + line.length > max) break;
     lines.unshift(line); size += line.length;
   }
-  const notes = getThread(threadId)?.notes;
-  return [carry, notes ? `Notes you kept for this thread:\n${notes}` : "", `This thread continues an earlier conversation. Your tools changed since it started, so it was restarted. Files in /bot/work are as you left them. The latest messages, oldest first:\n\n${lines.join("\n\n")}`].filter(Boolean).join("\n\n");
+  return lines;
 }
 export async function startTurn(threadId: string, text: string, attachments: string[], trigger: string) {
   const t = getThread(threadId)!, b = getBot(t.bot_id)!;
@@ -224,7 +228,7 @@ export function prewarmBrain(threadId: string) {
 export async function finishTurn(threadId: string, status: string, error?: string | null) {
   const a = active.get(threadId);
   if (!a) return;
-  active.delete(threadId); endPaintings(threadId);
+  active.delete(threadId); endPaintings(threadId); activityNow.delete(threadId);
   const t = getThread(threadId)!, b = getBot(t.bot_id)!;
   const u = a.total && a.base ? { input: a.total.inputTokens - a.base.inputTokens, cached: a.total.cachedInputTokens - a.base.cachedInputTokens, output: a.total.outputTokens - a.base.outputTokens } : { input: 0, cached: 0, output: 0 };
   const billed = billedUsage(b.id, a.turnId, a.usageFrom);

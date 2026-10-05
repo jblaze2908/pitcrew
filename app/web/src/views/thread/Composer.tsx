@@ -93,8 +93,11 @@ export interface EditTarget { path: string; label: string; src: string }
 interface ComposerProps {
   threadId: string; name: string; running: boolean; queued: QueuedItem[]; fromName: string; target?: EditTarget | null; onClearTarget?: () => void;
   autonomy: string; onAutonomy: (a: string) => void; ctx: { tokens: number | null; window: number | null };
+  /** The side question panel (SideAsk): open, and its toggle (also ⌘; from Thread). */
+  side?: boolean; onSide?: () => void;
 }
-export function Composer({ threadId, name, running, queued, fromName, target, onClearTarget, autonomy, onAutonomy, ctx }: ComposerProps) {
+const SIDE_KEY = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘;" : "Ctrl ;";
+export function Composer({ threadId, name, running, queued, fromName, target, onClearTarget, autonomy, onAutonomy, ctx, side, onSide }: ComposerProps) {
   const [text, setText] = useState("");
   const [mode, setMode] = useState<"steer" | "queue">("steer");
   const [atts, setAtts] = useState<Attachment[]>([]);
@@ -178,6 +181,7 @@ export function Composer({ threadId, name, running, queued, fromName, target, on
         <div className="bar">
           <button className="chipb" title="Attach files or paste an image" onClick={() => file.current?.click()}><Icon name="attach" size={14} />Attach</button>
           <input ref={file} type="file" className="hidden" multiple onChange={async (e) => { const input = e.currentTarget; await upload([...(input.files || [])]); input.value = ""; }} />
+          {onSide && <button className={`chipb${side ? " on" : ""}`} aria-pressed={!!side} title={`Ask ${name} something without steering it or adding to the thread (${SIDE_KEY})`} onClick={onSide}>Side question <kbd>{SIDE_KEY}</kbd></button>}
           <ModePicker threadId={threadId} value={autonomy} onChange={onAutonomy} />
           <span style={{ flex: 1 }} />
           {running && <Seg options={[["steer", "Steer now"], ["queue", "Queue after"]] as const} value={mode} onChange={setMode} />}

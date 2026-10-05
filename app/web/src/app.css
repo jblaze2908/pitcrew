@@ -799,3 +799,71 @@ svg text{fill:var(--ink-3);font:10px var(--font-data)}
 .plan .bar i,.planchip .bar i{display:block;height:100%;background:var(--data);transition:width .3s}
 .planchip{display:flex;flex-direction:column;gap:8px;max-width:520px;padding:12px 14px;text-align:left;cursor:pointer;font:inherit;color:inherit}
 .planchip:hover{box-shadow:inset 0 0 0 1px var(--line-2)}
+
+/* Home: since you last looked, crew activity (Draft H3). Two columns, stacked on narrow screens. */
+.side .nv em.new{min-width:18px;height:18px;padding:0 5px;display:grid;place-items:center;border-radius:99px;background:var(--data);color:var(--on-signal)} /* on-signal reads on data in both themes */
+.side .nv .bd.new,.side .ib .bd.new{background:var(--data)}
+.home2{display:grid;grid-template-columns:minmax(0,420px) minmax(0,1fr)}
+.home2>section{min-width:0}
+.home2>.since{padding-right:28px}
+.home2>.activity{border-left:1px solid var(--line);padding-left:28px}
+.home2 .sub{font-size:13px;color:var(--ink-2);margin-top:6px}
+.home2 .empty{text-align:left;padding:18px 4px;font-size:13px}
+.since .hd{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
+.since .mark{font-size:12.5px;color:var(--ink-3);flex:none}
+.since .mark:hover{color:var(--ink)}
+.since .list{margin-top:14px}
+.since .it{display:grid;grid-template-columns:10px 28px minmax(0,1fr) auto;gap:12px;align-items:start;padding:14px 4px;border-top:1px solid var(--line);color:var(--ink)}
+.since .it:first-child{border-top:0}
+.since .it:hover{background:var(--surface)}
+.since .dot{width:8px;height:8px;border-radius:50%;background:var(--data);margin-top:10px}
+.since .dot.r{background:none}
+.since .who b{font-weight:600;font-size:13.5px}
+.since .k{font-size:12px;color:var(--ink-3)}
+.since .txt{font-size:14px;line-height:1.5;color:var(--ink-2);margin-top:3px;word-break:break-word}
+.since .txt.soft{color:color-mix(in srgb,var(--bad) 62%,var(--ink-2))}
+.since .it.read .txt{color:var(--ink-3)}
+.since .t{font:500 11.5px/1.4 var(--font-data);color:var(--ink-3);margin-top:3px}
+.activity .filters{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+.activity .ch{display:inline-flex;align-items:center;gap:6px;width:auto;height:30px;padding:0 11px;border:0;border-radius:99px;box-shadow:inset 0 0 0 1px var(--line-2);background-color:transparent;font:500 12.5px/1 var(--font-body);color:var(--ink-2)}
+.activity select.ch{padding-right:30px;background-position:right 11px center;cursor:pointer}
+.activity .ch:hover{color:var(--ink)}
+.activity .ch.on{background-color:var(--surface-2);color:var(--ink)}
+.activity .lg{margin-top:16px;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.activity .lh,.activity .lr{display:grid;grid-template-columns:84px 150px 78px minmax(0,1fr) 128px;gap:12px;align-items:center;padding:0 16px}
+.activity .lh{height:34px;background:var(--surface);font:500 11px/1 var(--font-data);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.activity .lr{min-height:48px;border-top:1px solid var(--line);font-size:13px;color:var(--ink-2)}
+.activity a.lr:hover{background:var(--surface)}
+.activity .lr>*{min-width:0}
+.activity .tm{font:500 12px var(--font-data);color:var(--ink-3);white-space:nowrap}
+.activity .who{display:flex;align-items:center;gap:8px;color:var(--ink)}
+.activity .who .nm,.activity .w,.activity .by{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.activity .by{font-size:12.5px;color:var(--ink-3)}
+.activity .by b{font-weight:500;color:var(--ink-2)}
+.activity .foot{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;font-size:12px;color:var(--ink-3)}
+@media (max-width:1100px){.home2{grid-template-columns:minmax(0,1fr);gap:28px}.home2>.since{padding-right:0}.home2>.activity{border-left:0;padding-left:0}}
+@media (max-width:640px){.activity .lh{display:none}.activity .lr{grid-template-columns:auto minmax(0,1fr) auto;padding:10px 14px;row-gap:6px}.activity .lr .w,.activity .lr .by{grid-column:1/-1}}
+
+/* Side question (Draft H4): the right column of a thread while open; nothing in it is kept. */
+.threadpage.withbtw{grid-template-columns:minmax(0,1fr) 400px}
+.btw{display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--ground-deep);border-left:1px solid var(--line)}
+.btw .bh{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);flex:none}
+.btw .bh .ic{color:var(--ink-3);flex:none}
+.btw .bh b{font:600 13.5px/1 var(--font-body)}
+.btw .bh small{font-size:12px;color:var(--ink-3)}
+.btw .bh .x{margin-left:auto;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;color:var(--ink-3)}
+.btw .bh .x:hover{background:var(--surface-2);color:var(--ink)}
+.btw .bb{flex:1;min-height:0;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:12px}
+.btw .hint{font-size:13px;line-height:1.5;color:var(--ink-3)}
+.btw .pair{display:flex;flex-direction:column;gap:12px}
+.btw .bq{align-self:flex-end;max-width:85%;background:var(--surface-3);border-radius:14px;padding:8px 13px;font-size:13.5px;white-space:pre-wrap;word-break:break-word}
+.btw .ba{display:grid;grid-template-columns:22px minmax(0,1fr);gap:10px;align-items:start;font-size:13.5px;line-height:1.55;color:var(--ink-2);white-space:pre-wrap;word-break:break-word}
+.btw .ba .err0{color:color-mix(in srgb,var(--bad) 62%,var(--ink-2))}
+.btw .bi{margin:0 14px 10px;border:1px solid var(--line-2);border-radius:12px;padding:4px 6px;flex:none}
+.btw .bi:focus-within{border-color:var(--ink-3)}
+.btw .bi textarea{border:0;background:none;padding:6px;min-height:30px;max-height:140px;resize:none;font-size:13.5px;line-height:1.45}
+.btw .bf{padding:0 14px 12px;font-size:12px;line-height:1.45;color:var(--ink-3);display:flex;align-items:flex-start;gap:6px;flex:none}
+.btw .bf svg{flex:none;margin-top:2px}
+.composer .chipb.on{background:var(--surface-3);color:var(--ink);box-shadow:none}
+.composer .chipb kbd{font:500 11px var(--font-data);color:var(--ink-3)}
+@media (max-width:900px){.threadpage.withbtw{grid-template-columns:1fr}.btw{border-left:0;border-top:1px solid var(--line);max-height:70vh}}

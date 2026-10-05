@@ -41,6 +41,7 @@ export function state(): State {
     weekCap: one<{ c: number }>("SELECT COALESCE(SUM(weekly_cap_usd),0) c FROM bots WHERE archived=0")!.c,
     computersUp: allComputers().filter((c) => c.up).length,
     engram: { linked: linked(), url: engramUrl() },
+    unread: R.inbox().unread,
   };
 }
 export async function threadView(id: string): Promise<ThreadView> {

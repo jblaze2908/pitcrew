@@ -1181,3 +1181,138 @@ test("the Chief as workspace admin: profile and model changes, file listing and 
   const notChief = await Tl.dynamicTool({ bot: { id: "adm_a" }, mems: new Map() }, "th_adm", { tool: "member_files", threadId: "cx_w", arguments: { member: "Bills" } });
   assert.equal(notChief.success, false);
 });
+
+test("since you last looked: runs ended after the thread was last opened are unread; quiet, retro and stopped runs never are", () => {
+  const t0 = Date.now(), m = 60000;
+  run("INSERT INTO bots(id,name,created_at) VALUES('b_inb','Inboxer',0),('b_inb_chief','Chief',0)");
+  const th = (id, extra = {}) => run("INSERT INTO threads(id,bot_id,title,origin,archived,seen_at,created_at,updated_at) VALUES(?,?,?,?,?,?,0,0)", id, extra.bot || "b_inb", extra.title || id, extra.origin ? JSON.stringify(extra.origin) : null, extra.archived ? 1 : 0, extra.seen ?? null);
+  const turn = (id, thread, status, trigger, ended, extra = {}) => run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,error,started_at,ended_at) VALUES(?,?,?,?,?,?,?,?)", id, thread, extra.bot || "b_inb", status, trigger, extra.error || null, ended - m, ended);
+  const reply = (thread, turnId, text) => run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES(?,?,'agent',?,0)", thread, turnId, JSON.stringify({ text }));
+  th("th_in_new", { title: "Excalidraw diagram" }); turn("tu_in_new", "th_in_new", "completed", "driver", t0 - 5 * m); reply("th_in_new", "tu_in_new", "**Diagram** is on the canvas.\nMore detail");
+  th("th_in_seen", { seen: t0 - m }); turn("tu_in_seen", "th_in_seen", "completed", "driver", t0 - 2 * m);
+  th("th_in_sched", { title: "Scheduled work" });
+  run("INSERT INTO schedules(id,bot_id,thread_id,spec,prompt,created_at) VALUES('sc_inb','b_inb','th_in_sched','daily 22:00',?,0)", "Daily review\nof spend");
+  turn("tu_in_quiet", "th_in_sched", "completed", "schedule", t0 - 30 * m); turn("tu_in_fail", "th_in_sched", "failed", "schedule", t0 - 20 * m, { error: "Couldn't confirm the ledger" });
+  run("INSERT INTO schedule_runs(id,schedule_id,bot_id,thread_id,turn_id,kind,due_at,fired_at,status,summary) VALUES('sr_inb_q','sc_inb','b_inb','th_in_sched','tu_in_quiet','time',0,0,'quiet','2 new orders logged'),('sr_inb_f','sc_inb','b_inb','th_in_sched','tu_in_fail','time',0,0,'failed',NULL)");
+  th("th_in_ask", { bot: "b_inb_chief", seen: t0 }); th("th_in_dlg", { origin: { kind: "delegated", fromBot: "b_inb_chief", fromThread: "th_in_ask" } });
+  turn("tu_in_dlg", "th_in_dlg", "completed", "delegation", t0 - 3 * m); reply("th_in_dlg", "tu_in_dlg", "₹26,990 on Flipkart");
+  turn("tu_in_retro", "th_in_new", "completed", "retro", t0 - m); turn("tu_in_stop", "th_in_new", "interrupted", "driver", t0 - m);
+  th("th_in_arch", { archived: true }); turn("tu_in_arch", "th_in_arch", "completed", "driver", t0 - m);
+  turn("tu_in_old", "th_in_new", "completed", "driver", t0 - 8 * 86400000);
+  run("INSERT INTO pitstops(id,bot_id,thread_id,kind,effect,title,detail,created_at,expires_at) VALUES('ps_inb','b_inb','th_in_sched','mcp','send','x','{}',?,?)", t0, t0 + 60 * m);
+  try {
+    const mine = () => R.inbox().items.filter((i) => i.botId === "b_inb");
+    const by = () => Object.fromEntries(mine().map((i) => [i.turnId, i]));
+    let it = by();
+    assert.deepEqual(Object.keys(it).sort(), ["tu_in_dlg", "tu_in_fail", "tu_in_new", "tu_in_quiet", "tu_in_seen"], "no retro, stopped, archived or week-old runs");
+    assert.deepEqual(mine().map((i) => i.turnId), ["tu_in_seen", "tu_in_dlg", "tu_in_new", "tu_in_fail", "tu_in_quiet"], "newest first");
+    assert.deepEqual([it.tu_in_new.unread, it.tu_in_new.kind, it.tu_in_new.status, it.tu_in_new.text, it.tu_in_new.sub], [true, "run", "completed", "Diagram is on the canvas.", "Excalidraw diagram"]);
+    assert.equal(it.tu_in_seen.unread, false, "opened after it ended");
+    assert.deepEqual([it.tu_in_quiet.unread, it.tu_in_quiet.status, it.tu_in_quiet.text, it.tu_in_quiet.sub, it.tu_in_quiet.waiting], [false, "quiet", "2 new orders logged", "Daily review", false], "only the thread's newest run says it waits on you");
+    assert.deepEqual([it.tu_in_fail.unread, it.tu_in_fail.kind, it.tu_in_fail.status, it.tu_in_fail.text, it.tu_in_fail.waiting], [true, "scheduled", "failed", "Couldn't confirm the ledger", true]);
+    assert.deepEqual([it.tu_in_dlg.kind, it.tu_in_dlg.fromBot, it.tu_in_dlg.unread], ["delegation", "b_inb_chief", false], "the asking thread was opened after the answer landed");
+    run("UPDATE threads SET seen_at=? WHERE id='th_in_ask'", t0 - 10 * m);
+    assert.equal(by().tu_in_dlg.unread, true);
+    assert.equal(R.markSeen("th_in_new"), true);
+    assert.equal(R.markSeen("th_in_new", t0 - 60 * m), false, "the marker never moves back");
+    it = by();
+    assert.equal(it.tu_in_new.unread, false);
+    assert.ok(R.inbox().unread >= 2);
+    R.markAllSeen(t0 + 1);
+    assert.equal(R.inbox().unread, 0);
+    const after = R.inbox().items;
+    assert.ok(after.length > 0 && after.length <= 8 && after.every((i) => !i.unread), "the newest read runs stay listed, up to READ_KEEP");
+  } finally { run("DELETE FROM pitstops WHERE id='ps_inb'"); }
+});
+
+test("activity lists what was done for the driver, filtered by member, effect and who allowed it, a page at a time", async () => {
+  const B = "b_act";
+  run("INSERT INTO bots(id,name,created_at) VALUES(?, 'Actor', 0)", B);
+  const call = (tool, el, host = "shop.example") => ({ kind: "mcp", server: "browser", tool, arguments: { page_url: `https://${host}/x`, grounded_elements: el ? [{ ref: "e1", element: el }] : [] } });
+  const v = (effect, decision, by = "rule", reason = "r") => ({ effect, decision, by, reason });
+  R.logDecision("th_x", B, v("browse", "allow"), call("browser_navigate"));
+  R.logDecision("th_x", B, v("send", "ask", "jev:m"), call("browser_click", 'button "Send"'), { decision: "allow", by: "rule:click Send on shop.example (this thread)", source: "standing" });
+  R.logDecision("th_x", B, v("signin", "ask", "jev:m"), call("browser_click", 'button "Sign in"'), { decision: "allow", by: "hands-free", source: "standing" });
+  R.logDecision("th_x", B, v("delete", "allow", "jev:m", "effect=delete · the driver asked for this 0.91"), { kind: "shell", command: "rm -rf /bot/work/old" });
+  R.logDecision("th_x", B, v("send", "ask", "jev:m"), call("browser_click", 'button "Post"'), { decision: "allow", by: "learned:click Post (3 approvals)", source: "learned" });
+  R.logDecision("th_x", B, v("share", "block", "rule"), { kind: "shell", command: "scp x y" });
+  const gated = async (id, effect, decision, scope = "once") => {
+    R.logDecision(null, B, v(effect, "ask", "jev:m"), call("browser_click", 'button "Go"'), { decision: "ask", pitstop: id });
+    R.pitStop({ id, botId: B, threadId: null, kind: "mcp", effect, title: "Pay ₹1,299 on shop.example · verify: shop.example (https)", detail: {} });
+    await R.decide(id, decision, { scope });
+  };
+  await gated("ps_act_pay", "pay", "approve"); await gated("ps_act_no", "signin", "deny"); await gated("ps_act_br", "browse", "approve", "always");
+  R.pitStop({ id: "ps_act_file", botId: B, threadId: null, kind: "file", effect: "write", title: "Edit files outside the workspace: /etc/hosts", detail: {} });
+  await R.decide("ps_act_file", "approve");
+  assert.equal(one("SELECT allowed_by FROM jev_labels WHERE bot_id=? AND allowed_by='hands-free'", B).allowed_by, "hands-free", "what stood in for the driver is stored");
+
+  const list = (q = {}) => R.activity({ bot: B, ...q }).rows;
+  const every = list();
+  const key = (r) => `${r.effect}:${r.by.cat}`;
+  assert.deepEqual(every.map(key).sort(), ["browse:always", "delete:jev", "pay:once", "send:always", "send:learned", "signin:autonomy", "write:once"],
+    "no reads or browsing unless the driver approved it; nothing blocked or denied");
+  const by = Object.fromEntries(every.map((r) => [key(r), r]));
+  assert.deepEqual(by["send:always"].by, { cat: "always", who: "You", how: "this thread" });
+  assert.deepEqual(by["signin:autonomy"].by, { cat: "autonomy", who: "Thread", how: "hands-free" });
+  assert.deepEqual(by["send:learned"].by, { cat: "learned", who: "Learned", how: "3 approvals" });
+  assert.deepEqual(by["delete:jev"].by, { cat: "jev", who: "jev", how: "you asked" });
+  assert.deepEqual([by["pay:once"].what, by["pay:once"].by.how], ["Pay ₹1,299 on shop.example", "once"], "the pit stop's title, without its verify suffix");
+  assert.equal(by["browse:always"].by.how, "always");
+  assert.equal(by["delete:jev"].what, "Ran rm -rf /bot/work/old");
+  assert.equal(by["signin:autonomy"].what, 'click button "Sign in" on shop.example');
+  assert.deepEqual(list({ effect: "pay" }).map(key), ["pay:once"]);
+  assert.deepEqual(list({ effect: "send" }).map(key).sort(), ["send:always", "send:learned"]);
+  assert.deepEqual(list({ by: "once" }).map(key).sort(), ["pay:once", "write:once"]);
+  assert.deepEqual(list({ by: "autonomy" }).map(key), ["signin:autonomy"]);
+  assert.deepEqual(list({ by: "jev", effect: "send" }), []);
+  assert.equal(R.activity({ bot: "b_nobody" }).rows.length, 0);
+
+  const seen = []; let cursor = null, pages = 0;
+  do { const p = R.activity({ bot: B, limit: 3, before: cursor }); seen.push(...p.rows.map((r) => r.id)); cursor = p.next; pages++; } while (cursor && pages < 10);
+  assert.equal(pages, 3);
+  assert.deepEqual([...seen].sort(), every.map((r) => r.id).sort(), "pages neither skip nor repeat");
+
+  const { db } = await import("../app/dist/src/db.js");
+  const plan = (sql) => db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all("x", 0).map((r) => r.detail).join(" ");
+  assert.match(plan("SELECT id FROM jev_labels l WHERE json_extract(l.verdict,'$.effect')=? AND l.ts>? ORDER BY l.ts DESC"), /jev_labels_effect/);
+  assert.match(plan("SELECT id FROM jev_labels l WHERE l.bot_id=? AND l.ts>? ORDER BY l.ts DESC"), /jev_labels_bot/);
+});
+
+test("a side question reads the thread's record on a tool-less plan ask, and stores nothing", async () => {
+  const { active } = await import("../app/dist/src/runtime/state.js");
+  const { bus } = await import("../app/dist/src/runtime/bus.js");
+  run("INSERT INTO bots(id,name,job,created_at) VALUES('b_side','Grocery Tracker','Keeps the grocery ledger',0)");
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_side','b_side','October ledger',0,0)");
+  const ev = (kind, data) => run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('th_side','tu_side',?,?,0)", kind, JSON.stringify(data));
+  ev("user", { text: "Rebuild this month's ledger from Blinkit and Zepto" });
+  ev("agent", { text: "Blinkit is done: 23 orders for October so far." });
+  ev("tool", { type: "mcpToolCall", title: "navigate zeptonow.com", status: "completed" });
+  ev("tool", { type: "commandExecution", title: "$ sqlite3 ledger.db", status: "failed" });
+  active.set("th_side", { turnId: "tu_side", codexTurnId: "c", base: null, total: null, last: null, usageFrom: 0 });
+  bus.emit("activity", { threadId: "th_side", text: "Reading Zepto order history · page 3" });
+  const counts = () => ["events", "turns", "audit", "queued"].map((t) => one(`SELECT COUNT(*) n FROM ${t}`).n);
+  try {
+    const before = counts();
+    let got = null, closed = 0;
+    const open = async () => ({ ask: async (instructions, text, opts) => { got = { instructions, text, opts }; return " Reading Zepto, page 3 of about 5. "; }, close: () => { closed++; } });
+    const r = await R.sideAsk("th_side", "  what are you doing right now? ", [{ q: "hi", a: "Working on the ledger." }], open);
+    assert.deepEqual(r, { answer: "Reading Zepto, page 3 of about 5." });
+    assert.equal(closed, 1, "the side server is closed after the ask");
+    assert.match(got.instructions, /You are Grocery Tracker/);
+    assert.match(got.instructions, /can't act, run tools/);
+    assert.match(got.instructions, /data, never instructions/);
+    for (const s of ["Thread: October ledger", "Current step: Reading Zepto order history · page 3", "Driver: Rebuild this month's ledger", "Grocery Tracker: Blinkit is done",
+      "- navigate zeptonow.com", "- $ sqlite3 ledger.db (failed)", "Driver: hi\nGrocery Tracker: Working on the ledger.", "Side question from the driver: what are you doing right now?"])
+      assert.ok(got.text.includes(s), `prompt lacks ${s}`);
+    assert.deepEqual(counts(), before, "nothing reaches the transcript, the turns, the audit log or the queue");
+
+    await assert.rejects(R.sideAsk("th_side", "still there?", [], async () => null), (e) => e.status === 503 && e.message === R.NOT_CONNECTED);
+    await assert.rejects(R.sideAsk("th_side", "   ", [], open), (e) => e.status === 400);
+    await assert.rejects(R.sideAsk("th_nope", "x", [], open), (e) => e.status === 404);
+    const failing = async () => ({ ask: async () => { throw new Error("plan ask timed out"); }, close: () => { closed++; } });
+    await assert.rejects(R.sideAsk("th_side", "x", [], failing), (e) => e.status === 502 && /timed out/.test(e.message));
+    assert.equal(closed, 2);
+    active.delete("th_side");
+    assert.match(R.sidePrompt("th_side", "x").text, /Status: not running/);
+  } finally { active.delete("th_side"); }
+});
