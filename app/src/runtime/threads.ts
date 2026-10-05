@@ -3,6 +3,7 @@ import { writeFileSync, chownSync } from "node:fs";
 import { one, all, run, now, json } from "../db.js";
 import { botDir, ensureDirs } from "../computer.js";
 import { bus } from "./bus.js";
+import { folded } from "./state.js";
 import type { ThreadRow } from "../models.js";
 import type { ThreadStatus, EventKind } from "../../shared/types.js";
 
@@ -10,6 +11,9 @@ export const getThread = (id: string | null | undefined) => one<ThreadRow>("SELE
 
 // `live` rides on the SSE payload only (the pit stop or surface row), so an open thread draws it without a refetch.
 export function addEvent(threadId: string, turnId: string | null | undefined, kind: EventKind, data: object, live: object | null = null) {
+  // A folded turn (a retro on a fork) leaves only pit stops, which need the driver; the rest becomes its summary line.
+  const f = turnId ? folded.get(turnId) : undefined;
+  if (f && kind !== "pitstop") { if (kind === "agent") f.reply = String((data as { text?: unknown }).text || ""); else if (kind === "tool") f.steps++; return; }
   const r = run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES(?,?,?,?,?)", threadId, turnId ?? null, kind, JSON.stringify(data), now());
   run("UPDATE threads SET updated_at=? WHERE id=?", now(), threadId);
   bus.emit("event", { id: Number(r.lastInsertRowid), threadId, turnId, kind, data, ts: now(), ...live });

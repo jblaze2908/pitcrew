@@ -3,7 +3,9 @@ import type { Snapshot } from "../snapshot.js";
 
 export type TokenUsage = Record<string, number>; // Codex's inputTokens, cachedInputTokens, outputTokens, …
 // quietFrom: a scheduled run's thread updated_at before it started, put back if the run ends QUIET (nothing notable).
-export interface ActiveTurn { turnId: string; codexTurnId: string | null; base: TokenUsage | null; total: TokenUsage | null; last: TokenUsage | null; usageFrom: number; snap?: Snapshot; quietFrom?: number; extraUsd?: number; editOf?: string | null }
+export interface ActiveTurn { turnId: string; codexTurnId: string | null; base: TokenUsage | null; total: TokenUsage | null; last: TokenUsage | null; usageFrom: number; snap?: Snapshot; quietFrom?: number; extraUsd?: number; editOf?: string | null;
+  // A retro on a fork (turns.ts startTurn): the fork's Codex thread id and the retro's "Retro · why" line.
+  fork?: string; retro?: string }
 export interface TurnEnd { turnId: string; status: string; cost: number }
 export interface Lease { since: number; waiters: ((ok: boolean) => void)[]; ask?: Promise<boolean> | null }
 // The browser snapshot the agent last saw: text is the diff base, lines are its ref lines for grounding.
@@ -23,4 +25,6 @@ export const shellVerdicts = new Map<string, { effect: string; decision: string 
 export const turnWaiters = new Map<string, ((r: TurnEnd) => void)[]>(); // our thread id → [resolve] for the next finished turn (delegation)
 export const usage = new Map<string, TokenUsage>();    // codex thread id → last total usage
 export const snapshots = new Map<string, Seen>();      // codex thread id → { url, text, lines } from the last browser snapshot the agent saw (noteSnapshot)
+// Turns whose events stay out of the transcript (a retro on a fork): what they'd add is kept here for the one-line summary.
+export const folded = new Map<string, { reply: string; steps: number }>(); // turn id → last reply, step count
 export const wakeFor = new Map<string, string>();      // Chief thread id → item key it was woken for, until it acts or its turn ends

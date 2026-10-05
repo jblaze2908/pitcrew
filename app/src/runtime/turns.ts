@@ -8,7 +8,7 @@ import { providerReady, estimateCost } from "../providers.js";
 import { snapshot, changes, pruneShadow } from "../snapshot.js";
 import { doneCheck } from "./donecheck.js";
 import { bus, activityNow } from "./bus.js";
-import { active, byCodex, turnWaiters, wakeFor, type TurnEnd } from "./state.js";
+import { active, byCodex, folded, turnWaiters, usage, wakeFor, type TurnEnd } from "./state.js";
 import { enqueue, peekQueued, takeQueued, requeue, queuedThreads } from "./queue.js";
 import { getThread, addEvent, setThreadStatus, nameThread } from "./threads.js";
 import { brain, computer } from "./machines.js";
@@ -26,8 +26,9 @@ import { nameAfterRun } from "./titles.js";
 import { scheduleRunStarted, scheduleRunEnded, scheduleRunWaiting, scheduleRunCancelled, scheduleRunFailedToStart } from "./schedules.js";
 import { listSkills, skillIndex } from "./skills.js";
 import { CHANGELOG } from "../changelog.js";
-import { runReport, retroReason, retroPrompt, weeklyDue } from "./retro.js";
+import { runReport, retroReason, retroPrompt, weeklyDue, retroOutcome } from "./retro.js";
 import type { Bot } from "../../shared/types.js";
+import type { Brain } from "../computer.js";
 
 export const isRunning = (threadId: string) => active.has(threadId);
 
@@ -49,6 +50,9 @@ export async function sendMessage(threadId: string, { text: given, attachments =
   const a = active.get(threadId);
   // A queued message stays out of the transcript until it actually goes to the member (startQueued).
   if (a && mode === "queue") return { queued: true, id: enqueue(threadId, { text, attachments, trigger, display }) };
+  // Steered into a retro's fork, the message would vanish with it: it waits for the thread, and the retro stops for it
+  // (once its turn exists; before that, an interrupt would end the run under a turn/start still in flight).
+  if (a?.fork) { const id = enqueue(threadId, { text, attachments, trigger, display }); if (a.codexTurnId) interrupt(threadId).catch(() => {}); return { queued: true, id }; }
   const said = () => addEvent(threadId, null, "user", { text, attachments, via: trigger, ...(display ? { display } : {}) });
   if (a) {
     a.editOf = editTarget(text) ?? a.editOf;
@@ -56,8 +60,9 @@ export async function sendMessage(threadId: string, { text: given, attachments =
     said();
     return { steered: true };
   }
-  said();
-  startTurn(threadId, text, attachments, trigger).catch((e) => {
+  // A retro says itself: one summary line from a fork, or this line when it runs in the thread (startTurn).
+  if (trigger !== "retro") said();
+  startTurn(threadId, text, attachments, trigger, display).catch((e) => {
     if (e.silent) return;
     if (trigger === "schedule") scheduleRunFailedToStart(threadId, e.message);
     addEvent(threadId, null, "error", { text: e.message });
@@ -111,7 +116,18 @@ export function recentLines(threadId: string, current = "", max = 8000, me = "Yo
   }
   return lines;
 }
-export async function startTurn(threadId: string, text: string, attachments: string[], trigger: string) {
+/** A Codex fork of the thread for a retro: same history, tools and instructions, but nothing it does comes back to the
+ * thread (rewind.ts forks the same way). One thread/fork per retro, plus the fork's MCP connect. */
+export async function retroFork(c: Brain, b: Bot, codexId: string) {
+  const f = await c.request("thread/fork", { threadId: codexId, model: b.model, modelProvider: b.provider, cwd: "/bot/work", sandbox: "danger-full-access", approvalPolicy: "untrusted", excludeTurns: true }, 120000);
+  const id = f.thread.id as string;
+  setRollout(b.id, id, f.thread.path);
+  // The fork has heard what its parent heard: memories saved since go in as context, like on the parent.
+  c.loaded.add(id); c.mems.set(id, new Map(c.mems.get(codexId) ?? []));
+  await c.mcpReady(id);
+  return id;
+}
+export async function startTurn(threadId: string, text: string, attachments: string[], trigger: string, display: string | null = null) {
   const t = getThread(threadId)!, b = getBot(t.bot_id)!;
   const why = blockedReason(b);
   if (why) throw new Error(why);
@@ -179,17 +195,25 @@ export async function startTurn(threadId: string, text: string, attachments: str
     // Developer instructions reach Codex only at start/resume (which just sent the current list); memories saved since
     // go in as turn context, persisted in the thread's history.
     if (mems && !c.mems.has(codexId)) c.mems.set(codexId, memMap(mems));
-    const memDelta = mems && memoryDelta(c.mems.get(codexId), mems);
     byCodex.set(codexId, threadId);
     const a0 = active.get(threadId);
+    // A retro runs on a fork (retro.ts has the cost); when the fork can't be made it runs in the thread as before.
+    let runOn = codexId;
+    if (trigger === "retro") {
+      const f = await retroFork(c, b, codexId).catch(() => null);
+      if (f && a0) { runOn = f; a0.fork = f; a0.retro = display || "Retro"; folded.set(turnId, { reply: "", steps: 0 }); byCodex.set(f, threadId); }
+      else addEvent(threadId, null, "user", { text, attachments, via: trigger, ...(display ? { display } : {}) });
+    }
+    const memDelta = mems && memoryDelta(c.mems.get(runOn), mems);
     if (a0) try { a0.snap = snapshot(b.id); } catch {}
-    const carry = getThread(threadId)!.carry;
+    // A fork leaves the carry (a recap, a rewind note) for the thread's next real turn.
+    const carry = runOn === codexId ? getThread(threadId)!.carry : null;
     if (carry) run("UPDATE threads SET carry=NULL WHERE id=?", threadId);
     const ctx = { ...(memDelta ? { pitcrew_memory: { kind: "application", value: memDelta } } : {}), ...(refreshed ? { pitcrew_engram: { kind: "application", value: refreshed } } : {}) };
     // Every turn names the computer environment, so commands never run in the brain itself.
-    const r = await c.request("turn/start", { threadId: codexId, environments: ENVS, input: toInput(b.id, carry ? `${carry}\n\n---\n\n${text}` : text, attachments), responsesapiClientMetadata: { pitcrew_turn: turnId },
+    const r = await c.request("turn/start", { threadId: runOn, environments: ENVS, input: toInput(b.id, carry ? `${carry}\n\n---\n\n${text}` : text, attachments), responsesapiClientMetadata: { pitcrew_turn: turnId },
       ...(Object.keys(ctx).length ? { additionalContext: ctx } : {}) }, 120000);
-    if (memDelta && mems) c.mems.set(codexId, memMap(mems));
+    if (memDelta && mems) c.mems.set(runOn, memMap(mems));
     const a = active.get(threadId);
     if (a) a.codexTurnId = r.turn.id;
     run("UPDATE turns SET codex_turn_id=?, status='running' WHERE id=?", r.turn.id, turnId);
@@ -257,10 +281,18 @@ export async function finishTurn(threadId: string, status: string, error?: strin
   // A delegated thread's answer carries what it read, so untrusted content also taints the thread that asked.
   const from = tainted(threadId) && t.origin ? json<{ fromThread?: string }>(t.origin, {}).fromThread : null;
   if (from && taint(from)) addEvent(from, null, "system", { text: `${b.name}'s answer came from a thread with untrusted content. For the next 10 minutes, sending, paying, signing in, sharing and deleting ask you first.` });
+  // A retro on a fork: drop the fork; the thread gets one line saying why it ran and what it changed.
+  const f = folded.get(a.turnId);
+  if (a.fork) {
+    folded.delete(a.turnId); byCodex.delete(a.fork); usage.delete(a.fork);
+    brain(b).unload(a.fork).catch(() => {});
+    const row = one<{ changes: string | null; started_at: number }>("SELECT changes, started_at FROM turns WHERE id=?", a.turnId);
+    addEvent(threadId, null, "system", { text: `${a.retro || "Retro"} · ${retroOutcome(b.id, row?.started_at ?? now(), json<{ path: string }[]>(row?.changes, []), f?.reply || "", status)}`, retro: { turnId: a.turnId } });
+  }
   setThreadStatus(threadId, "idle");
   // A scheduled run with nothing notable ends "QUIET: …": the thread keeps its place instead of jumping to the top, and
   // the web app folds the run to one line. Anything else is news and surfaces as usual.
-  if (a.quietFrom != null && status === "completed" && isQuiet(lastAgentText(threadId, a.turnId))) run("UPDATE threads SET updated_at=? WHERE id=?", a.quietFrom, threadId);
+  if (a.quietFrom != null && status === "completed" && isQuiet(f ? f.reply : lastAgentText(threadId, a.turnId))) run("UPDATE threads SET updated_at=? WHERE id=?", a.quietFrom, threadId);
   bus.emit("turn", { threadId, turnId: a.turnId, status, cost: cost.usd, botId: b.id });
   // A separate grader checks a finished task against its criteria (donecheck.ts); async, so nothing here waits on it.
   if (status === "completed") doneCheck(threadId, a.turnId).catch(() => {});
@@ -285,8 +317,8 @@ export function startQueued(threadId: string, quiet = false) {
   const why = blockedReason(b);
   if (why) { if (q.via === "schedule") scheduleRunWaiting(threadId, why); if (!quiet) addEvent(threadId, null, "error", { text: `${why} Your queued message is still waiting.` }); return false; }
   takeQueued(threadId, q.id);
-  addEvent(threadId, null, "user", { text: q.text, attachments: q.attachments, via: q.via, ...(q.display ? { display: q.display } : {}) });
-  startTurn(threadId, q.text, q.attachments, q.via).catch((e) => { if (!e.silent) { if (q.via === "schedule") scheduleRunFailedToStart(threadId, e.message); addEvent(threadId, null, "error", { text: e.message }); setThreadStatus(threadId, "idle"); } });
+  if (q.via !== "retro") addEvent(threadId, null, "user", { text: q.text, attachments: q.attachments, via: q.via, ...(q.display ? { display: q.display } : {}) });
+  startTurn(threadId, q.text, q.attachments, q.via, q.display).catch((e) => { if (!e.silent) { if (q.via === "schedule") scheduleRunFailedToStart(threadId, e.message); addEvent(threadId, null, "error", { text: e.message }); setThreadStatus(threadId, "idle"); } });
   return true;
 }
 /** Threads with queued messages and no run, e.g. after a restart or a kill-switch resume. */
@@ -297,7 +329,7 @@ export const startQueues = (quiet = true) => idleQueued().map((id) => startQueue
 export async function steerNote(threadId: string, text: string) {
   const a = active.get(threadId), t = getThread(threadId);
   if (!a?.codexTurnId || !t?.codex_id) return false;
-  await brain(getBot(t.bot_id)!).request("turn/steer", { threadId: t.codex_id, expectedTurnId: a.codexTurnId, input: toInput(t.bot_id, `[Pitcrew] ${text}`, []) });
+  await brain(getBot(t.bot_id)!).request("turn/steer", { threadId: a.fork ?? t.codex_id, expectedTurnId: a.codexTurnId, input: toInput(t.bot_id, `[Pitcrew] ${text}`, []) });
   return true;
 }
 /** The driver's "Send now": steers it into the running turn, or starts it. A failed delivery puts it back in place. */
@@ -320,7 +352,7 @@ export async function interrupt(threadId: string) {
   const t = getThread(threadId), a = active.get(threadId);
   if (!t || !a) return false;
   const c = brain(getBot(t.bot_id)!);
-  if (a.codexTurnId && c.up) await c.request("turn/interrupt", { threadId: t.codex_id, turnId: a.codexTurnId }).catch(() => {});
+  if (a.codexTurnId && c.up) await c.request("turn/interrupt", { threadId: a.fork ?? t.codex_id, turnId: a.codexTurnId }).catch(() => {});
   else finishTurn(threadId, "interrupted");
   return true;
 }

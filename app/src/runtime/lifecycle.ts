@@ -56,10 +56,12 @@ export function settleCutTurns() {
 const RESUME = "Pitcrew restarted in the middle of your last run, so it stopped partway. Check where things stand now (the screen, the page, the files) and carry on with the task from there. Don't redo steps that already finished.";
 const RESUME_WITHIN = 2 * 3600_000;
 // Each cut turn resumes once, on the thread it was on. Not a resume of a resume (a restart loop would replay forever),
-// nor a delegated or plan turn (whoever waited for its answer died with the process), nor work older than 2 h.
-export const resumable = (t: Cut, at = now()) => !["resume", "delegation", "plan"].includes(t.trigger) && at - t.started_at < RESUME_WITHIN && !!getThread(t.thread_id);
+// nor a delegated or plan turn (whoever waited for its answer died with the process), nor work older than 2 h. A retro
+// isn't resumed or offered: it ran on a fork the thread never saw, and the next run that stands out gets another.
+export const resumable = (t: Cut, at = now()) => !["resume", "delegation", "plan", "retro"].includes(t.trigger) && at - t.started_at < RESUME_WITHIN && !!getThread(t.thread_id);
 export function resumeCut(cut: Cut[]) {
   for (const t of cut) {
+    if (t.trigger === "retro") continue;
     if (!resumable(t)) { addEvent(t.thread_id, null, "system", { text: "Say continue to pick it up." }); continue; }
     sendMessage(t.thread_id, { text: RESUME, trigger: "resume", display: "Pick up where you left off" })
       .catch((e) => addEvent(t.thread_id, null, "error", { text: e.message }));

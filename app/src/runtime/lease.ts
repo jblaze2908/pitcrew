@@ -7,6 +7,7 @@ import { active, leases } from "./state.js";
 import { getThread, addEvent } from "./threads.js";
 import { pitStop, decide } from "./pitstops.js";
 import { sendMessage } from "./turns.js";
+import { startRecording, stopRecording, deliverRecording } from "./teach.js";
 
 // While the driver holds the screen, the crew asks for it back through a pit stop instead of waiting blind.
 export async function waitLease(botId: string, threadId: string, call: Call) {
@@ -18,16 +19,19 @@ export async function waitLease(botId: string, threadId: string, call: Call) {
   return Promise.race([new Promise<boolean>((res) => l.waiters.push(res)), l.ask]);
 }
 
-export function takeControl(botId: string) { if (!leases.has(botId)) leases.set(botId, { since: now(), waiters: [] }); audit("driver", "computer.take_control", { botId }); bus.emit("lease", { botId, held: true }); }
+// The lease also records what the driver does in the browser (teach.ts), for the member to hear and keep as a skill.
+export function takeControl(botId: string) { if (!leases.has(botId)) { leases.set(botId, { since: now(), waiters: [] }); startRecording(botId); } audit("driver", "computer.take_control", { botId }); bus.emit("lease", { botId, held: true }); }
 export function releaseLease(botId: string, action: string, why?: string) {
   const l = leases.get(botId);
   if (!l) return;
   leases.delete(botId);
+  const rec = stopRecording(botId);
   l.waiters.forEach((w) => w(true));
   audit("driver", action, { botId });
   bus.emit("lease", { botId, held: false });
   for (const ps of all<{ id: string }>("SELECT id FROM pitstops WHERE bot_id=? AND kind='lease' AND status='pending'", botId)) decide(ps.id, "approve", { note: "Control handed back" });
   if (why) for (const [tid, a] of active) if (getThread(tid)?.bot_id === botId) addEvent(tid, a.turnId, "system", { text: why });
+  deliverRecording(botId, rec);
 }
 export function handBack(botId: string, note = "") {
   releaseLease(botId, "computer.hand_back");

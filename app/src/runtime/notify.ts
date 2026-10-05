@@ -39,6 +39,9 @@ export function onNotify(c: Brain, method: string, p: Record<string, any>) {
   const threadId = p.threadId ? byCodex.get(p.threadId) : null;
   if (!threadId) return;
   const a = active.get(threadId);
+  // A retro on a fork streams nothing live and leaves the thread's context gauge alone: its tokens aren't the thread's.
+  const fork = !!a?.fork && a.fork === p.threadId;
+  if (fork && (method === "item/agentMessage/delta" || method === "item/commandExecution/outputDelta")) return;
   switch (method) {
     case "item/agentMessage/delta": bus.emit("delta", { threadId, itemId: p.itemId, text: p.delta }); break;
     // Live shell output for the Terminal tab: one SSE frame per chunk, the same cost as streamed reply text.
@@ -50,7 +53,7 @@ export function onNotify(c: Brain, method: string, p: Record<string, any>) {
     }
     case "item/started": {
       const it = p.item; items.set(it.id, it);
-      if (it.type === "commandExecution") {
+      if (it.type === "commandExecution" && !fork) {
         const command = String(it.command || "").replace(/^\/bin\/(ba)?sh -l?c /, "").slice(0, 8000), cwd = it.cwd ?? null;
         const gate = shellVerdicts.get(`${threadId}\n${it.command}`) || null;
         liveCommands.set(it.id, { itemId: it.id, threadId, command, cwd, startedAt: Date.now(), output: "", gate });
@@ -60,7 +63,7 @@ export function onNotify(c: Brain, method: string, p: Record<string, any>) {
       if (typeof it.id === "string" && it.id.startsWith("exec-")) scanScripts(threadId, a?.turnId, c.bot.id, p.threadId);
       if (it.type === "imageGeneration") startPainting(threadId, { id: it.id, botId: c.bot.id, n: 1, aspect: "1:1", palette: paletteFor(""), model: "gpt-image-2" });
       // Browser and pixel tools announce themselves from their own handler, with the grounded element.
-      if (["commandExecution", "mcpToolCall", "fileChange", "webSearch", "imageGeneration"].includes(it.type) || (it.type === "dynamicToolCall" && !/^(browser|computer)_/.test(it.tool)))
+      if (!fork && ["commandExecution", "mcpToolCall", "fileChange", "webSearch", "imageGeneration"].includes(it.type) || (it.type === "dynamicToolCall" && !/^(browser|computer)_/.test(it.tool)))
         bus.emit("activity", { threadId, botId: c.bot.id, text: toolTitle(it) });
       break;
     }
@@ -85,6 +88,7 @@ export function onNotify(c: Brain, method: string, p: Record<string, any>) {
       const tu = p.tokenUsage;
       if (a) { if (!a.base) a.base = usage.get(p.threadId) || subtract(tu.total, tu.last); a.total = tu.total; }
       usage.set(p.threadId, tu.total);
+      if (fork) break;
       run("UPDATE threads SET ctx_tokens=?, ctx_window=? WHERE id=?", tu.last.inputTokens, tu.modelContextWindow, threadId);
       bus.emit("context", { threadId, tokens: tu.last.inputTokens, window: tu.modelContextWindow });
       break;

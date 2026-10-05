@@ -45,7 +45,7 @@ async function send(msg: { title: string; message: string; click: string; action
 }
 /** A new pit stop on the phone. Engram proposals wait for the inbox; they're never urgent. */
 export function pushPitStop(p: PitstopRow, botName: string) {
-  if (p.kind === "engram") return;
+  if (p.kind === "engram" || p.kind === "teach") return;  // teach: the driver is at the screen they just handed back
   const open = `https://${HOST}/${p.thread_id ? `#/t/${p.thread_id}` : "#/pitstops"}`, act = (d: "approve" | "deny") => `https://${HOST}/api/push/act/${actToken(p.id, d, p.expires_at)}`;
   const actions: Action[] = [
     ...(phoneMayApprove(p) ? [{ action: "http" as const, label: "Approve", url: act("approve"), method: "POST", clear: true }] : []),
