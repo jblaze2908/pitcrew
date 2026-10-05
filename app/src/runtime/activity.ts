@@ -53,16 +53,19 @@ export function activity({ bot = null, effect = null, by = null, before = null, 
   return { rows: page, next: rows.length > limit && last ? `${last.at}:${last.id}` : null };
 }
 
-// Pit stop titles carry the gate's verification suffix (" · verify: …"); the log keeps the action.
-const tidy = (t: string) => t.replace(/ · (verify|after untrusted|jev blocked)\b.*$/, "").slice(0, 240);
+// Pit stop titles carry the gate's verification suffix (" · verify: …"); the log keeps the action, and names a code
+// step by what it did instead of showing its code.
+const CODE_TOOLS: Record<string, string> = { "run code unsafe": "ran a browser script", evaluate: "ran page JavaScript", "replay request": "re-sent a request" };
+const codeStep = (t: string) => t.replace(/^(run code unsafe|evaluate|replay request)\b.*?((?: on [a-z0-9.-]+\.[a-z]{2,})?)$/is, (_, k: string, on: string) => `${CODE_TOOLS[k.toLowerCase()]}${on}`);
+const tidy = (t: string) => codeStep(t.replace(/ · (verify|after untrusted|jev blocked)\b.*$/, "")).slice(0, 240);
 const scopeHow = (s: string | null | undefined) => (s === "thread" ? "this thread" : s === "always" ? "always" : "once");
 
 function fromLabel(r: LabelRow): ActivityRow {
   const call = json<Record<string, any>>(r.call, {}), v = json<{ effect?: string; reason?: string; by?: string }>(r.verdict, {}), by = r.allowed_by || "";
   const who = r.cat === "once" || r.cat === "always" ? { who: "You", how: r.driver_scope ? scopeHow(r.driver_scope) : / \(this thread\)$/.test(by) ? "this thread" : "always" }
-    : r.cat === "autonomy" ? { who: "Thread", how: by === "yolo" ? "YOLO" : "hands-free" }
+    : r.cat === "autonomy" ? { who: "Thread", how: by === "yolo" ? "full auto" : "hands-free" }
     : r.cat === "learned" ? { who: "Learned", how: /\((\d+) approvals?\)/.exec(by)?.[1] ? `${/\((\d+) approvals?\)/.exec(by)![1]} approvals` : "" }
-    : r.cat === "jev" ? { who: "jev", how: /the driver asked for this/.test(v.reason || "") ? "you asked" : "judged safe" }
+    : r.cat === "jev" ? { who: "Safety check", how: /the driver asked for this/.test(v.reason || "") ? "you asked" : "judged safe" }
     : by === "site" ? { who: "Site", how: "fully allowed" } : by === "script" ? { who: "Script", how: "allowed before" }
     : r.source === "standing" ? { who: "Standing", how: "approval" } : { who: "Policy", how: `${String(v.effect || "").replace(/_/g, " ")} allowed` };
   return { id: r.id, at: r.ts, botId: r.bot_id, threadId: r.thread_id, effect: v.effect || "unknown", what: r.pit_title ? tidy(r.pit_title) : describeCall(call), by: { cat: r.cat, ...who } };
@@ -71,8 +74,9 @@ const fromPit = (p: PitRow): ActivityRow => ({ id: p.id, at: p.ts, botId: p.bot_
 
 /** A gated call in a few words, from its redacted record (jev.ts redact): the command, or the tool, element and site. */
 export function describeCall(c: Record<string, any>): string {
-  if (c.kind === "shell") return `Ran ${String(c.command || "").replace(/^\/bin\/(ba)?sh -l?c /, "").replace(/\s+/g, " ").trim().slice(0, 200)}`;
+  if (c.kind === "shell") return `Ran ${String(c.command || "").replace(/^\/bin\/(ba|z)?sh -l?c /, "").replace(/^(["'])([\s\S]*)\1$/, "$2").replace(/\s+/g, " ").trim().slice(0, 200)}`;
   const tool = String(c.tool || "").replace(/^(browser|computer)_/, "").replace(/_/g, " ");
+  if (CODE_TOOLS[tool]) return `${CODE_TOOLS[tool]}${c.host ? ` on ${c.host}` : ""}`;
   const el = (c.arguments?.grounded_elements || [])[0]?.element;
   const what = el ? `${tool} ${String(el).slice(0, 120)}` : tool;
   return c.server === "browser" || c.server === "computer" ? `${what}${c.host ? ` on ${c.host}` : ""}` : `${c.server ? `${c.server}.` : ""}${what}`;

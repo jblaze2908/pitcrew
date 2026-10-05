@@ -13,4 +13,4 @@ export const autonomyOf = (threadId: string | null | undefined): Autonomy => {
 };
 // Whether this thread's autonomy stands in for the driver on an effect jev would have asked about.
 export const waived = (a: Autonomy, effect: string) => a === "yolo" || (a === "handsfree" && !HANDSFREE_ASKS.has(effect));
-export const AUTONOMY_LABEL: Record<Autonomy, string> = { ask: "Ask me", handsfree: "Hands-free", yolo: "YOLO" };
+export const AUTONOMY_LABEL: Record<Autonomy, string> = { ask: "Ask first", handsfree: "Hands-free", yolo: "Full auto" };

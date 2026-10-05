@@ -300,7 +300,7 @@ export async function finishTurn(threadId: string, status: string, error?: strin
   // and a usage-limit failure waits for the resume instead.
   if (trig !== "retro" && !(status === "failed" && isUsageLimit(error)) && getSetting("retros", "1") === "1") {
     const rep = runReport(a.turnId), why = rep && (retroReason(rep) || (trig === "schedule" && weeklyDue(threadId) ? "weekly check" : null));
-    if (rep && why) enqueue(threadId, { text: retroPrompt(rep, why), attachments: [], trigger: "retro", display: `Retro · ${why}` });
+    if (rep && why) enqueue(threadId, { text: retroPrompt(rep, why), attachments: [], trigger: "retro", display: `Looking back at the run · ${why}` });
   }
   if (wakeFor.has(threadId)) { const p = activePlan(threadId); if (p) { planLog(p.id, `Looked after ${wakeFor.get(threadId)}: no change`); emitPlan(planRow(p.id)!); } wakeFor.delete(threadId); }
   for (const w of turnWaiters.get(threadId)?.splice(0) || []) w({ turnId: a.turnId, status, cost: cost.usd });

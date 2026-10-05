@@ -4,7 +4,7 @@ import { usd } from "../lib/format";
 import { useStore } from "../lib/store";
 import { Face, Md } from "./ui";
 
-const STATUS: Record<string, [string, string]> = { asking: ["working…", ""], answered: ["answered", "ok"], failed: ["didn't finish", "bad"] };
+const STATUS: Record<string, [string, string]> = { asking: ["Working…", ""], answered: ["Answered", "ok"], failed: ["Didn't finish", "bad"] };
 
 export function DelegationCard({ d }: { d: Deleg }) {
   const { bot } = useStore();

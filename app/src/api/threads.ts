@@ -20,9 +20,9 @@ const NewThread = z.object({ botId: raw, title: text(120, "New thread") });
 const AskBody = z.object({ text: trimmed(20000), botId: raw, dry: raw, crew: raw });
 const Reroute = z.object({ botId: raw });
 const AUTONOMY_NOTE: Record<Autonomy, string> = {
-  ask: "Pit stops back to normal: jev asks before sending, paying, signing in, installing, sharing, deleting or opening a new site.",
+  ask: "Ask first: this thread asks before sending, paying, signing in, installing, sharing, deleting or opening a new site.",
   handsfree: "Hands-free: this thread only stops for paying, signing in, sending, sharing, deleting, and sites that look like another or aren't https, or anything that might break a house rule.",
-  yolo: "YOLO: this thread runs without pit stops, paying and sending included. Only jev's hard blocks, blocked sites and anything that might break a house rule still stop it.",
+  yolo: "Full auto: this thread runs without pit stops, paying and sending included. Only the safety check's hard blocks, blocked sites and anything that might break a house rule still stop it.",
 };
 const ThreadEdit = z.object({ title: truthy((v) => String(v).slice(0, 120)), archived: given((v) => (v ? 1 : 0)), pinned: given((v) => (v ? 1 : 0)), autonomy: pick(AUTONOMY, undefined) });
 const Message = z.object({ text: raw, attachments: field((v): string[] => (Array.isArray(v) ? v.filter((a) => /^uploads\/[\w.-]+$/.test(a)) : [])), mode: raw,
@@ -126,7 +126,7 @@ export const threadRoutes = new Hono<Env>()
     if (b.autonomy !== undefined && R.getThread(id) && R.getThread(id)!.autonomy !== b.autonomy) {
       run("UPDATE threads SET autonomy=? WHERE id=?", b.autonomy, id);
       audit("driver", "thread.autonomy", { id, autonomy: b.autonomy });
-      addEvent(id, null, "system", { text: AUTONOMY_NOTE[b.autonomy], ...(b.autonomy === "yolo" ? { tone: "bad" } : {}) });
+      addEvent(id, null, "system", { text: AUTONOMY_NOTE[b.autonomy] });
     }
     return c.json({ ok: true });
   })

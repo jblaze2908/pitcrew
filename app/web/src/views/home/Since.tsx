@@ -43,7 +43,7 @@ function Row({ i }: { i: InboxItem }) {
       <Face b={b} size="sm" mood="idle" />
       <div className="body">
         <p className="who"><b>{b?.name || "A former member"}</b>{sub && <span className="k">{` · ${sub}`}</span>}</p>
-        <p className={`txt${i.status === "failed" ? " soft" : ""}`}>{i.status === "quiet" ? `QUIET: ${i.text}` : i.text}</p>
+        <p className={`txt${i.status === "failed" ? " soft" : ""}`}>{i.status === "quiet" ? `Nothing new · ${i.text}` : i.text}</p>
         <p className="t">{meta}</p>
       </div>
       <span className="k">›</span>

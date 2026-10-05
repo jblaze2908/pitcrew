@@ -21,7 +21,7 @@ export function FilesTab({ b, rest }: { b: BotCard; rest: (string | undefined)[]
           <a className={mode === "projects" ? "on" : ""} href={`${base}/projects`}>Projects</a>
         </div>
         <span style={{ flex: 1 }} />
-        <span className="pc-m small faint">{mode === "changes" ? "every run's file changes, however they were made" : mode === "workspace" ? "/bot/work" : ""}</span>
+        <span className="small faint">{mode === "changes" ? "Every run's file changes, however they were made" : mode === "workspace" ? "Its own files" : ""}</span>
       </div>
       {mode === "projects" ? <Projects key={rest[1] || ""} b={b} encPath={rest[1]} />
         : mode === "workspace" ? <Workspace b={b} runs={runs.data || []} path={rest[1] ? decodeURIComponent(rest[1]) : ""} />
@@ -30,7 +30,7 @@ export function FilesTab({ b, rest }: { b: BotCard; rest: (string | undefined)[]
   );
 }
 
-const chip = (status: string) => (status === "added" ? ["ok", "new"] : status === "deleted" ? ["bad", "gone"] : ["blue", "edit"]);
+const chip = (status: string) => (status === "added" ? ["ok", "New"] : status === "deleted" ? ["bad", "Deleted"] : ["blue", "Edited"]);
 const Delta = ({ n }: { n: number }) => (n ? <span className={n > 0 ? "plus" : "minus"}>{n > 0 ? `+${n}` : `−${-n}`}</span> : null);
 const net = (cs: FileChange[]) => cs.reduce((a, c) => { const l = c.lines || 0; return l > 0 ? [a[0] + l, a[1]] : [a[0], a[1] - l]; }, [0, 0]);
 export function Tally({ cs }: { cs: FileChange[] }) {
@@ -202,7 +202,7 @@ function ProjectFrame({ b, list, path }: { b: BotCard; list: Project[]; path: st
         <select className="projsel" value={path} onChange={(e) => go(`#/crew/${b.id}/files/projects/${encodeURIComponent(e.target.value)}`)}>
           {list.map((p) => <option key={p.path} value={p.path}>{`${p.path}${p.git ? " · git" : ""}`}</option>)}
         </select>
-        <span className="pc-chip ok">read-only</span>
+        <span className="pc-chip ok">Read-only</span>
         {opened.error ? <span className="small badc">{opened.error}</span> : !opened.data && <span className="small faint">Starting the code view…</span>}
         <span style={{ flex: 1 }} />
         {opened.data && <a className="small" href={opened.data.url} target="_blank" rel="noopener noreferrer">Open in a new tab</a>}

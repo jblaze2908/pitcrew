@@ -24,7 +24,7 @@ export function App() {
       {boot.kind === "setup" && <SetupScreen />}
       {boot.kind === "login" && <LoginScreen />}
       {boot.kind === "app" && <StoreProvider initial={boot.state}><Shell /></StoreProvider>}
-      {boot.kind === "error" && <div className="auth"><div className="pc-card"><pc-logo size="md" wordmark="" /><p className="badc small">{`Can't reach the pit wall: ${boot.message}`}</p><button className="pc-pill" onClick={start}>Try again</button></div></div>}
+      {boot.kind === "error" && <div className="auth"><div className="pc-card"><pc-logo size="md" wordmark="" /><p className="badc small">{`Can't reach Pitcrew: ${boot.message}`}</p><button className="pc-pill" onClick={start}>Try again</button></div></div>}
       <Toasts />
     </>
   );
@@ -52,7 +52,7 @@ function AuthCard({ title, sub, label, submit, children }: { title: string; sub:
 function SetupScreen() {
   const [token, setToken] = useState(""), [name, setName] = useState(""), [pw, setPw] = useState("");
   return (
-    <AuthCard title="Set up your pit wall" sub="Paste the setup token from /srv/pitcrew/data/setup-token on the server, then choose a password." label="Set password"
+    <AuthCard title="Set up Pitcrew" sub="Paste the setup token from /srv/pitcrew/data/setup-token on the server, then choose a password." label="Set password"
       submit={() => api.post("/api/setup", { token: token.trim(), password: pw, driverName: name.trim() }, { quiet: true })}>
       <input autoComplete="off" placeholder="Setup token" value={token} onChange={(e) => setToken(e.target.value)} />
       <input placeholder="What should the crew call you?" value={name} onChange={(e) => setName(e.target.value)} />
@@ -64,7 +64,7 @@ function SetupScreen() {
 function LoginScreen() {
   const [pw, setPw] = useState("");
   return (
-    <AuthCard title="Pitcrew" sub="Sign in to the pit wall." label="Sign in" submit={() => api.post("/api/login", { password: pw }, { quiet: true })}>
+    <AuthCard title="Pitcrew" sub="Sign in to your crew." label="Sign in" submit={() => api.post("/api/login", { password: pw }, { quiet: true })}>
       <input type="password" autoComplete="current-password" placeholder="Password" autoFocus value={pw} onChange={(e) => setPw(e.target.value)} />
     </AuthCard>
   );
