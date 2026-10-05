@@ -63,7 +63,7 @@ const scopeHow = (s: string | null | undefined) => (s === "thread" ? "this threa
 function fromLabel(r: LabelRow): ActivityRow {
   const call = json<Record<string, any>>(r.call, {}), v = json<{ effect?: string; reason?: string; by?: string }>(r.verdict, {}), by = r.allowed_by || "";
   const who = r.cat === "once" || r.cat === "always" ? { who: "You", how: r.driver_scope ? scopeHow(r.driver_scope) : / \(this thread\)$/.test(by) ? "this thread" : "always" }
-    : r.cat === "autonomy" ? { who: "Thread", how: by === "yolo" ? "full auto" : "hands-free" }
+    : r.cat === "autonomy" ? { who: "Thread", how: by === "yolo" ? "YOLO" : "hands-free" }
     : r.cat === "learned" ? { who: "Learned", how: /\((\d+) approvals?\)/.exec(by)?.[1] ? `${/\((\d+) approvals?\)/.exec(by)![1]} approvals` : "" }
     : r.cat === "jev" ? { who: "Safety check", how: /the driver asked for this/.test(v.reason || "") ? "you asked" : "judged safe" }
     : by === "site" ? { who: "Site", how: "fully allowed" } : by === "script" ? { who: "Script", how: "allowed before" }

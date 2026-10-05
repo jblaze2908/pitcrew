@@ -11,7 +11,7 @@ import { useFetch } from "../../lib/useFetch";
 
 // The gate's effect classes (jev.ts DEFAULT_POLICY); there is no "publish" class, so sharing stands for it.
 const EFFECTS = [["send", "Sent"], ["pay", "Paid"], ["signin", "Signed in"], ["delete", "Deleted"], ["share", "Shared"], ["install", "Installed"]] as const;
-const BY = [["", "Allowed by anyone"], ["once", "You · once"], ["always", "You · always"], ["autonomy", "Hands-free or Full auto"], ["learned", "Learned from you"], ["jev", "Safety check"], ["rules", "Policy or site list"]] as const;
+const BY = [["", "Allowed by anyone"], ["once", "You · once"], ["always", "You · always"], ["autonomy", "Hands-free or YOLO"], ["learned", "Learned from you"], ["jev", "Safety check"], ["rules", "Policy or site list"]] as const;
 const PAGE = 30;
 
 export function Activity() {

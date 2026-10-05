@@ -122,7 +122,7 @@ function Soul({ b }: { b: BotCard }) {
   );
 }
 
-// Prose rules jev (the safety check) reads on every call it judges. "Never" lines block even in yolo (Full auto); "fine to" lines pre-approve that action
+// Prose rules jev (the safety check) reads on every call it judges. "Never" lines block even in yolo; "fine to" lines pre-approve that action
 // (except paying and signing in). Saved as typed, one rule per line.
 function HouseRules({ b }: { b: BotCard }) {
   const [text, setText] = useState(b.house_rules || "");
@@ -132,7 +132,7 @@ function HouseRules({ b }: { b: BotCard }) {
     <div className="pc-card col">
       <p className="pc-lab">House rules</p>
       <textarea rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder={"Never place, change or cancel orders on Blinkit.\nUploading my own finished files to Canva is fine."} />
-      <div className="spread"><p className="small faint">One per line. The safety check reads them on every action it judges: a “never” rule stops the action even in Full auto; a “fine to” rule saves a pit stop (paying and signing in still ask).</p>
+      <div className="spread"><p className="small faint">One per line. The safety check reads them on every action it judges: a “never” rule stops the action even in YOLO; a “fine to” rule saves a pit stop (paying and signing in still ask).</p>
         <button className="pc-pill s" disabled={text === saved} onClick={save}>Save</button></div>
     </div>
   );

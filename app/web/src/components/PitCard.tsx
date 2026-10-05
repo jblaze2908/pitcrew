@@ -168,7 +168,7 @@ function SiteSummary({ d }: { d: Record<string, any> }) {
     <div className="col" style={{ gap: 4 }}>
       {warn && <p className="badc small">{`Looks like ${d.lookalike?.brand || d.homograph?.brand || "another site"}${d.lookalike?.domain ? ` (${d.lookalike.domain})` : ""}: ${[d.homograph?.why, d.lookalike?.why].filter(Boolean).join("; ")}${d.homograph?.unicode ? `. Shown as ${d.homograph.unicode}` : ""}.`}</p>}
       <pre>{`${d.url || d.host}\n${d.https ? "https" : "Not https: anything typed here can be read on the way"}`}</pre>
-      <p className="small faint">{d.sensitive ? "An account site: it asks in every thread, in every mode, Full auto included." : "Allow site: browse it; other effects follow this member's permissions. Fully: every effect allowed there except paying, which always asks."}</p>
+      <p className="small faint">{d.sensitive ? "An account site: it asks in every thread, in every mode, YOLO included." : "Allow site: browse it; other effects follow this member's permissions. Fully: every effect allowed there except paying, which always asks."}</p>
     </div>
   );
 }
