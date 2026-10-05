@@ -127,7 +127,14 @@ for (const sql of ["ALTER TABLE turns ADD COLUMN changes TEXT", "ALTER TABLE jev
   "ALTER TABLE plans ADD COLUMN limits TEXT", "ALTER TABLE plans ADD COLUMN log TEXT", "ALTER TABLE plans ADD COLUMN sweep TEXT",
   "ALTER TABLE bots ADD COLUMN engram_scope TEXT NOT NULL DEFAULT 'personal'", "ALTER TABLE engram_members ADD COLUMN scope TEXT",
   "ALTER TABLE bots ADD COLUMN engram_household INTEGER NOT NULL DEFAULT 0", "ALTER TABLE engram_members ADD COLUMN household INTEGER NOT NULL DEFAULT 0",
-  "ALTER TABLE threads ADD COLUMN autonomy TEXT NOT NULL DEFAULT 'ask'", "ALTER TABLE threads ADD COLUMN tools_sig TEXT", "ALTER TABLE bots ADD COLUMN house_rules TEXT NOT NULL DEFAULT ''", "ALTER TABLE threads ADD COLUMN title_auto INTEGER NOT NULL DEFAULT 1", "ALTER TABLE schedules ADD COLUMN hook_secret TEXT", "ALTER TABLE schedules ADD COLUMN check_cmd TEXT", "ALTER TABLE schedules ADD COLUMN check_last TEXT", "ALTER TABLE threads ADD COLUMN notes TEXT", "ALTER TABLE bots ADD COLUMN soul TEXT NOT NULL DEFAULT ''", "ALTER TABLE bots ADD COLUMN changelog_seen INTEGER NOT NULL DEFAULT 0"]) { try { db.exec(sql); } catch {} }
+  "ALTER TABLE threads ADD COLUMN autonomy TEXT NOT NULL DEFAULT 'ask'", "ALTER TABLE threads ADD COLUMN tools_sig TEXT", "ALTER TABLE bots ADD COLUMN house_rules TEXT NOT NULL DEFAULT ''", "ALTER TABLE threads ADD COLUMN title_auto INTEGER NOT NULL DEFAULT 1", "ALTER TABLE schedules ADD COLUMN hook_secret TEXT", "ALTER TABLE schedules ADD COLUMN check_cmd TEXT", "ALTER TABLE schedules ADD COLUMN check_last TEXT", "ALTER TABLE threads ADD COLUMN notes TEXT", "ALTER TABLE bots ADD COLUMN soul TEXT NOT NULL DEFAULT ''", "ALTER TABLE bots ADD COLUMN changelog_seen INTEGER NOT NULL DEFAULT 0", "ALTER TABLE jev_labels ADD COLUMN allowed_by TEXT"]) { try { db.exec(sql); } catch {} }
+// When the driver last opened each thread (runtime/inbox.ts). Set to now on the boot that adds it, so the inbox starts
+// empty instead of listing a week of runs nobody marked seen.
+try { db.exec("ALTER TABLE threads ADD COLUMN seen_at INTEGER"); db.prepare("UPDATE threads SET seen_at=?").run(Date.now()); } catch {}
+// The inbox reads turns by end time; the activity log pages jev_labels newest first, per member or per effect.
+db.exec(`CREATE INDEX IF NOT EXISTS turns_ended ON turns(ended_at);
+CREATE INDEX IF NOT EXISTS jev_labels_bot ON jev_labels(bot_id, ts);
+CREATE INDEX IF NOT EXISTS jev_labels_effect ON jev_labels(json_extract(verdict,'$.effect'), ts)`);
 
 // A row as SQLite returns it; callers name the shape they expect (models.ts).
 export type Row = Record<string, any>;

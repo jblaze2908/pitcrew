@@ -30,6 +30,7 @@ const Message = z.object({ text: raw, attachments: field((v): string[] => (Array
     pins: z.array(z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), note: z.string().max(200) })).max(9).optional() }).nullish() });
 const SurfaceAction = z.object({ action: raw, values: field((v): Record<string, unknown> => (v && typeof v === "object" ? v : {})) });
 const Save = z.object({ saved: flag });
+const SideBody = z.object({ question: trimmed(2000), history: field((v): { q: string; a: string }[] => (Array.isArray(v) ? v.slice(-4).map((h) => ({ q: String(h?.q || "").slice(0, 500), a: String(h?.a || "").slice(0, 800) })) : [])) });
 
 // Front door: one message, routed to the member whose job covers it. Unsure → the driver picks from the top candidates.
 function openRouted(botId: string, text: string, origin: Origin) {
@@ -108,7 +109,12 @@ export const threadRoutes = new Hono<Env>()
     audit("driver", "ask.rerouted", { threadId: id, from: t.bot_id, to: to.id });
     return c.json(await openRouted(to.id, first.text, { kind: "routed", by: "driver", from: t.bot_id }));
   })
-  .get("/api/threads/:id", signedIn, async (c) => { const id = c.req.param("id"), v = await threadView(id); R.prewarmBrain(id); return c.json(v); })
+  // Opening a thread is the driver seeing it: its finished runs leave "Since you last looked" (runtime/inbox.ts).
+  .get("/api/threads/:id", signedIn, async (c) => { const id = c.req.param("id"), v = await threadView(id); R.markSeen(id); R.prewarmBrain(id); return c.json(v); })
+  // An open thread whose run just ended while the driver was looking at it.
+  .post("/api/threads/:id/seen", signedIn, (c) => c.json({ ok: R.markSeen(c.req.param("id")) }))
+  // Side question: answered from the thread's record and returned only to this browser; nothing is stored or audited.
+  .post("/api/threads/:id/side", signedIn, async (c) => { const b = await jsonBody(c, SideBody); return c.json(await R.sideAsk(c.req.param("id"), b.question, b.history)); })
   .patch("/api/threads/:id", signedIn, async (c) => {
     const id = c.req.param("id"), b = await jsonBody(c, ThreadEdit);
     if (b.title !== undefined) run("UPDATE threads SET title=?, title_auto=0 WHERE id=?", b.title, id);

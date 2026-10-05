@@ -148,8 +148,9 @@ export function logDecision(threadId: string | null, botId: string, v: Verdict, 
   const safe = redact(call);
   audit("jev", `gate.${decision}`, { threadId, effect: v.effect, by, reason: v.reason, ms: v.ms ?? null, call: gateSummary(safe), ...(pitstop ? { pitstop } : {}) });
   const verdict = { effect: v.effect, decision: v.decision, reason: v.reason, by: v.by, model: /^(jev|judge):/.test(v.by || "") ? v.by.replace(/^\w+:/, "") : null, ms: v.ms ?? null, answers: v.answers ?? null, probabilities: v.probabilities ?? null };
-  run("INSERT INTO jev_labels(id,ts,bot_id,thread_id,source,call,verdict,decision,pitstop_id) VALUES(?,?,?,?,?,?,?,?,?)", id, now(), botId, threadId ?? null, source,
-    JSON.stringify({ ...safe, host: hostOf(call.arguments?.page_url) || null }), JSON.stringify(verdict), decision, pitstop);
+  // allowed_by: what stood in for the driver (rule:…, hands-free, learned:…, site, script), for the activity log.
+  run("INSERT INTO jev_labels(id,ts,bot_id,thread_id,source,call,verdict,decision,pitstop_id,allowed_by) VALUES(?,?,?,?,?,?,?,?,?,?)", id, now(), botId, threadId ?? null, source,
+    JSON.stringify({ ...safe, host: hostOf(call.arguments?.page_url) || null }), JSON.stringify(verdict), decision, pitstop, by || null);
   if (decision === "allow") bus.emit("jev", { threadId, effect: v.effect, by, ms: v.ms ?? null });
   if (call.kind === "shell" && threadId) { if (shellVerdicts.size > 500) shellVerdicts.clear(); shellVerdicts.set(`${threadId}\n${call.command}`, { effect: String(v.effect || "unknown"), decision }); }
   return decision === "allow";
