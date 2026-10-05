@@ -291,6 +291,7 @@ function OriginChip({ origin: o, threadId, b }: { origin: Origin; threadId: stri
   const { bot } = useStore();
   const pill = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState(false);
+  if (o.kind === "schedule") return <a className="pc-chip" href="#/schedules" title="This run's schedule">{`Scheduled run${o.spec ? ` · ${o.spec}` : ""}`}</a>;
   if (o.kind === "delegated") {
     const f = bot(o.fromBot);
     return <a className="pc-chip blue" href={`#/t/${o.fromThread}`} title="Open the thread that asked">{o.planId ? `Plan step for ${f?.name || "another member"}` : `Asked by ${f?.name || "another member"}`}</a>;

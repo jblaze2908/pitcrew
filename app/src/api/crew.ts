@@ -22,7 +22,7 @@ const Memory = z.object({ text: trimmed(500), scope: pick(["agent", "global"] as
 const MemoryEdit = z.object({ text: text(500) });
 const ForgetSource = z.object({ source: raw });
 const Schedule = z.object({ threadId: field((v) => v || null), spec: text(), prompt: text() });
-const ScheduleEdit = z.object({ enabled: z.boolean().optional(), spec: z.string().max(100).optional(), prompt: z.string().max(2000).optional() });
+const ScheduleEdit = z.object({ enabled: z.boolean().optional(), spec: z.string().max(100).optional(), prompt: z.string().max(2000).optional(), check: z.string().max(500).nullable().optional() });
 const Project = z.object({ path: text() });
 const HandBack = z.object({ note: text() });
 

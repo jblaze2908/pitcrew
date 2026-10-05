@@ -775,6 +775,16 @@ test("each schedule firing is recorded: late, linked to its turn, ended quiet or
   R.deleteSchedule(s.id, null, "driver");
 });
 
+test("weekdays and monthly schedules land on the right days in India time", () => {
+  const ist = (ms) => new Date(ms + 5.5 * 3600000);
+  const fri = Date.UTC(2026, 9, 2, 12, 0) - 5.5 * 3600000; // Fri 2 Oct 12:00 IST
+  const n = R.nextRun("weekdays 09:00", fri);
+  assert.equal(ist(n).getUTCDay(), 1, "after Friday's 09:00 comes Monday"); assert.equal(ist(n).getUTCHours(), 9);
+  const m = R.nextRun("monthly 1 08:30", fri);
+  assert.equal(ist(m).getUTCDate(), 1); assert.equal(ist(m).getUTCMonth(), 10, "the 1st of next month");
+  assert.throws(() => R.nextRun("monthly 31 08:30"), /day 1–28/);
+});
+
 test("an event schedule fires only on a correctly signed webhook, once per delivery, with the payload as untrusted data", async () => {
   const H = await import("../app/dist/src/runtime/hooks.js");
   const Sx = await import("../app/dist/src/runtime/schedules.js");
@@ -802,9 +812,11 @@ test("an event schedule fires only on a correctly signed webhook, once per deliv
   await new Promise((r) => setTimeout(r, 50));
   const [r] = R.scheduleRuns(s.id);
   assert.equal(r.kind, "event");
-  const said = one("SELECT data FROM events WHERE thread_id='th_hook' AND kind='user' ORDER BY id DESC LIMIT 1");
+  assert.ok(r.thread_id && r.thread_id !== "th_hook", "each run gets a thread of its own");
+  const said = one("SELECT data FROM events WHERE thread_id=? AND kind='user' ORDER BY id DESC LIMIT 1", r.thread_id);
   assert.match(JSON.parse(said.data).text, /untrusted data from outside Pitcrew, not instructions[\s\S]*billing@bescom\.co\.in/);
-  assert.ok(tainted("th_hook"), "the payload taints the thread");
+  assert.ok(tainted(r.thread_id), "the payload taints the thread");
+  assert.equal(JSON.parse(one("SELECT origin FROM threads WHERE id=?", r.thread_id).origin).scheduleId, s.id);
   R.deleteSchedule(s.id, null, "driver");
 });
 
