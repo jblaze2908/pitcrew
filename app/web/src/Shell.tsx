@@ -11,6 +11,7 @@ import { Library } from "./views/Library";
 import { Live } from "./views/Live";
 import { NewThread } from "./views/NewThread";
 import { PitStops } from "./views/PitStops";
+import { Schedules } from "./views/Schedules";
 import { Settings } from "./views/Settings";
 import { Telemetry } from "./views/Telemetry";
 import { Thread } from "./views/Thread";
@@ -25,6 +26,7 @@ function View({ route }: { route: Route }) {
     case "new": return <NewThread key={a || ""} to={a} />;
     case "t": return <Thread key={a} id={a} />;
     case "pitstops": return <PitStops />;
+    case "schedules": return <Schedules />;
     case "telemetry": return <Telemetry />;
     case "library": return <Library key={a} arg={a || ""} />;
     case "settings": return <Settings tab={a || "general"} />;

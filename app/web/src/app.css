@@ -867,3 +867,29 @@ svg text{fill:var(--ink-3);font:10px var(--font-data)}
 .composer .chipb.on{background:var(--surface-3);color:var(--ink);box-shadow:none}
 .composer .chipb kbd{font:500 11px var(--font-data);color:var(--ink-3)}
 @media (max-width:900px){.threadpage.withbtw{grid-template-columns:1fr}.btw{border-left:0;border-top:1px solid var(--line);max-height:70vh}}
+
+/* Schedules (H1): a row per schedule, its last 14 runs as dots; open, its history beside its settings. */
+.sch .tbl td{vertical-align:middle}
+.sch-row{cursor:pointer}
+.sch-row:hover,.sch-row.on{background:var(--surface-2)}
+.sch-row.off{opacity:.6}
+.sch .ell{display:block;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dots{display:inline-flex;gap:4px}
+.dots i,.res i{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ink-3);flex:none}
+.dots i.none{background:none;box-shadow:inset 0 0 0 1px var(--line)}
+.dots i.news,.res.news i{background:var(--data)}
+.dots i.bad,.res.bad i{background:color-mix(in srgb,var(--bad) 70%,var(--ink-2))}
+.dots i.hollow,.res.hollow i{background:none;box-shadow:inset 0 0 0 1.5px var(--ink-3)}
+.dots i.late,.res.late i{background:none;box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--signal) 70%,var(--ink-2))}
+.dots i.live,.res.live i{background:var(--ink)}
+.res{display:inline-flex;align-items:center;gap:7px;font-size:13px;white-space:nowrap}
+.res.bad{color:color-mix(in srgb,var(--bad) 70%,var(--ink-2))}
+.res.late{color:color-mix(in srgb,var(--signal) 70%,var(--ink-2))}
+.sch-open>td{padding:0;background:var(--ground)}
+.sch-detail{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:28px;padding:18px 20px 22px 56px;border-top:1px solid var(--line)}
+.sch-hist .tbl tr.link{cursor:pointer}
+.sch-hist .tbl tr.link:hover{background:var(--surface)}
+.sch-hist .ell{max-width:340px}
+.sch-cfg{gap:12px}
+.sch-cfg code{word-break:break-all;background:var(--surface-2);padding:6px 8px;border-radius:6px}
+@media (max-width:900px){.sch-detail{grid-template-columns:1fr;padding-left:20px}}

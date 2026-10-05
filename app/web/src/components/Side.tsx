@@ -61,6 +61,7 @@ export function Side({ route }: { route: Route }) {
       {nav("wall", "home", "Home", "#/", pending.length, undefined, S.unread)}
       {nav("threads", "threads", "Threads", "#/threads")}
       {nav("crew", "crew", "Crew", "#/crew")}
+      {nav("schedules", "clock", "Schedules", "#/schedules")}
       {nav("library", "library", "Library", "#/library")}
       <span style={{ flex: 1 }} />
       <div className="faces">{active.slice(0, 5).map((b) => <a key={b.id} href={`#/crew/${b.id}`} title={b.name}><Face b={b} size="sm" /></a>)}</div>
@@ -76,6 +77,7 @@ export function Side({ route }: { route: Route }) {
         {nav("wall", "home", "Home", "#/", pending.length, undefined, S.unread)}
         {nav("threads", "threads", "Threads", "#/threads")}
         {nav("crew", "crew", "Crew", "#/crew", null, S.bots.length)}
+        {nav("schedules", "clock", "Schedules", "#/schedules")}
         {nav("pitstops", "flag", "Pit stops", "#/pitstops")}
         {nav("library", "library", "Library", "#/library")}
       </nav>
