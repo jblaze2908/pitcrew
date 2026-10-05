@@ -16,7 +16,7 @@ export interface SiteRule { mode: SiteMode | "unknown"; entry: SiteEntry | Pick<
 // The gate's answer before jev: go on with a per-page policy, ask the driver about the domain, or refuse.
 export interface SiteVerdict {
   action: "go" | "ask" | "refuse"; policy?: Policy; site?: Site; why?: string; local?: boolean; entry?: SiteRule["entry"]; once?: boolean;
-  checkout?: string | null; full?: boolean; title?: string; warn?: boolean; detail?: Record<string, unknown>;
+  checkout?: string | null; full?: boolean; title?: string; warn?: boolean; detail?: Record<string, unknown>; sensitive?: string | null;
 }
 
 export const EFFECTS = ["read", "draft", "browse", "write_workspace", "signin", "install", "send", "pay", "delete", "share", "exec_untrusted"];
@@ -70,6 +70,24 @@ export const fullyAllowed = (p: Policy) => EFFECTS.every((e) => e === "pay" || p
 // per-page policy. url is the navigation target (navigate, new tab) or the page the action runs on. Per call: a few
 // Map lookups; the look-alike scan runs only for a domain the driver hasn't decided on.
 const LOCAL_SCHEMES = new Set(["about", "chrome-error"]);
+// Account sites a member may reach only with the driver's say-so in each thread, in every autonomy mode (YOLO too):
+// identity and email, cloud consoles, code hosting, banking, payments, investments and government IDs. A web
+// "Sign in with Google" leaves a live session for the whole account behind; this keeps a member from wandering into
+// it. Matched on the host's own name or any parent (mail.google.com, netbanking.hdfcbank.com). The driver extends
+// the list in Settings (sensitive_sites, comma-separated).
+export const SENSITIVE = [
+  "accounts.google.com", "myaccount.google.com", "passwords.google.com", "mail.google.com", "gmail.com", "drive.google.com", "docs.google.com", "photos.google.com", "pay.google.com", "payments.google.com", "console.cloud.google.com",
+  "login.microsoftonline.com", "login.live.com", "account.microsoft.com", "account.live.com", "outlook.live.com", "outlook.office.com", "outlook.office365.com", "onedrive.live.com", "portal.azure.com",
+  "github.com", "gitlab.com", "aws.amazon.com", "signin.aws.amazon.com", "awsapps.com", "appleid.apple.com", "icloud.com", "id.atlassian.com",
+  "paypal.com", "paytm.com", "phonepe.com", "zerodha.com", "groww.in", "upstox.com", "angelone.in", "camsonline.com", "kfintech.com",
+  "hdfcbank.com", "icicibank.com", "sbi.co.in", "onlinesbi.sbi", "axisbank.com", "kotak.com", "yesbank.in", "idfcfirstbank.com", "indusind.com", "bankofbaroda.in", "pnbindia.in", "federalbank.co.in", "aubank.in", "rblbank.com", "sc.com", "hsbc.co.in", "citibank.co.in",
+  "incometax.gov.in", "uidai.gov.in", "epfindia.gov.in", "digilocker.gov.in", "passportindia.gov.in",
+];
+export function sensitiveSite(host: string) {
+  const extra = String(getSetting("sensitive_sites", "") || "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+  const chain = domainChain(host);
+  return [...SENSITIVE, ...extra].find((d) => chain.includes(d)) || null;
+}
 export function siteVerdict(b: Pick<Bot, "id" | "name" | "policy">, threadId: string | null, url: string | null | undefined, { navigating = false, typing = false, pageCheckout = null, title = null, lines = null }: { navigating?: boolean; typing?: boolean; pageCheckout?: string | null; title?: string | null; lines?: string[] | null } = {}): SiteVerdict {
   if (!url) return { action: "go", policy: b.policy };
   const s = siteOf(url);
@@ -83,6 +101,13 @@ export function siteVerdict(b: Pick<Bot, "id" | "name" | "policy">, threadId: st
   const sf = siteFor(b.id, s.host, threadId);
   if (sf.mode === "blocked") return { action: "refuse", site: s, why: `${sf.entry!.domain} is blocked${sf.entry!.scope === "global" ? " for the whole crew" : ` for ${b.name}`}` };
   const checkout = pageCheckout || checkoutWhy({ url, title, lines });
+  // A sensitive site asks once per thread even where the member is allowed it; only this thread's own "allow once" lets it through.
+  const sens = sensitiveSite(s.host);
+  if (sens && !(threadId && once.get(threadId)?.has(sf.domain))) {
+    s.homograph = homograph(s.host);
+    return { action: "ask", site: s, checkout, sensitive: sens, title: `${b.name} wants to open ${s.host}, an account site that asks in every thread (${s.https ? "https" : "NOT https"})`,
+      warn: !!s.homograph, detail: { site: sf.domain, host: s.host, url: s.url.slice(0, 500), https: s.https, sensitive: true, homograph: s.homograph } };
+  }
   if (sf.mode === "unknown") {
     const ref = [...knownDomains(b.id), ...allowedDomains(b.id)];
     s.lookalike = lookalike(s.host, ref); s.homograph = homograph(s.host);
@@ -130,10 +155,11 @@ export function removeSite(scope: string, domain: string) {
 export function applySiteChoice(ps: PitstopRow, status: string, scope: string) {
   const d = json(ps.detail, {}), domain = d.site;
   if (!domain) return;
-  if (status === "approved" && ["once", "thread"].includes(scope)) {
+  // A sensitive site is only ever allowed for this thread, whatever scope was asked.
+  if (status === "approved" && (["once", "thread"].includes(scope) || d.sensitive)) {
     if (ps.thread_id) (once.get(ps.thread_id) || once.set(ps.thread_id, new Set()).get(ps.thread_id)!).add(domain);
     audit("driver", "site.allowed_once", { botId: ps.bot_id, threadId: ps.thread_id, domain });
-  } else if (status === "approved" && ["site", "full", "always"].includes(scope)) setSite(ps.bot_id, domain, "allowed", scope === "full" ? FULL : {}, `pitstop:${ps.id}`);
+  } else if (status === "approved" && ["site", "full", "always"].includes(scope) && !d.sensitive) setSite(ps.bot_id, domain, "allowed", scope === "full" ? FULL : {}, `pitstop:${ps.id}`);
   else if (status === "denied" && scope === "block") setSite(ps.bot_id, domain, "blocked", {}, `pitstop:${ps.id}`);
   if (status === "approved") recordVisit(ps.bot_id, domain);
 }
