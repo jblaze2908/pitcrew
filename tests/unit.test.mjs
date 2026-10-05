@@ -1123,7 +1123,7 @@ test("a run that stands out is measured and gets a retro; suggestions deduplicat
   await T.finishTurn("th_retro", "completed");
   const q = one("SELECT * FROM queued WHERE thread_id='th_retro'");
   assert.equal(q.trigger, "retro"); assert.match(q.text, /^\[Retro\] Your last run stood out \(it used 5\.0× the usual input tokens\)/);
-  assert.match(q.display, /^Retro · /);
+  assert.match(q.display, /^Looking back at the run · /);
 
   const a = Rt.suggest("b_retro", "th_retro", { area: "tool", title: "Add a pacing option to replay", evidence: "three 429s on tu_big", proposal: "rate limit per host" });
   const b2 = Rt.suggest("b_retro", null, { area: "tool", title: "add a pacing option to replay!", evidence: "again on tu_next", proposal: "" });
@@ -1331,7 +1331,7 @@ test("activity lists what was done for the driver, filtered by member, effect an
   assert.deepEqual(by["send:always"].by, { cat: "always", who: "You", how: "this thread" });
   assert.deepEqual(by["signin:autonomy"].by, { cat: "autonomy", who: "Thread", how: "hands-free" });
   assert.deepEqual(by["send:learned"].by, { cat: "learned", who: "Learned", how: "3 approvals" });
-  assert.deepEqual(by["delete:jev"].by, { cat: "jev", who: "jev", how: "you asked" });
+  assert.deepEqual(by["delete:jev"].by, { cat: "jev", who: "Safety check", how: "you asked" });
   assert.deepEqual([by["pay:once"].what, by["pay:once"].by.how], ["Pay ₹1,299 on shop.example", "once"], "the pit stop's title, without its verify suffix");
   assert.equal(by["browse:always"].by.how, "always");
   assert.equal(by["delete:jev"].what, "Ran rm -rf /bot/work/old");

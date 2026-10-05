@@ -46,7 +46,7 @@ export async function gate(c: Brain, threadId: string, call: Call, pit: PitInfo)
     const n = noteBlock(threadId);
     // After ESCALATE_AFTER jev blocks in a row the driver decides instead (hard rules never escalate); past
     // STOP_AFTER blocks in one run the run stops, so a member can't keep probing for a way through.
-    if (n.total >= STOP_AFTER) { addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Stopped: jev blocked ${n.total} actions in this run. Tell ${b.name} how to go on, or change its house rules.`, tone: "bad" }); import("./turns.js").then((T) => T.interrupt(threadId)).catch(() => {}); return false; }
+    if (n.total >= STOP_AFTER) { addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Stopped: the safety check blocked ${n.total} actions in this run. Tell ${b.name} how to go on, or change its house rules.`, tone: "bad" }); import("./turns.js").then((T) => T.interrupt(threadId)).catch(() => {}); return false; }
     if (n.consecutive < ESCALATE_AFTER || v.by === "rule") {
       addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Blocked by jev: ${v.reason}. Nothing ran.`, tone: "bad" });
       // Codex reports a declined command only as "rejected by user"; the member also hears what was blocked and why.

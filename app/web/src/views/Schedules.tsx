@@ -117,7 +117,7 @@ function Detail({ s, reload }: { s: Sched; reload: () => void }) {
           <Field label="When" help={'"daily 22:00", "weekdays 09:00", "weekly mon 09:00", "monthly 1 08:30", "every 6 hours"'}><input value={spec} onChange={(e) => setSpec(e.target.value)} /></Field>
           <Field label="Only wake when (optional)" help="A shell command on the member's computer, run first with no model. Same output as last time: the run is skipped and costs no tokens."><input className="pc-m" placeholder="python3 skills/blinkit/order_count.py" value={check} onChange={(e) => setCheck(e.target.value)} /></Field>
         </> : <div className="col" style={{ gap: 6 }}>
-          <p className="small muted">The member wakes when a signed request reaches this schedule's address: an email forwarder, a bank alert, any service that sends webhooks. What it sends reaches the member as untrusted data.</p>
+          <p className="small muted">The member wakes when a signed request reaches this schedule's address: an email forwarder, a bank alert, any service that sends webhooks. The member reads what it sends as information, never as instructions.</p>
           {event && (hook ? <div className="col" style={{ gap: 4 }}><code className="small">{`https://${location.host}${hook.path}`}</code><code className="small">{hook.secret}</code><p className="small faint">Sign with Standard Webhooks (HMAC-SHA256), or send the secret as a Bearer token.</p></div>
             : <BusyButton className="pc-pill o s" onClick={async () => setHook(await api.get(`/api/schedules/${s.id}/hook`))}>Show address and secret</BusyButton>)}
           {!event && <p className="small faint">Save to get its address and secret.</p>}

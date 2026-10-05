@@ -21,15 +21,15 @@ export function DataTab({ b }: { b: BotCard }) {
       <section className="col">
         <p className="pc-lab">{`Ledgers · ${data.ledgers.length}`}</p>
         {data.ledgers.length ? data.ledgers.map((l) => <LedgerCard key={l.path} b={b} l={l} />)
-          : <div className="pc-card tight"><p className="empty">{`${b.name} keeps no ledgers yet. A recurring task stores its data in a SQLite file under /bot/work.`}</p></div>}
+          : <div className="pc-card tight"><p className="empty">{`${b.name} keeps no ledgers yet. A recurring task keeps its data in a small database in its workspace.`}</p></div>}
       </section>
       <section className="col">
         <p className="pc-lab">{`Skills · ${data.skills.length}`}</p>
         {data.skills.length ? <div className="pc-card tight"><table className="tbl"><tbody>{data.skills.map((k) => (
           <tr key={k.name}><td className="pc-m">{k.name}</td><td className="small muted">{k.description}</td>
-            <td className="num small faint">{k.uses ? `${k.uses} load${k.uses === 1 ? "" : "s"} · last ${ago(k.last_used)}` : "never loaded"}{k.stale ? " · stale" : ""}</td></tr>))}</tbody></table>
-          <p className="small faint" style={{ padding: "0 12px 10px" }}>{`In /bot/work/skills, a git repo: history under Files → Projects.`}</p></div>
-          : <div className="pc-card tight"><p className="empty">{`No skills yet. ${b.name} writes them in /bot/work/skills as it learns how a task runs.`}</p></div>}
+            <td className="num small faint">{k.uses ? `Used ${k.uses} time${k.uses === 1 ? "" : "s"} · last ${ago(k.last_used)}` : "Not used yet"}{k.stale ? " · out of date" : ""}</td></tr>))}</tbody></table>
+          <p className="small faint" style={{ padding: "0 12px 10px" }}>{`Kept in its workspace under skills, with history under Files → Projects.`}</p></div>
+          : <div className="pc-card tight"><p className="empty">{`No skills yet. ${b.name} writes them as it learns how a task runs.`}</p></div>}
       </section>
       <section className="col">
         <p className="pc-lab">{`Dashboards · ${data.dashboards.length}`}</p>
@@ -72,14 +72,14 @@ function LedgerCard({ b, l }: { b: BotCard; l: Ledger }) {
 
 function BoardRow({ d, onChange }: { d: Board; onChange: () => void }) {
   const [s, setS] = useState<SurfaceRow | null>(null);
-  const toggle = async () => { await api.post(`/api/surfaces/${d.id}/save`, { saved: !d.saved }); toast(d.saved ? "Taken off the Wall" : "Pinned to the Wall"); onChange(); };
+  const toggle = async () => { await api.post(`/api/surfaces/${d.id}/save`, { saved: !d.saved }); toast(d.saved ? "Taken off Home" : "Pinned to Home"); onChange(); };
   return (
     <div className="pc-card col">
       <div className="spread">
         <div className="col" style={{ gap: 2 }}><b>{d.title}</b><span className="small faint">{`${d.source} · ${plural(d.queries.length, "query")} · made ${ago(d.created_at)}`}</span></div>
         <div className="row" style={{ gap: 8 }}>
           <button className="pc-pill o s" onClick={async () => setS(s ? null : await api.get<SurfaceRow>(`/api/surfaces/${d.id}`))}>{s ? "Hide" : "Show"}</button>
-          <button className={`pc-pill s ${d.saved ? "o" : "sig"}`} onClick={toggle}>{d.saved ? "On the Wall" : "Pin to Wall"}</button>
+          <button className={`pc-pill s ${d.saved ? "o" : ""}`} onClick={toggle}>{d.saved ? "On Home" : "Pin to Home"}</button>
           <a className="small faint" href={`#/t/${d.thread_id}`}>Thread</a>
         </div>
       </div>

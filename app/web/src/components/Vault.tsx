@@ -36,7 +36,7 @@ export function VaultSettings({ item }: { item?: string }) {
           <div className="vh"><span>Name · site</span><span>Kind</span><span>Who may use it</span><span>Last used</span></div>
           {data.map((v) => (
             <a key={v.id} className="vr" href={`#/settings/vault/${v.id}`}>
-              <div><b>{v.name}</b>{v.needs_update && <span className="pc-chip bad" title={v.needs_update}>needs update</span>}<small>{[v.site || "any checkout", v.kind === "card" && v.last4 ? `card ending ${v.last4}` : "", v.note].filter(Boolean).join(" · ")}</small></div>
+              <div><b>{v.name}</b>{v.needs_update && <span className="pc-chip bad" title={v.needs_update}>Needs update</span>}<small>{[v.site || "any checkout", v.kind === "card" && v.last4 ? `card ending ${v.last4}` : "", v.note].filter(Boolean).join(" · ")}</small></div>
               <span><span className="vk">{v.kind === "card" ? `card ·${v.last4}` : v.kind === "login+totp" ? "login + TOTP" : "login"}</span></span>
               <Who v={v} bots={S.bots} />
               <span className="pc-m small faint" title={v.last_used ? `by ${name(v.last_used_by)}` : undefined}>{v.last_used ? ago(v.last_used) : "never"}</span>

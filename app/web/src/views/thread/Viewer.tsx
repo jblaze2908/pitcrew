@@ -59,7 +59,7 @@ export function Viewer({ I, start, compare, onClose, onEdit, onMore, onKeep }: {
         <div className="col" style={{ gap: 10, alignItems: "flex-end" }}>
           {known && <div className="vw-acts">
             {onMore && <button className="pc-pill s o" onClick={() => { onMore(cur); onClose(); }}>More like this</button>}
-            {traced && onKeep && (kept ? <span className="pc-chip ok">kept</span> : <button className="pc-pill s o" title="Mark this as the version you're going with" onClick={() => onKeep(cur.id)}>Keep</button>)}
+            {traced && onKeep && (kept ? <span className="pc-chip ok">Kept</span> : <button className="pc-pill s o" title="Mark this as the version you're going with" onClick={() => onKeep(cur.id)}>Keep</button>)}
             {onEdit && <button className="pc-pill s" onClick={() => onEdit(cur)}>Edit</button>}
           </div>}
           <p className="vw-keys">{`${list.length > 1 ? "← → images · " : ""}${parent ? "C compare · " : ""}Esc close`}</p>

@@ -61,7 +61,7 @@ function RewindSheet({ turnId, mode, name, onClose, onDone }: { turnId: string; 
         {p && <>
           {mode !== "chat" && <p>Pitcrew keeps a copy of the member's workspace before every run, so shell commands are covered too, not just edits.</p>}
           {mode !== "chat" && <div className="rw-grp">
-            <div className="gh"><Icon name="folder" size={14} />Files in /bot/work<small>{back.length ? `${back.length} change back` : "nothing to change back"}</small></div>
+            <div className="gh"><Icon name="folder" size={14} />Files in its workspace<small>{back.length ? `${back.length} change back` : "nothing to change back"}</small></div>
             {back.slice(0, 40).map((f) => <div key={f.path} className="fr"><span className={`k${f.kind}`}>{f.kind}</span><span className="pth">{f.path}</span><span className="hint">{HINT[f.kind]}</span></div>)}
             {back.length > 40 && <div className="fr"><span className="hint">{`and ${back.length - 40} more`}</span></div>}
             {stuck.map((f) => <div key={f.path} className="fr stuck"><span className="k">!</span><span className="pth">{f.path}</span><span className="hint">{`stays: ${f.why || "can't change back"}`}</span></div>)}

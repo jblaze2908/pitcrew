@@ -5,7 +5,7 @@ import { plainText, usd } from "../lib/format";
 import { useStore } from "../lib/store";
 import { ConfirmButton, Face, Loader, Md } from "./ui";
 
-const ITEM_LABEL: Record<string, string> = { todo: "waits", doing: "on track", done: "done", failed: "didn't finish", cancelled: "cancelled" };
+const ITEM_LABEL: Record<string, string> = { todo: "Waiting", doing: "Working", done: "Done", failed: "Didn't finish", cancelled: "Cancelled" };
 const ITEM_MOOD: Record<string, string> = { doing: "working", done: "done", failed: "failed" };
 const nothing = (x: string | null | undefined) => !x || /^nothing\.?$/i.test(x.trim());
 
@@ -46,7 +46,7 @@ export function PlanCard({ P, flat }: { P: PlanSnapshot; flat?: boolean }) {
         <div className="cons"><p className="pc-lab">Your constraints</p>
           {P.constraints.map((c, i) => { const k = grade(c); return (
             <div key={i} className="con">
-              <span className={`pc-chip ${k?.status === "met" ? "ok" : k?.status === "unmet" ? "bad" : ""}`}>{k?.status || "open"}</span>
+              <span className={`pc-chip ${k?.status === "met" ? "ok" : k?.status === "unmet" ? "bad" : ""}`}>{k?.status === "met" ? "Met" : k?.status === "unmet" ? "Not met" : "Open"}</span>
               <span>{c}{k?.note && <span className="faint">{` · ${k.note}`}</span>}</span>
             </div>); })}
         </div>)}

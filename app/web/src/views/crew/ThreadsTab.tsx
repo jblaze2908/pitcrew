@@ -35,9 +35,9 @@ export function ThreadsTab({ b }: { b: BotCard }) {
                 <td>
                   <div className="row" style={{ gap: 8 }}>
                     <b>{t.title}</b>
-                    {!!t.pinned && <span className="pc-chip">pinned</span>}
-                    {!!t.archived && <span className="pc-chip">archived</span>}
-                    {t.status === "running" ? <span className="pc-chip blue">working</span> : t.status === "needs" ? <span className="pc-chip hot">pit stop</span> : null}
+                    {!!t.pinned && <span className="pc-chip">Pinned</span>}
+                    {!!t.archived && <span className="pc-chip">Archived</span>}
+                    {t.status === "running" ? <span className="pc-chip blue">Working</span> : t.status === "needs" ? <span className="pc-chip hot">Pit stop</span> : null}
                   </div>
                   {t.snippet && <p className="small faint snip">{t.snippet}</p>}
                 </td>

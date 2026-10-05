@@ -6,7 +6,7 @@ import { api } from "../lib/api";
 import { when } from "../lib/format";
 import { toast } from "../lib/toast";
 import { useFetch } from "../lib/useFetch";
-import { ConfirmButton, Seg } from "./ui";
+import { ConfirmButton, EffectChip, Seg } from "./ui";
 
 const SITE_EFFECTS = ["read", "draft", "browse", "write_workspace", "signin", "install", "send", "delete", "share", "exec_untrusted"];
 type Kind = "read" | "allowed" | "full" | "blocked";
@@ -92,7 +92,7 @@ function SiteLine({ r, hidden, store, put, remove, onRemoved }: LineProps) {
         <div className="custom">
           {SITE_EFFECTS.map((e) => (
             <div key={e} className="perm">
-              <pc-effect kind={e}>{e.replace(/_/g, " ")}</pc-effect><span className="what">On this site</span>
+              <EffectChip kind={e} /><span className="what">On this site</span>
               <Seg options={[["", "Member's"], ["allow", "Allow"], ["ask", "Ask"]] as const} value={(row.overrides?.[e] || "") as "" | "allow" | "ask"} onChange={(v) => setOverride(e, v)} />
             </div>))}
           <p className="small faint">Pay always asks, whatever you set here.</p>
