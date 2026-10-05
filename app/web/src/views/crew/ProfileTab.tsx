@@ -5,7 +5,7 @@ import type { BotCard, BotDetail, Decision, EngramScope, Hue, ProviderId, Shape,
 import { RuleLabel } from "../../components/Approvals";
 import { MailboxCard } from "../../components/MailboxCard";
 import { ModelPicker } from "../../components/ModelPicker";
-import { SitesEditor } from "../../components/SitesEditor";
+import { Sites as SiteList } from "../settings/Sites";
 import { ConfirmButton, Face, Seg, hueStyle } from "../../components/ui";
 import { api } from "../../lib/api";
 import { when } from "../../lib/format";
@@ -232,7 +232,7 @@ function Sites({ b }: { b: BotCard }) {
     <div className="br">
       <div className="brh"><p className="ms-l">Its own sites</p><button className="lk2" onClick={() => setEdit(!edit)}>{edit ? "Done" : "Edit sites"}</button></div>
       <p className="ms-h">{list.length ? list.map((s) => `${s.domain}, ${MODE[s.mode] || s.mode}`).join(" · ") : "None of its own. It follows the crew-wide list in Settings."}</p>
-      {edit && <div className="ms-sites"><SitesEditor scope={b.id} help={`These win over the crew-wide list, except a crew-wide block.`} /></div>}
+      {edit && <div className="ms-sites"><SiteList scope={b.id} intro="These win over the crew-wide list, except a crew-wide block." /></div>}
     </div>
   );
 }
