@@ -415,15 +415,16 @@ svg text{fill:var(--ink-3);font:10px var(--font-data)}
 .steps .last{overflow:hidden;text-overflow:ellipsis;min-width:0;color:var(--ink-3)}
 .steps .last::before{content:"· "}
 .steps[open] .last{display:none}
-.steps .cnt,.pitrow .tag{display:inline-flex;align-items:center;gap:5px;flex:none;font:500 12px/1 var(--font-body)}
+.steps .cnt,.tool .tag{display:inline-flex;align-items:center;gap:5px;flex:none;font:500 12px/1 var(--font-body)}
 .steps .cnt::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
-.steps .approved,.pitrow .tag.approved{color:var(--in)}
-.steps .expired,.pitrow .tag.expired{color:var(--signal)}
-.steps .denied,.pitrow .tag.denied{color:var(--bad)}
+.steps .approved,.tool .tag.approved{color:var(--in)}
+.steps .expired,.tool .tag.expired{color:var(--signal)}
+.steps .denied,.tool .tag.denied{color:var(--bad)}
 .steps-body{display:flex;flex-direction:column;gap:8px;margin:8px 0 2px 2px;padding-left:12px}
 .steps-body .tool{margin-left:0}
 .pitrow summary .lbl{color:var(--ink)}
-.pitrow .tag{margin-left:auto;padding-left:12px}
+.tool .tag{margin-left:auto;padding-left:12px}
+.tool>.why{margin:6px 0 0 15px;font:12px/1.45 var(--font-data);color:var(--ink-3)}
 .pitrow>pre,.pitrow>.why,.pitrow>p{margin:6px 0 0 15px}
 .pitrow .why{font:12px/1.45 var(--font-data);color:var(--ink-3)}
 .pitrow pre{font:12px/1.5 var(--font-data);background:var(--surface-2);border-radius:var(--radius-sm);padding:10px 12px;white-space:pre-wrap;word-break:break-word;max-height:260px;overflow:auto;color:var(--ink-2)}
