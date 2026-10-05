@@ -152,7 +152,7 @@ async function start(s: ScheduleRow, runId: string, kind: ScheduleRunRow["kind"]
     }
     if (r.ok) run("UPDATE schedules SET check_last=? WHERE id=?", sha(r.out), s.id);
   }
-  const at = now(), title = `${s.prompt.split("\n")[0].replace(/^\W+/, "").split(/\s+/).slice(0, 6).join(" ").slice(0, 50)} · ${new Date(at + IST).toUTCString().slice(0, 11)}`;
+  const at = now(), title = `${s.title || scheduleTitle(s.prompt)} · ${new Date(at + IST).toUTCString().slice(5, 11).replace(/^0/, "")}`;
   const threadId = uid("th");
   run("INSERT INTO threads(id,bot_id,title,title_auto,origin,created_at,updated_at) VALUES(?,?,?,0,?,?,?)", threadId, s.bot_id, title, JSON.stringify({ kind: "schedule", scheduleId: s.id, runId, spec: s.spec }), at, at);
   run("UPDATE schedule_runs SET thread_id=? WHERE id=?", threadId, runId);
