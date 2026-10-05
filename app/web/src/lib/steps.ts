@@ -52,3 +52,20 @@ export function stepView(title: string, connLabel?: string | null): StepView {
   if (/^computer_/.test(head)) return { icon: "browser", label: words(head.replace(/^computer_/, "")), detail: rest };
   return { icon: verbIcon(head), label: words(head), detail: rest };
 }
+
+// Code-running browser tools: jev's title carries the raw code, which says nothing at a glance.
+const PAGE_CODE: Record<string, string> = { browser_run_code_unsafe: "Ran a browser script", browser_evaluate: "Ran page JavaScript", browser_replay_request: "Re-sent a request" };
+const hostOf = (u: unknown) => { try { return typeof u === "string" ? new URL(u).hostname.replace(/^www\./, "") : ""; } catch { return ""; } };
+/** A pit stop as a step line: what it would do, in words, for the folded row and the card heading. */
+export function pitLabel(p: { kind: string; title: string; detail?: Record<string, any> }): StepView {
+  const d = p.detail || {}, tool = String(d.tool || "");
+  if (p.kind === "command") return { icon: "terminal", label: "Run", detail: String(d.command || p.title.replace(/^Run: /, "")).replace(/^\/bin\/(ba)?sh -l?c /, "") };
+  if (p.kind === "mcp" && (d.server === "browser" || d.server === "computer")) {
+    const host = hostOf(d.args?.page_url), on = host ? `on ${host}` : "";
+    if (PAGE_CODE[tool]) return { icon: "code", label: PAGE_CODE[tool], detail: on };
+    const v = stepView(`${d.server === "computer" ? "computer_" : ""}${tool}`);
+    return { ...v, detail: on };
+  }
+  if (p.kind === "mcp" && d.server && tool) { const v = stepView(`${d.server}.${tool}`); return { ...v, detail: "" }; }
+  return { icon: "tool", label: p.title, detail: "" };
+}

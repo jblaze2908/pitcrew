@@ -4,7 +4,7 @@ import type { Img, ImageIndex } from "../../lib/images";
 import { editOf, type EditAsk } from "../../../../shared/edits";
 import type { Bot, DelegationCard as Deleg, PitStop, PlanSnapshot, ThreadEvent } from "../../../../shared/types";
 import { DelegationCard } from "../../components/DelegationCard";
-import { PitCard } from "../../components/PitCard";
+import { OUTCOME, PitCard } from "../../components/PitCard";
 import { PlanCard, PlanChip } from "../../components/PlanCard";
 import { BusyButton, Face, Md } from "../../components/ui";
 import { tidyTitle } from "../../lib/format";
@@ -190,6 +190,8 @@ function LearnedCard({ d }: { d: Record<string, any> }) {
 export interface EventCtx { cont?: boolean; b: Bot; fromName: string; pits: Record<string, PitStop>; latest: Map<string, Record<string, any>>; surface: (id: string) => ReactNode;
   /** Opens the work panel's Plan tab; when set, plans show as a chip in the chat instead of the full card. */
   onPlan?: () => void;
+  /** Sends "continue" after a restart cut a run that won't resume on its own; unset once the driver has written since. */
+  onContinue?: () => void;
   images?: ImageIndex; onView?: (im: Img) => void; onCompare?: (im: Img) => void; onEdit?: (im: Img) => void; onMore?: (im: Img) => void; onKeep?: (id: string) => Promise<unknown> }
 
 /** The element for one event, or null when it draws nothing (an unknown pit stop or surface). */
@@ -205,7 +207,10 @@ export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
     case "shot": return <Shot e={e} b={c.b} />;
     case "image": return <Images e={e} b={c.b} c={c} />;
     case "tool": return <Tool e={e} />;
-    case "system": return <p className={`sys ${d.tone === "bad" ? "bad" : ""}`}>{d.text}</p>;
+    // A restart cut the run (runtime/lifecycle.ts): a divider, since nothing broke on the member's side.
+    case "system": return /^Pitcrew restarted/.test(d.text || "") ? <p className="sys rule"><span>{d.text}</span></p>
+      : d.text === "Say continue to pick it up." ? (c.onContinue ? <p className="sys rule"><button className="pc-pill o s" onClick={c.onContinue}>Pick up where it left off</button></p> : null)
+      : <p className={`sys ${d.tone === "bad" ? "bad" : ""}`}>{d.text}</p>;
     case "error": return <p className="err">{d.text}</p>;
     // Older runs recorded a changed-files card; threads no longer draw it (Crew → Files keeps the history).
     case "changes": return null;
@@ -223,16 +228,27 @@ function Last({ e }: { e: ThreadEvent }) {
   return <span className="last"><StepIcon name={v.icon} />{v.detail ? `${v.label} · ${v.detail}` : v.label}</span>;
 }
 
-/** A run's tool calls fold into one "N steps" row: open while the run goes, folded when it ends (closeSignal bumps). */
-export function Steps({ events, initialOpen, closeSignal, results }: { events: ThreadEvent[]; initialOpen: boolean; closeSignal: number; results?: Map<string, Record<string, any>> }) {
+/** A run's tool calls fold into one "N steps" row under the message before them: open while the run goes, folded when
+ * it ends (closeSignal bumps). Decided pit stops ride in the same group as their own line, counted in the summary. */
+export function Steps({ events, pits, initialOpen, closeSignal, results }: { events: ThreadEvent[]; pits: Record<string, PitStop>; initialOpen: boolean; closeSignal: number; results?: Map<string, Record<string, any>> }) {
   const [open, setOpen] = useState(initialOpen);
   const first = useRef(closeSignal);
   useEffect(() => { if (closeSignal !== first.current) setOpen(false); }, [closeSignal]);
-  const bad = events.filter((e) => !stepOk(e) && e.data.status !== "inProgress").length;
+  const tools = events.filter((e) => e.kind === "tool"), decided = events.flatMap((e) => (e.kind === "pitstop" && pits[e.data.id] ? [pits[e.data.id]] : []));
+  const bad = tools.filter((e) => !stepOk(e) && e.data.status !== "inProgress").length;
+  const n = (st: PitStop["status"]) => decided.filter((p) => p.status === st).length;
+  const counts = (["approved", "denied", "expired"] as const).filter((st) => n(st) > 0);
   return (
     <details className="steps" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary><span>{`${events.length} step${events.length === 1 ? "" : "s"}${bad ? ` · ${bad} failed` : ""}`}</span><Last e={events[events.length - 1]} /></summary>
-      <div className="steps-body">{events.map((e) => <Tool key={e.id} e={e} results={results} />)}</div>
+      <summary>
+        <span className="n">{`${tools.length} step${tools.length === 1 ? "" : "s"}`}</span>
+        {tools.length > 0 && <Last e={tools[tools.length - 1]} />}
+        {bad > 0 && <span className="cnt denied">{`${bad} failed`}</span>}
+        {counts.map((st) => <span key={st} className={`cnt ${st}`}>{`${n(st)} ${OUTCOME[st]}`}</span>)}
+      </summary>
+      <div className="steps-body">{events.map((e) => e.kind === "pitstop"
+        ? pits[e.data.id] && <PitCard key={e.id} p={pits[e.data.id]} row />
+        : <Tool key={e.id} e={e} results={results} />)}</div>
     </details>
   );
 }

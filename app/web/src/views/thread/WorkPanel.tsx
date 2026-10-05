@@ -5,7 +5,10 @@ import type { BotCard, ChangeRun, LiveCommandView, PlanSnapshot, ThreadEvent } f
 import { useDock } from "../../components/Dock";
 import { Icon } from "../../components/Icon";
 import { PlanCard } from "../../components/PlanCard";
+import { StepIcon } from "../../components/StepIcon";
 import { Loader } from "../../components/ui";
+import { tidyTitle } from "../../lib/format";
+import { stepView } from "../../lib/steps";
 import { api } from "../../lib/api";
 import { hm } from "../../lib/format";
 import { openScreen } from "../../lib/novnc";
@@ -47,11 +50,12 @@ export function WorkPanel(p: Props) {
         </div>
         {!p.follow && p.running && <button className="chipb follow" onClick={p.onFollow}>Follow live</button>}
         <span style={{ flex: 1 }} />
+        {p.tab === "screen" && <ScreenActions b={p.b} lease={p.lease} onHandBack={p.onHandBack} />}
         <button className="ib" title="Close the panel" onClick={p.onClose}><Icon name="close" /></button>
       </div>
       <div className="wbody">
         {p.tab === "plan" && p.plan && <PlanCard P={p.plan} flat />}
-        {p.tab === "screen" && <ScreenTab b={p.b} lease={p.lease} onHandBack={p.onHandBack} />}
+        {p.tab === "screen" && <ScreenTab b={p.b} events={p.events} running={p.running} />}
         {p.tab === "terminal" && <TerminalTab b={p.b} events={p.events} live={p.live} />}
         {p.tab === "files" && <FilesTab b={p.b} runs={p.runs} />}
       </div>
@@ -60,9 +64,20 @@ export function WorkPanel(p: Props) {
 
 const asleep = (t: Tab, b: BotCard) => (t === "screen" && !b.computer.desktop) || (t === "terminal" && !b.computer.up);
 
-function ScreenTab({ b, lease, onHandBack }: { b: BotCard; lease: boolean; onHandBack: () => void }) {
-  const el = useRef<HTMLDivElement>(null);
+/** Take over, corner and full screen sit on the tab row, so the screen gets the panel's height. */
+function ScreenActions({ b, lease, onHandBack }: { b: BotCard; lease: boolean; onHandBack: () => void }) {
   const { openDock } = useDock();
+  const up = b.computer.desktop;
+  return <>
+    {lease ? <button className="pc-pill sig s" onClick={onHandBack}>Hand back</button>
+      : <a className="pc-pill s" href={`#/live/${b.id}`} title={up ? `Taking over pauses ${b.name} until you hand back` : undefined}>{up ? "Take over" : "Watch live"}</a>}
+    {up && <button className="ib ol" title="Watch in a corner" onClick={() => openDock(b)}><Icon name="corner" size={14} /></button>}
+    {up && <a className="ib ol" title="Full screen" href={`#/live/${b.id}`}><Icon name="expand" size={14} /></a>}
+  </>;
+}
+
+function ScreenTab({ b, events, running }: { b: BotCard; events: ThreadEvent[]; running: boolean }) {
+  const el = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState("Connecting…");
   const up = b.computer.desktop;
   useEffect(() => {
@@ -74,16 +89,18 @@ function ScreenTab({ b, lease, onHandBack }: { b: BotCard; lease: boolean; onHan
     }).catch((e: Error) => setStatus(e.message));
     return () => { gone = true; rfb?.disconnect(); };
   }, [b.id, up]);
+  // The newest screen steps, so the space under a landscape screen says what just happened on it.
+  const recent = useMemo(() => events.filter(isScreenTool).slice(-8).reverse(), [events]);
   return (
-    <div className="col" style={{ gap: 12 }}>
+    <div className="col" style={{ gap: 14, flex: 1 }}>
       {up ? <div className="wscreen"><div ref={el} className="vnc" /><span className="st">{status}</span></div>
         : <div className="asleep"><b>The screen is asleep.</b><p>It wakes on the member's next page, or when you watch live.</p></div>}
-      <div className="row">
-        {lease ? <button className="pc-pill sig s" onClick={onHandBack}>Hand back</button> : <a className="pc-pill s" href={`#/live/${b.id}`}>{up ? "Take over" : "Watch live"}</a>}
-        {up && <button className="pc-pill o s" onClick={() => openDock(b)}><Icon name="corner" size={14} />Corner</button>}
-        {up && <a className="pc-pill o s" href={`#/live/${b.id}`}><Icon name="expand" size={14} />Full screen</a>}
-      </div>
-      <p className="note">Taking over pauses {b.name} until you hand back. The computer goes back to the garage after 10 idle minutes.</p>
+      {recent.length > 0 && <div className="onscreen">
+        <p className="pc-lab">On screen</p>
+        {recent.map((e, i) => { const v = stepView(tidyTitle(e.data.title), e.data.conn); return (
+          <div key={e.id} className={`osr ${i === 0 && running ? "now" : ""}`}>{i === 0 && running ? <Loader /> : <StepIcon name={v.icon} />}<span>{v.detail ? `${v.label} · ${v.detail}` : v.label}</span><small>{hm(e.ts)}</small></div>); })}
+      </div>}
+      {up && <p className="note" style={{ marginTop: "auto" }}>Back in the garage after 10 idle minutes</p>}
     </div>);
 }
 

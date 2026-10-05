@@ -3,14 +3,20 @@ import { useEffect, useState } from "react";
 import type { EngramDecision, Personality, PitStop } from "../../../shared/types";
 import { api } from "../lib/api";
 import { ago, usd, when } from "../lib/format";
+import { pitLabel } from "../lib/steps";
 import { useStore } from "../lib/store";
 import { toast } from "../lib/toast";
 import { ProposalSummary } from "./Engram";
+import { StepIcon } from "./StepIcon";
 import { EffectChip, Face } from "./ui";
 
 type Scope = "once" | "thread" | "always" | "site" | "full" | "block";
 
-export function PitCard({ p: given, onDone }: { p: PitStop; onDone?: (r: PitStop) => void }) {
+/** What a decided pit stop came to, as a short tag. */
+export const OUTCOME: Record<PitStop["status"], string> = { pending: "waiting", approved: "approved", denied: "denied", expired: "no answer" };
+
+/** row: a decided pit stop drawn as one line inside a thread's steps, not as a card of its own. */
+export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: PitStop) => void; row?: boolean }) {
   const { bot, S } = useStore();
   // The decided card replaces itself in place; nothing around it needs a refetch.
   const [p, setP] = useState(given);
@@ -51,10 +57,15 @@ export function PitCard({ p: given, onDone }: { p: PitStop; onDone?: (r: PitStop
     : p.kind === "files" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><pre>{(d.paths || []).map((x: { path: string; dir: boolean; size: number }) => `${x.path}${x.dir ? "/ (folder and everything in it)" : ` · ${x.size} B`}`).join("\n")}</pre></div> : null;
 
   const outcome = `${p.kind === "engram" && p.note ? p.note : p.status} ${ago(p.decided_at)}`;
+  // gate.ts appends the site to verify, escalation and untrusted-content flags to the title; those stay word for word.
+  const flags = / · (verify: |jev blocked |after untrusted content).*$/.exec(p.title)?.[0] || "";
+  const v = pitLabel(p), heading = p.kind === "mcp" ? `${v.label}${v.detail ? ` ${v.detail}` : ""}${flags}` : p.title;
   // Decided: one line that opens to the details, so a thread's history doesn't keep full cards around.
   if (done) return (
-    <details className="pit done">
-      <summary><Face b={b} size="sm" mood="idle" /><b>{b?.name || p.bot_id}</b><span className="t1">{p.title}</span><span className="pc-m small faint">{outcome}</span></summary>
+    <details className={row ? "tool pitrow" : "pit done"}>
+      {row
+        ? <summary><span className={`st ${p.status === "approved" ? "ok" : "bad"}`} /><StepIcon name={v.icon} /><span className="lbl">{v.label}</span>{v.detail && <span className="det">{v.detail}</span>}<span className={`tag ${p.status}`}>{p.status === "expired" ? "no answer · skipped" : OUTCOME[p.status]}</span></summary>
+        : <summary><Face b={b} size="sm" mood="idle" /><b>{b?.name || p.bot_id}</b><span className="t1">{heading}</span><span className="pc-m small faint">{outcome}</span></summary>}
       {body}
       {j.reason && <p className="why">{`jev · ${j.by || ""} · ${j.reason}${j.ms ? ` · ${j.ms} ms` : ""}`}</p>}
       {p.note && p.kind !== "engram" && <p className="small faint">{p.note}</p>}
@@ -97,7 +108,7 @@ export function PitCard({ p: given, onDone }: { p: PitStop; onDone?: (r: PitStop
         <div className="row"><Face b={b} size="sm" mood="needs" /><b>{b?.name || p.bot_id}</b><EffectChip kind={p.effect} /></div>
         <span className="pc-m small faint">{p.kind === "engram" ? "from Engram" : `expires ${when(p.expires_at)}`}</span>
       </div>
-      <p className="t">{p.title}</p>
+      <p className="t">{heading}</p>
       {body}
       {j.reason && <p className="why">{`jev · ${j.by || ""} · ${j.reason}${j.ms ? ` · ${j.ms} ms` : ""}`}</p>}
       {p.similar && !["pay", "delete", "share"].includes(p.effect) && <p className="small faint">{`Similar means: ${p.similar}.`}</p>}
