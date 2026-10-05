@@ -1,6 +1,6 @@
 // Overview: talk to the member, what waits on you, its threads, and a side column for job, schedule, computer and spend.
 import { useEffect, useState, type KeyboardEvent } from "react";
-import type { AskResult, BotCard, BotDetail, ThreadListRow } from "../../../../shared/types";
+import type { AskResult, BotCard, BotDetail, ThreadListRow, ThreadPage } from "../../../../shared/types";
 import { Icon } from "../../components/Icon";
 import { BusyButton } from "../../components/ui";
 import { api } from "../../lib/api";
@@ -75,10 +75,11 @@ function Waiting({ b }: { b: BotCard }) {
   );
 }
 
+const flat = (p: ThreadPage) => [...p.pinned, ...p.rows];
 // Its threads with the last thing said; search covers titles and anything said in them.
 function Threads({ b }: { b: BotCard }) {
   const [q, setQ] = useState(""), [all, setAll] = useState(false);
-  const list = useFetch(() => api.get<ThreadListRow[]>(`/api/threads?bot=${encodeURIComponent(b.id)}`, { quiet: true }), [b.id]);
+  const list = useFetch(() => api.get<ThreadPage>(`/api/threads?bot=${encodeURIComponent(b.id)}`, { quiet: true }).then(flat), [b.id]);
   useLiveReload((e) => e.type === "thread" && "botId" in e.data && e.data.botId === b.id, list.reload);
   const [found, setFound] = useState<ThreadListRow[] | null>(null);
   // Search waits for a 200 ms pause in typing.
@@ -87,7 +88,7 @@ function Threads({ b }: { b: BotCard }) {
     if (!v) { setFound(null); return; }
     let live = true;
     const t = setTimeout(async () => {
-      const r = await api.get<ThreadListRow[]>(`/api/threads?bot=${encodeURIComponent(b.id)}&q=${encodeURIComponent(v)}`, { quiet: true }).catch(() => []);
+      const r = await api.get<ThreadPage>(`/api/threads?bot=${encodeURIComponent(b.id)}&q=${encodeURIComponent(v)}`, { quiet: true }).then(flat).catch(() => []);
       if (live) setFound(r);
     }, 200);
     return () => { live = false; clearTimeout(t); };
