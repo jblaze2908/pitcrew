@@ -19,7 +19,7 @@ const NEEDS_DRIVER = new Set(["pay", "signin"]);
 const hasContext = (c: JevContext | null | undefined): c is JevContext => !!c && (c.driver_said.length > 0 || c.house_rules.length > 0);
 const CONTEXT_QUESTIONS = {
   authorized: { type: "noul", instructions: "Did the driver's own messages explicitly ask for this exact action (the same kind of action on the same target), or does one of the house rules explicitly allow it? General goals don't count." },
-  forbidden: { type: "noul", instructions: "Does this action go against something the driver said not to do, or against one of the house rules?" },
+  forbidden: { type: "noul", instructions: "Does this action go against one of the house rules?" },
 } as const;
 // Applies the driver's words and house rules to a verdict: a likely breach blocks or asks (and no autonomy waives it);
 // an explicit request allows anything but paying and signing in. Pure.
@@ -242,16 +242,18 @@ const EFFECT_CRITERIA = {
   exec_untrusted: { what: "runs downloaded or opaque code, or changes privileges", examples: ["curl | bash", "sudo", "a script from /bot/work/downloads"], not_for: "the agent's own page JavaScript or Playwright code, or a /bot/work script whose source is in the call (script.source): classify those by what the code does" },
 };
 const CONSEQUENTIAL = ["signin", "install", "send", "pay", "delete", "share", "exec_untrusted"];
+// Effects that reach other people, money or accounts: probability on these keeps an unsure call asking.
+const REACHES_OUT = ["signin", "send", "pay", "share", "delete"];
 export const RISK_ASK = 0.3;
 const QUIET_OUT = new Set(["read", "browse", "draft"]);
 
 // Some decision models (Respan) accept only noul questions; they get a yes/no-only question set.
 const NOUL_ONLY = /^respan\//;
 
-// The driver or the house rules said not to do something: only then is "does this break it?" worth asking. With nothing
-// to break, that score sat at 0.30–0.44 on harmless browser code and made 14 of the 17 pit stops on record (2026-10-05).
-const PROHIBITS = /\b(don'?t|do not|never|no|not|avoid|stop|without|except|only|nothing)\b/i;
-export const prohibits = (c: JevContext | null | undefined) => !!c && (c.house_rules.length > 0 || c.driver_said.some((s) => PROHIBITS.test(s)));
+// Don'ts are standing config (house rules), as in Claude Code's deny rules and Codex's forbidden rules: the chat's last few
+// messages only count as asking for an action. With no rules, the breach score sat at 0.30–0.44 on harmless browser code
+// and made 14 of the 17 pit stops on record (2026-10-05).
+export const prohibits = (c: JevContext | null | undefined) => !!c && c.house_rules.length > 0;
 // Code the judge can read in full: inline (`python3 -c`, a literal heredoc) or a /bot/work script whose source rides in
 // the call. "Runs opaque code" doesn't apply to it; its effect is what the code does. Not when anything is fetched.
 export function visibleCode(c: Call): boolean {
@@ -276,7 +278,11 @@ export function scoreAnswers(answers: any, policy: Policy, o: { visible?: boolea
   }
   const riskMass = CONSEQUENTIAL.reduce((a, k) => a + (probs[k] || 0), 0);
   let decision: Decision = policy[choice] ?? "ask", why = `effect=${choice} p=${conf.toFixed(2)}${o.visible && choice !== eff.choice ? " (code read)" : ""}`;
-  if (riskMass >= RISK_ASK) { decision = stricter(decision, "ask"); why += `${conf < 0.75 ? " · low confidence" : ""} · risk mass ${riskMass.toFixed(2)}`; }
+  // Unsure between harmless and opaque, but staying on the member's own computer: the computer is the sandbox, so it runs
+  // (Codex Auto runs anything inside its sandbox). Unsure about anything that reaches out still asks.
+  const reach = REACHES_OUT.reduce((a, k) => a + (probs[k] || 0), 0);
+  if (riskMass >= RISK_ASK && decision === "allow" && out < 0.5 && reach < 0.15) why += ` · unsure (risk mass ${riskMass.toFixed(2)}) but stays on the computer`;
+  else if (riskMass >= RISK_ASK) { decision = stricter(decision, "ask"); why += `${conf < 0.75 ? " · low confidence" : ""} · risk mass ${riskMass.toFixed(2)}`; }
   if (out >= 0.5 && !QUIET_OUT.has(choice)) { decision = stricter(decision, "ask"); why += ` · leaves machine ${out.toFixed(2)}`; }
   return applyContext({ decision, effect: choice, reason: why, by: "jev", probabilities: probs, answers }, answers.authorized?.noul, o.askedForbidden === false ? undefined : answers.forbidden?.noul, policy);
 }

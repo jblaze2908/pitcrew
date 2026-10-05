@@ -238,6 +238,15 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
       if (b.kind !== "chief") return say("Only the Crew Chief manages the crew.", false);
       return say(triageSuggestion(String(a.id || ""), { mergeInto: a.merge_into ? String(a.merge_into) : null, note: String(a.note || "") }));
     }
+    case "propose_house_rule": {
+      const rule = String(a.rule || "").replace(/\s+/g, " ").trim().slice(0, 300);
+      if (!rule) return say("Give the rule as one line.", false);
+      const pr = memberChange(b.name, { house_rules: [String(getBot(b.id)?.house_rules || "").trim(), `- ${rule.replace(/^[-*•]\s*/, "")}`].filter(Boolean).join("\n") }, String(a.why || ""));
+      if ("error" in pr) return say(pr.error!, false);
+      const decision = await pitStop({ botId: b.id, threadId, kind: "member", effect: "member", title: `House rule for ${b.name}: ${rule}`, detail: pr.detail! });
+      const driver = getSetting("driver_name", "the driver");
+      return say(decision === "approved" ? `Saved. The gate holds you to it from your next action: ${rule}` : decision === "expired" ? `${driver} didn't answer; the rule wasn't saved. Follow it anyway in this thread.` : `${driver} didn't keep it as a rule.`, decision === "approved");
+    }
     case "suggest_improvement": {
       const s = { area: String(a.area || "other"), title: String(a.title || "").trim(), evidence: String(a.evidence || "").trim(), proposal: String(a.proposal || "").trim() };
       if (!s.title || !s.evidence) return say("A suggestion needs a title and the evidence (runs, numbers, what happened).", false);

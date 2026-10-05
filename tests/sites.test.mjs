@@ -252,7 +252,8 @@ test("jev asks on consequential risk, not on uncertainty between safe effects or
     [["write_workspace", 0.56, { write_workspace: 0.56, read: 0.31, exec_untrusted: 0.13 }, 0.34], "allow", "unsure between safe effects"],
     [["write_workspace", 0.7, { write_workspace: 0.7, read: 0.1, send: 0.2 }, 0.6], "ask", "writing that also leaves the machine"],
     [["exec_untrusted", 0.51, { exec_untrusted: 0.51, write_workspace: 0.32, send: 0.04 }, 0.26], "ask", "the class itself asks"],
-    [["read", 0.6, { read: 0.6, exec_untrusted: 0.3, write_workspace: 0.1 }, 0.04], "ask", "risk mass at the bar"],
+    [["read", 0.6, { read: 0.6, exec_untrusted: 0.3, write_workspace: 0.1 }, 0.04], "allow", "unsure at the bar but stays on the computer"],
+    [["read", 0.6, { read: 0.6, exec_untrusted: 0.3, write_workspace: 0.1 }, 0.55], "ask", "unsure at the bar and leaves the machine"],
   ];
   for (const [a, want, why] of cases) assert.equal((await withFetch(jevSays(...a), () => J.jevSystemOne(sh, { apiKey: "t" }))).decision, want, why);
   assert.equal(J.RISK_ASK, 0.3);
@@ -372,7 +373,7 @@ test("jev reads the driver's own words and house rules: an explicit ask allows, 
 
   const c = { bot: { id: b.id } }, pit = { kind: "command", title: "Run", detail: {} }, sh = { kind: "shell", command: "python3 /bot/work/order.py" };
   thread("t_yolo_rule"); run("UPDATE threads SET autonomy='yolo' WHERE id='t_yolo_rule'");
-  run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('t_yolo_rule',NULL,'user',?,0)", JSON.stringify({ text: "run the order script, but never place a real order" }));
+  run("UPDATE bots SET house_rules=? WHERE id=?", "- Never place a real order", b.id);
   assert.equal(await withFetch(says({ ...send, authorized: { noul: 0 }, forbidden: { noul: 0.8 } }), () => gate(c, "t_yolo_rule", sh, pit)), false, "a never-rule holds in YOLO");
   const maybeRun = withFetch(says({ ...send, authorized: { noul: 0 }, forbidden: { noul: 0.45 } }), async () => {
     const g = gate(c, "t_yolo_rule", sh, pit);
@@ -380,6 +381,7 @@ test("jev reads the driver's own words and house rules: an explicit ask allows, 
     const ps = pending(); await R.decide(ps.id, "deny"); return [await g, !!ps];
   });
   assert.deepEqual(await maybeRun, [false, true], "a possible breach asks even in YOLO");
+  run("UPDATE bots SET house_rules='' WHERE id=?", b.id);
   // Nothing said not to and no house rules: the breach question isn't asked, and its noise floor can't make a pit stop.
   thread("t_noprohib"); run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('t_noprohib',NULL,'user',?,0)", JSON.stringify({ text: "build something in excalidraw" }));
   const browse = { effect: { choice: "browse", confidence: 0.63, probabilities: { browse: 0.67, draft: 0.31, exec_untrusted: 0.02 } }, outside: { noul: 0.2 } };
@@ -415,8 +417,13 @@ test("jev reads shell through its wrappers: loops, sleep, literal heredocs; code
   const sends = { effect: { choice: "exec_untrusted", confidence: 0.5, probabilities: { exec_untrusted: 0.5, send: 0.4, read: 0.1 } }, outside: { noul: 0.9 } };
   assert.equal(J.scoreAnswers(sends, P, { visible: true }).decision, "ask", "readable code that sends still asks");
   assert.equal(J.prohibits({ driver_said: ["build something in excalidraw"], house_rules: [] }), false);
-  assert.equal(J.prohibits({ driver_said: ["don't post it"], house_rules: [] }), true);
+  assert.equal(J.prohibits({ driver_said: ["don't post it"], house_rules: [] }), false, "don'ts in chat are for memory and house rules, not the gate");
   assert.equal(J.prohibits({ driver_said: [], house_rules: ["Never order"] }), true);
+  const unsure = { effect: { choice: "read", confidence: 0.52, probabilities: { read: 0.52, exec_untrusted: 0.47 } }, outside: { noul: 0.02 } };
+  assert.equal(J.scoreAnswers(unsure, P).decision, "allow", "unsure but local runs: the computer is the sandbox");
+  assert.equal(J.scoreAnswers({ ...unsure, outside: { noul: 0.6 } }, P).decision, "ask", "unsure and leaving the machine asks");
+  const reach = { effect: { choice: "browse", confidence: 0.55, probabilities: { browse: 0.55, send: 0.25, exec_untrusted: 0.2 } }, outside: { noul: 0.1 } };
+  assert.equal(J.scoreAnswers(reach, P).decision, "ask", "unsure with weight on sending asks");
 });
 
 test("an expired pit stop tells the tool call it went unanswered, not that it was refused", async () => {
@@ -455,7 +462,8 @@ test("a workspace script jev allowed once runs again without asking until its by
 test("after three jev blocks in a row the driver decides; hard rule blocks never escalate", async () => {
   const { gate, ESCALATE_AFTER } = await import("../app/dist/src/runtime/gate.js");
   thread("t_esc");
-  run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('t_esc',NULL,'user',?,0)", JSON.stringify({ text: "tidy the report, don't touch the totals" }));
+  run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('t_esc',NULL,'user',?,0)", JSON.stringify({ text: "tidy the report" }));
+  run("UPDATE bots SET house_rules=? WHERE id=?", "- Never touch the totals", b.id);
   const c = { bot: { id: b.id } }, pit = { kind: "command", title: "Run it", detail: {} }, sh = { kind: "shell", command: "node -e 'x()'" };
   const breach = async () => ({ ok: true, json: async () => ({ model: "jev-test", answers: { effect: { choice: "read", confidence: 0.9, probabilities: { read: 0.9 } }, outside: { noul: 0 }, authorized: { noul: 0 }, forbidden: { noul: 0.9 } } }) });
   const mine = () => one("SELECT * FROM pitstops WHERE status='pending' AND thread_id='t_esc' ORDER BY rowid DESC LIMIT 1");
@@ -470,15 +478,18 @@ test("after three jev blocks in a row the driver decides; hard rule blocks never
   thread("t_esc_rule");
   for (let i = 0; i < 4; i++) assert.equal(await gate(c, "t_esc_rule", { kind: "shell", command: "sudo whoami" }, pit), false);
   assert.equal(one("SELECT 1 FROM pitstops WHERE thread_id='t_esc_rule'"), undefined);
+  run("UPDATE bots SET house_rules='' WHERE id=?", b.id);
 });
 
 test("a blocked tool call hears jev's reason, not a generic decline", async () => {
   const { gate } = await import("../app/dist/src/runtime/gate.js");
   const S2 = await import("../app/dist/src/runtime/sitegate.js");
   thread("t_blk");
-  run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('t_blk',NULL,'user',?,0)", JSON.stringify({ text: "tidy up, never wipe anything" }));
+  run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('t_blk',NULL,'user',?,0)", JSON.stringify({ text: "tidy up" }));
+  run("UPDATE bots SET house_rules=? WHERE id=?", "- Never wipe anything", b.id);
   const says = async () => ({ ok: true, json: async () => ({ model: "jev-test", answers: { effect: { choice: "read", confidence: 0.9, probabilities: { read: 0.9 } }, outside: { noul: 0 }, authorized: { noul: 0 }, forbidden: { noul: 0.9 } } }) });
   assert.equal(await withFetch(says, () => gate({ bot: { id: b.id } }, "t_blk", { kind: "mcp", server: "crm", tool: "wipe", arguments: {} }, { kind: "mcp", title: "crm: wipe", detail: {} })), false);
   const note = S2.takeRefusal("t_blk");
   assert.match(note, /Blocked, not run: "crm: wipe"/); assert.match(note, /breaks a house rule/); assert.match(note, /didn't refuse it/);
+  run("UPDATE bots SET house_rules='' WHERE id=?", b.id);
 });
