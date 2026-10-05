@@ -7,6 +7,7 @@ const PATHS: Record<string, string> = {
   threads: '<path d="M3 4h10M3 8h10M3 12h6"/>',
   crew: '<circle cx="5.5" cy="6" r="2.2"/><circle cx="11" cy="6" r="2.2"/><path d="M1.8 13c.6-2 2-3 3.7-3s3.1 1 3.7 3M8.6 11.2c.5-.8 1.4-1.2 2.4-1.2 1.7 0 3.1 1 3.7 3"/>',
   flag: '<path d="M4 14V2.5h8l-2 3 2 3H4"/>',
+  clock: '<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2l2.2 1.4"/>',
   library: '<rect x="2.5" y="2.5" width="4" height="11" rx="1"/><rect x="9.5" y="2.5" width="4" height="11" rx="1"/>',
   chart: '<path d="M2.5 13.5h11M4.5 11V8M8 11V4.5M11.5 11V6.5"/>',
   gear: '<circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6L5 5M11 11l1.4 1.4M3.6 12.4L5 11M11 5l1.4-1.4"/>',
