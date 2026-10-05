@@ -16,14 +16,17 @@ import { useStore } from "../lib/store";
 import { toast } from "../lib/toast";
 import { useFetch } from "../lib/useFetch";
 import { Composer } from "./thread/Composer";
+import { SideAsk } from "./thread/SideAsk";
 import { renderEvent, Steps, type EventCtx } from "./thread/Events";
 import { isCommand, TAB_LABEL, tabFor, useThreadRuns, WorkPanel, type LiveCmd, type Tab } from "./thread/WorkPanel";
 
 export function Thread({ id }: { id?: string }) {
-  const { setThreadBot } = useStore();
+  const { S, setThreadBot, refresh } = useStore();
   useEffect(() => { if (!id) go("#/"); }, [id]);
   const { data, error } = useFetch(() => (id ? api.get<ThreadView>(`/api/threads/${id}`) : Promise.resolve(null)), [id]);
   useEffect(() => { if (data) setThreadBot(data.bot.id); return () => setThreadBot(null); }, [data, setThreadBot]);
+  // Loading the thread marked it seen on the server; Home's unread count catches up (only when it had any to drop).
+  useEffect(() => { if (data && S.unread) refresh(); }, [data]);
   if (error && !data) return <div className="page"><p className="badc">{error}</p></div>;
   return data ? <LiveThread d={data} /> : null;
 }
@@ -68,7 +71,7 @@ function layout(events: ThreadEvent[], ctx: EventCtx): Item[] {
 const endsWithAgent = (events: ThreadEvent[], pits: Record<string, PitStop>) => { for (let i = events.length - 1; i >= 0; i--) { const e = events[i]; if (e.kind === "tool" || (e.kind === "pitstop" && pits[e.data.id]?.status !== "pending")) continue; return e.kind === "agent"; } return false; };
 
 function LiveThread({ d }: { d: ThreadView }) {
-  const { bot } = useStore();
+  const { bot, refresh } = useStore();
   const id = d.thread.id;
   const b = { ...d.bot, ...(bot(d.bot.id) || {}) };
   const origin = parseOrigin(d.thread.origin);
@@ -97,7 +100,17 @@ function LiveThread({ d }: { d: ThreadView }) {
   const [follow, setFollow] = useState(true);
   const [open, setOpen] = useState(d.thread.running || !!d.commands?.length);
   const [runsBump, setRunsBump] = useState(0);
+  const [side, setSide] = useState(false);
   const chunks = useRef(new Map<string, string>());
+  // A run that ends while you watch is seen; one that ends in a background tab waits until you come back to it.
+  const endedUnseen = useRef(false);
+  const seen = () => { endedUnseen.current = false; api.post(`/api/threads/${id}/seen`, undefined, { quiet: true }).then(refresh).catch(() => {}); };
+  useEffect(() => {
+    const vis = () => { if (document.visibilityState === "visible" && endedUnseen.current) seen(); };
+    const key = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key === ";") { e.preventDefault(); setSide((s) => !s); } };
+    document.addEventListener("visibilitychange", vis); window.addEventListener("keydown", key);
+    return () => { document.removeEventListener("visibilitychange", vis); window.removeEventListener("keydown", key); };
+  }, [id]);
   const chunkFrame = useRef(0);
 
   const stream = useRef<HTMLDivElement>(null);
@@ -155,6 +168,8 @@ function LiveThread({ d }: { d: ThreadView }) {
       case "painting": { const x = e.data; scrollSoon(); setPainting((l) => x.done || !x.painting ? l.filter((p) => p.id !== x.id) : [...l.filter((p) => p.id !== x.id), x.painting]); return; }
       case "turn":
         setRunning(false); buffer.current = null; setStreaming(null); setCloseSteps((n) => n + 1); setRunsBump((n) => n + 1); setLive([]);
+        endedUnseen.current = true;
+        if (document.visibilityState === "visible") seen();
         return;
       case "event": {
         const x = e.data;
@@ -215,11 +230,12 @@ function LiveThread({ d }: { d: ThreadView }) {
   const tabs = (["plan", "screen", "terminal", "files"] as Tab[]).filter((t) =>
     t === "plan" ? !!plan : t === "screen" ? card.computer.desktop || events.some((e) => tabFor(e) === "screen") : t === "terminal" ? live.length > 0 || events.some(isCommand) : runs.length > 0);
   const cur = tabs.includes(tab) ? tab : tabs[0];
-  const showPanel = open && tabs.length > 0;
+  // The side question takes the right column while it's open; the work panel comes back when it closes.
+  const showPanel = open && tabs.length > 0 && !side;
   const handBack = async () => { await api.post(`/api/bots/${b.id}/computer/handback`); setLease(false); };
 
   return (
-    <div className={`threadpage ${showPanel ? "withwork" : ""}`}>
+    <div className={`threadpage ${side ? "withbtw" : showPanel ? "withwork" : ""}`}>
       <section className="convo">
         <header className="thd">
           <TitleMenu id={id} title={title} onRenamed={setTitle} b={card} pinned={pinned} onPinned={setPinned} />
@@ -227,7 +243,7 @@ function LiveThread({ d }: { d: ThreadView }) {
           <span style={{ flex: 1 }} />
           {lease && <button className="pc-pill sig s" onClick={handBack}>Hand back</button>}
           <Power b={card} />
-          {!showPanel && tabs.length > 0 && <button className="reo" title="Open the work panel" onClick={() => setOpen(true)}><Icon name="panel" size={14} />{TAB_LABEL[cur!]}</button>}
+          {!showPanel && !side && tabs.length > 0 && <button className="reo" title="Open the work panel" onClick={() => setOpen(true)}><Icon name="panel" size={14} />{TAB_LABEL[cur!]}</button>}
         </header>
         <div ref={stream} className="stream">
           {items.map((it) => "steps" in it
@@ -239,10 +255,11 @@ function LiveThread({ d }: { d: ThreadView }) {
         </div>
         <Composer threadId={id} name={b.name} running={running} queued={queued} fromName={fromName}
           target={auto ? { path: auto.path, label: label(auto), src: imgSrc(auto) } : null}
-          onClearTarget={() => auto && setDismissed(auto.id)} autonomy={autonomy} onAutonomy={setAutonomy} ctx={ctx} />
+          onClearTarget={() => auto && setDismissed(auto.id)} autonomy={autonomy} onAutonomy={setAutonomy} ctx={ctx} side={side} onSide={() => setSide((s) => !s)} />
         {editing && <EditPanel img={editing} version={images.chain(editing.id).length} b={b} threadId={id} onClose={() => setEditing(null)} />}
         {viewing && <Viewer I={images} start={viewing.im} compare={viewing.cmp} onClose={() => setViewing(null)} onEdit={evCtx.onEdit} onMore={evCtx.onMore} onKeep={evCtx.onKeep} />}
       </section>
+      {side && <SideAsk threadId={id} b={b} running={running} onClose={() => setSide(false)} />}
       {showPanel && <WorkPanel b={card} threadId={id} events={events} plan={plan} live={live} runs={runs} tab={cur!} tabs={tabs} follow={follow} running={running} lease={lease}
         onTab={(t) => { setTab(t); setFollow(false); }} onFollow={() => setFollow(true)} onClose={() => setOpen(false)} onHandBack={handBack} />}
     </div>
