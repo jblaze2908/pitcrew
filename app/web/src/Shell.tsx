@@ -1,5 +1,5 @@
 // The signed-in app: the sidebar (links, crew, recent threads) and the routed view.
-import { useEffect, useLayoutEffect } from "react";
+import { Component, useEffect, useLayoutEffect, type ReactNode } from "react";
 import { api } from "./lib/api";
 import { DockProvider } from "./components/Dock";
 import { Side } from "./components/Side";
@@ -36,6 +36,18 @@ function View({ route }: { route: Route }) {
   }
 }
 
+/** A view that throws shows a line instead of blanking the whole app; keyed by the address, so moving on resets it. */
+class Guard extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(e: unknown) { console.error(e); }
+  render() {
+    return this.state.failed
+      ? <div className="page"><p className="muted">This page hit an error. <button className="link" onClick={() => location.reload()}>Reload</button></p></div>
+      : this.props.children;
+  }
+}
+
 export function Shell() {
   const route = useRoute();
   // A layout effect runs before any view's fetch effect, so the stream is open first and less lands between the two.
@@ -51,7 +63,7 @@ export function Shell() {
       <div className="app">
         <div className="shell">
           <Side route={route} />
-          <main id="view"><View route={route} /></main>
+          <main id="view"><Guard key={location.hash}><View route={route} /></Guard></main>
         </div>
       </div>
     </DockProvider>
