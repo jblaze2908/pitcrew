@@ -214,15 +214,15 @@ export async function fillSecret(br: Brain, threadId: string, p: ToolCall, deps:
     if (event) addEvent(threadId, turnId, "system", { text: `Not filled: ${why}.`, tone: "bad" });
     return say(`Not filled: ${why}. Don't type it another way or retry; tell ${driver} what's waiting.`, false);
   };
-  if (!sec) { const mine = usableBy(b.id); return say(`No secret called "${short(a.secret, 60)}". ${mine.length ? `Yours: ${mine.map((s) => `"${s.name}" (${s.site || "card"})`).join(", ")}.` : `${driver} hasn't given you any; they keep them in Settings → Vault.`}`, false); }
-  if (!sec.allowed.includes(b.id)) return refuse(`${b.name} isn't allowed to use "${sec.name}" (${driver} sets who may in Settings → Vault)`);
+  if (!sec) { const mine = usableBy(b.id); return say(`No secret called "${short(a.secret, 60)}". ${mine.length ? `Yours: ${mine.map((s) => `"${s.name}" (${s.site || "card"})`).join(", ")}.` : `${driver} hasn't given you any; they keep them in Settings → Permissions → Vault.`}`, false); }
+  if (!sec.allowed.includes(b.id)) return refuse(`${b.name} isn't allowed to use "${sec.name}" (${driver} sets who may in Settings → Permissions → Vault)`);
   if (sec.needs_update) return refuse(`"${sec.name}" failed before and waits for ${driver} to update it in Vault`);
   const card = sec.kind === "card", given = Array.isArray(a.fields) ? a.fields : [];
   const fields = given.map((f: any) => ({ field: String(f?.field || ""), target: String(f?.target || f?.ref || "") }));
   const bad = fields.find((f: { field: string; target: string }) => !FIELDS[sec.kind].includes(f.field) || !f.target);
   if (!fields.length || fields.length > 4 || bad || new Set(fields.map((f: { field: string }) => f.field)).size < fields.length) return say(`fields: 1 to 4 of {field, target}, field one of ${FIELDS[sec.kind].join(", ")}, target a ref from the latest snapshot.`, false);
   const missing = fields.find((f: { field: string }) => !sec.has.includes(f.field));
-  if (missing) return say(`"${sec.name}" has no ${missing.field} saved; ask ${driver} to add it in Settings → Vault.`, false);
+  if (missing) return say(`"${sec.name}" has no ${missing.field} saved; ask ${driver} to add it in Settings → Permissions → Vault.`, false);
   const submit = a.submit ? String(a.submit) : null;
   if (card && !submit) return say("A card fill needs submit: the ref of the pay button. It fills and pays in one step once the driver approves.", false);
   const seen = snapshots.get(p.threadId), url = seen?.url;
