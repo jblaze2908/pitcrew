@@ -26,6 +26,27 @@ const words = (s: string) => s.replace(/_/g, " ").replace(/^./, (c) => c.toUpper
 // "query=newer_than:30d max=1" → "newer_than:30d max=1": the one key everyone reads past.
 const tidyArgs = (s: string) => s.replace(/^(query|text|id|q)=/, "").trim();
 
+// Browser steps arrive titled "<tool in words> <args> on <host>" (runtime/browser.ts); the args are Playwright's, not words.
+const BR_TOOL = /^(run code unsafe|take screenshot|press key|navigate back|navigate|fill form|select option|wait for|file upload|handle dialog|replay request|evaluate|snapshot|read|click|type|hover|drag|tabs|close|resize)\b ?(.*)$/;
+const BR_LABEL: Record<string, [StepIcon, string]> = {
+  "run code unsafe": ["code", "Ran a browser script"], evaluate: ["code", "Ran page JavaScript"], "replay request": ["code", "Re-sent a request"],
+  "take screenshot": ["browser", "Took a screenshot"], snapshot: ["read", "Read the page"], read: ["read", "Read the page"],
+  navigate: ["browser", "Opened"], "navigate back": ["browser", "Went back"], click: ["browser", "Clicked"], type: ["browser", "Typed in"],
+  "press key": ["browser", "Pressed"], "fill form": ["browser", "Filled a form"], "select option": ["browser", "Picked an option"], hover: ["browser", "Hovered"],
+};
+function browserStep(t: string): StepView | null {
+  const m = BR_TOOL.exec(t);
+  if (!m) return null;
+  const [, tool] = m;
+  let rest = m[2].replace(/\bcode=[\s\S]*?(?= on [a-z0-9.-]+\.[a-z]{2,}$|$)/i, "");
+  const host = / on ([a-z0-9.-]+\.[a-z]{2,})$/i.exec(rest)?.[1] || "";
+  if (host) rest = rest.slice(0, -(host.length + 4));
+  const key = /\bkey=(\S+)/.exec(rest)?.[1];
+  rest = key || rest.replace(/\b[a-z_]+=\S+/gi, "").replace(/\s+/g, " ").trim();
+  const [icon, label] = BR_LABEL[tool] || ["browser", words(tool)];
+  return { icon, label, detail: [rest, host && `on ${host}`].filter(Boolean).join(" ") };
+}
+
 /** connLabel: the connection's real name when Pitcrew stamped one on the event (from Engram's sync); else the id, in words. */
 export function stepView(title: string, connLabel?: string | null): StepView {
   const t = title.trim();
@@ -33,6 +54,8 @@ export function stepView(title: string, connLabel?: string | null): StepView {
   if (t.startsWith("$ ")) return { icon: "terminal", label: "Run", detail: t.slice(2) };
   if (t.startsWith("Edited ")) return { icon: "file", label: "Edit", detail: t.slice(7) };
   if (t.startsWith("Searched ")) return { icon: "web", label: "Search the web", detail: t.slice(9) };
+  const br = browserStep(t);
+  if (br) return br;
   const sp = t.indexOf(" "), head = sp < 0 ? t : t.slice(0, sp), rest = sp < 0 ? "" : tidyArgs(t.slice(sp + 1));
   const m = /^([a-z][\w-]*)\.(.+)$/.exec(head);
   if (m) {
