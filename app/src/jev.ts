@@ -25,7 +25,7 @@ const CONTEXT_QUESTIONS = {
 // an explicit request allows anything but paying and signing in. Pure.
 export function applyContext(v: Verdict, authorized: number | undefined, forbidden: number | undefined, policy: Policy): Verdict {
   if (forbidden != null && forbidden >= 0.6) return { ...v, decision: "block", forbidden: true, reason: `${v.reason} · breaks a house rule or the driver's instruction ${forbidden.toFixed(2)}` };
-  if (forbidden != null && forbidden >= 0.3) return { ...v, decision: stricter(v.decision, "ask"), forbidden: true, reason: `${v.reason} · may break a house rule ${forbidden.toFixed(2)}` };
+  if (forbidden != null && forbidden >= 0.45) return { ...v, decision: stricter(v.decision, "ask"), forbidden: true, reason: `${v.reason} · may break a house rule ${forbidden.toFixed(2)}` };
   if (authorized != null && authorized >= 0.8 && !NEEDS_DRIVER.has(v.effect) && policy[v.effect] !== "block") return { ...v, decision: "allow", authorized: true, reason: `${v.reason} · the driver asked for this ${authorized.toFixed(2)}` };
   return v;
 }
@@ -40,7 +40,7 @@ export const DEFAULT_POLICY: Policy = {
   send: "ask", pay: "ask", delete: "ask", share: "ask", exec_untrusted: "ask",
 };
 
-const READ_ONLY = /^(ls|cat|head|tail|wc|find|grep|rg|stat|file|pwd|echo|date|du|df|sort|uniq|cut|tr|jq|diff|which|uname|true|printf|command -v|env\s*$|printenv\s*$)\b/;
+const READ_ONLY = /^(ls|cat|head|tail|wc|find|grep|rg|stat|file|pwd|echo|date|du|df|sort|uniq|cut|tr|jq|diff|which|uname|true|printf|command -v|env\s*$|printenv\s*$|sleep\s+[\d.]+\s*$|(node|python3?|bash|git|npm|ffmpeg|jq|rg)\s+(--version|-V)\s*$)\b/;
 const DANGER: [RegExp, Decision, string, string][] = [
   [/\b(curl|wget)\b[^|]*\|\s*(ba|z|)sh\b/, "block", "exec_untrusted", "pipes network content into a shell"],
   [/\b(curl|wget)\b.*(\s-d\b|--data|\s-F\b|--form|--upload-file|-T\s|-X\s*(POST|PUT))/, "ask", "share", "uploads data to the network"],
@@ -56,6 +56,35 @@ const DANGER: [RegExp, Decision, string, string][] = [
 
 // Read-only tools that still write or run something through a flag.
 const WRITES_ANYWAY = /^find\b.*\s-(exec|execdir|ok|okdir|delete|fprint\w*|fls)\b|^sort\b.*\s(-[a-zA-Z]*o|--output|--compress-program)|^rg\b.*\s--pre\b|^date\b.*\s(-s|--set)\b|^file\b.*\s-[a-zA-Z]*C|^uniq(\s+-\S+)*\s+\S+\s+\S+/;
+// POSIX word split, enough to see through `sh -c '…'` wrappers: null on unbalanced quotes. Expansions stay literal text,
+// so `$(…)` inside still reaches HIDDEN.
+function words(s: string): string[] | null {
+  const out: string[] = []; let cur = "", has = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "'") { const j = s.indexOf("'", i + 1); if (j < 0) return null; cur += s.slice(i + 1, j); has = true; i = j; }
+    else if (ch === '"') {
+      for (i++; i < s.length && s[i] !== '"'; i++) { if (s[i] === "\\" && '"\\$`'.includes(s[i + 1] ?? "")) i++; cur += s[i]; }
+      if (i >= s.length) return null; has = true;
+    } else if (ch === "\\") { cur += s[++i] ?? ""; has = true; }
+    else if (/\s/.test(ch)) { if (has) out.push(cur); cur = ""; has = false; }
+    else { cur += ch; has = true; }
+  }
+  if (has) out.push(cur);
+  return out;
+}
+// The script a shell wrapper runs: `/bin/sh -lc "bash -c '…'"` is judged as the innermost `…` (up to 3 deep).
+export function innerShell(cmd: string, depth = 0): string {
+  const w = depth < 3 && /^\s*(\/bin\/|\/usr\/bin\/)?(ba|z|da)?sh\s+-/.test(cmd) ? words(cmd.trim()) : null;
+  return w && w.length === 3 && /^(\/(usr\/)?bin\/)?(ba|z|da)?sh$/.test(w[0]) && /^-l?c$/.test(w[1]) ? innerShell(w[2], depth + 1) : cmd.trim();
+}
+// `cat > /bot/work/f <<'EOF' … EOF` with a quoted delimiter writes its body literally: nothing in it runs, so the body
+// drops out before the split (the target is still checked as a redirect). Unquoted delimiters expand, and stay HIDDEN.
+const LITERAL_HEREDOC = /(^|\n|&&|;)([ \t]*cat[ \t]*>>?[ \t]*\S+)[ \t]*<<-?[ \t]*(['"])(\w+)\3([^\n]*)\n[\s\S]*?\n[ \t]*\4[ \t]*(?=\n|$)/g;
+const dropHeredocs = (cmd: string) => cmd.replace(LITERAL_HEREDOC, (_m, lead, head, _q, _d, rest) => `${lead}${head}${rest}`);
+// Loop and branch keywords around otherwise plain parts: `for i in 1 2; do sleep 1; done` is judged by its body.
+const KEYWORD_ONLY = /^(done|fi|else|for\s+\w+\s+in\b[^;&|]*|while\s+true)$/;
+const unkeyword = (p: string) => p.replace(/^(do|then|else)\s+/, "");
 // Command substitution, heredocs and process substitution hide a second command from the split below.
 const HIDDEN = /\$\(|`|<<|<\(|>\(/;
 const WS_WRITE = /^(mkdir|cp|mv|touch)\s/;
@@ -105,10 +134,11 @@ export function ruleVerdict(call: Call, policy: Policy = DEFAULT_POLICY): Verdic
   }
   const ok = (effect: string, reason: string): Verdict => ({ decision: policy[effect] ?? "ask", effect, reason, by: "rule" });
   if (call.kind === "shell") {
-    const cmd = String(call.command).replace(/^\/bin\/(ba)?sh\s+-l?c\s+/, "").replace(/^['"]|['"]$/g, "").trim();
-    for (const [re, decision, effect, why] of DANGER) if (re.test(cmd)) return { decision, effect, reason: why, by: "rule" };
+    const full = innerShell(String(call.command));
+    for (const [re, decision, effect, why] of DANGER) if (re.test(full)) return { decision, effect, reason: why, by: "rule" };
+    const cmd = dropHeredocs(full);
     if (HIDDEN.test(cmd)) return null;
-    const parts = cmd.split(/\s*(?:&&|\|\||;|\||&|\n)\s*/);
+    const parts = cmd.split(/\s*(?:&&|\|\||;|\||&|\n)\s*/).map(unkeyword).filter((p) => p && !KEYWORD_ONLY.test(p));
     const redirects = cmd.match(/>+\s*[^\s;&|]*/g) || [];
     if (!parts.every((p) => (READ_ONLY.test(p) && !WRITES_ANYWAY.test(p)) || wsWrite(p) || cdIn(p))) return null;
     if (!redirects.length && !parts.some(wsWrite)) return ok("read", "read-only commands");
@@ -218,8 +248,41 @@ const QUIET_OUT = new Set(["read", "browse", "draft"]);
 // Some decision models (Respan) accept only noul questions; they get a yes/no-only question set.
 const NOUL_ONLY = /^respan\//;
 
+// The driver or the house rules said not to do something: only then is "does this break it?" worth asking. With nothing
+// to break, that score sat at 0.30–0.44 on harmless browser code and made 14 of the 17 pit stops on record (2026-10-05).
+const PROHIBITS = /\b(don'?t|do not|never|no|not|avoid|stop|without|except|only|nothing)\b/i;
+export const prohibits = (c: JevContext | null | undefined) => !!c && (c.house_rules.length > 0 || c.driver_said.some((s) => PROHIBITS.test(s)));
+// Code the judge can read in full: inline (`python3 -c`, a literal heredoc) or a /bot/work script whose source rides in
+// the call. "Runs opaque code" doesn't apply to it; its effect is what the code does. Not when anything is fetched.
+export function visibleCode(c: Call): boolean {
+  if (c.kind !== "shell" || c.script?.downloaded || /\b(curl|wget)\b|\/downloads\//.test(String(c.command))) return false;
+  const cmd = innerShell(String(c.command));
+  if (/(^|[;&|\n]\s*)\.{0,2}\/(?!bin\/|usr\/bin\/)[\w.\/-]+(\s|$)/.test(cmd)) return false; // runs a binary by path
+  for (const m of cmd.matchAll(/\b(python3?|node|bash|sh|zsh|bun|deno|ruby|perl|tsx)((?:[ \t]+-[\w-]+)*)[ \t]+(\S+)/g)) {
+    if (/\s-(c|e|p|-eval|-print)\b/.test(m[2]) || m[3] === "-" || m[3].startsWith("-")) continue; // code is inline
+    if (/\s-m\b/.test(m[2]) || !c.script) return false; // a module or a file whose source isn't in the call
+  }
+  return true;
+}
+// A choice + noul answer set → a verdict. Pure, so stored answers replay under new bars (scripts/jev-replay).
+export function scoreAnswers(answers: any, policy: Policy, o: { visible?: boolean; askedForbidden?: boolean } = {}): Verdict {
+  const eff = answers.effect, out = answers.outside?.noul ?? 0;
+  let probs: Record<string, number> = eff.probabilities || {}, choice: string = eff.choice, conf: number = eff.confidence;
+  if (o.visible && (probs.exec_untrusted || 0) > 0) {
+    const { exec_untrusted: x, ...rest } = probs, left = 1 - x;
+    probs = Object.fromEntries(Object.entries(rest).map(([k, p]) => [k, left > 0 ? p / left : 0]));
+    if (choice === "exec_untrusted") [choice, conf] = Object.entries(probs).sort((a, b) => b[1] - a[1])[0] ?? ["unknown", 0];
+    else conf = probs[choice] ?? conf;
+  }
+  const riskMass = CONSEQUENTIAL.reduce((a, k) => a + (probs[k] || 0), 0);
+  let decision: Decision = policy[choice] ?? "ask", why = `effect=${choice} p=${conf.toFixed(2)}${o.visible && choice !== eff.choice ? " (code read)" : ""}`;
+  if (riskMass >= RISK_ASK) { decision = stricter(decision, "ask"); why += `${conf < 0.75 ? " · low confidence" : ""} · risk mass ${riskMass.toFixed(2)}`; }
+  if (out >= 0.5 && !QUIET_OUT.has(choice)) { decision = stricter(decision, "ask"); why += ` · leaves machine ${out.toFixed(2)}`; }
+  return applyContext({ decision, effect: choice, reason: why, by: "jev", probabilities: probs, answers }, answers.authorized?.noul, o.askedForbidden === false ? undefined : answers.forbidden?.noul, policy);
+}
+
 export async function jevSystemOne(call: Call, { apiKey, policy = DEFAULT_POLICY, timeoutMs = 5000, model = process.env.JEV_MODEL || "~typesafe/jev-latest", ctx = null }: JudgeOpts = {}): Promise<Verdict> {
-  const extra = hasContext(ctx) ? CONTEXT_QUESTIONS : {};
+  const asked = prohibits(ctx), extra = hasContext(ctx) ? (asked ? CONTEXT_QUESTIONS : { authorized: CONTEXT_QUESTIONS.authorized }) : {};
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   const started = Date.now();
@@ -243,19 +306,13 @@ export async function jevSystemOne(call: Call, { apiKey, policy = DEFAULT_POLICY
       const c = body.answers.consequential.noul, o = body.answers.outside.noul;
       const decision = c >= 0.3 || o >= 0.5 ? "ask" : "allow";
       const v: Verdict = { decision, effect: decision === "allow" ? "read" : "unknown", reason: `consequential ${c.toFixed(2)} · leaves machine ${o.toFixed(2)}`, by: `jev:${body.model}`, ms: Date.now() - started, usage: body.usage, answers: body.answers };
-      return applyContext(v, undefined, body.answers.forbidden?.noul, policy);
+      return applyContext(v, undefined, asked ? body.answers.forbidden?.noul : undefined, policy);
     }
-    const eff = body.answers.effect, out = body.answers.outside.noul;
-    const riskMass = CONSEQUENTIAL.reduce((a, k) => a + (eff.probabilities[k] || 0), 0);
-    let decision: Decision = policy[eff.choice] ?? "ask", why = `effect=${eff.choice} p=${eff.confidence.toFixed(2)}`;
     // Only probability on consequential classes escalates, and only from RISK_ASK. "Leaves the machine" escalates
     // effects that aren't plain reading, browsing or drafting, which always touch the network. Measured over 30 days
     // (2026-09-04..10-04): 63 command and tool pit stops, 0 denied; at the old bars (low confidence from risk 0.05,
     // risk mass from 0.15, leaves machine on any effect), 22 of them re-score as allowed here.
-    if (riskMass >= RISK_ASK) { decision = stricter(decision, "ask"); why += `${eff.confidence < 0.75 ? " · low confidence" : ""} · risk mass ${riskMass.toFixed(2)}`; }
-    if (out >= 0.5 && !QUIET_OUT.has(eff.choice)) { decision = stricter(decision, "ask"); why += ` · leaves machine ${out.toFixed(2)}`; }
-    return applyContext({ decision, effect: eff.choice, reason: why, by: `jev:${body.model}`, ms: Date.now() - started, usage: body.usage, probabilities: eff.probabilities, answers: body.answers },
-      body.answers.authorized?.noul, body.answers.forbidden?.noul, policy);
+    return { ...scoreAnswers(body.answers, policy, { visible: visibleCode(call), askedForbidden: asked }), by: `jev:${body.model}`, ms: Date.now() - started, usage: body.usage };
   } catch (e: any) {
     return { decision: "ask", effect: "unknown", reason: `jev failed closed: ${e.message.slice(0, 60)}`, by: "fail-closed", ms: Date.now() - started };
   } finally { clearTimeout(t); }
@@ -266,7 +323,9 @@ export async function jev(call: Call, opts: JudgeOpts = {}): Promise<Verdict> {
   const r = ruleVerdict(call, policy);
   if (r) return r;
   const useJev = (opts.backend || process.env.JEV_BACKEND || "jev") === "jev", ctx = opts.context?.() ?? null;
-  const j = useJev ? await jevSystemOne(call, { ...opts, policy, ctx }) : await judgeVerdict(call, { ...opts, policy, ctx });
+  // The judge reads the command without its shell wrappers: three layers of escaped quotes read as "opaque".
+  const shown = call.kind === "shell" && call.command ? { ...call, command: innerShell(call.command) } : call;
+  const j = useJev ? await jevSystemOne(shown, { ...opts, policy, ctx }) : await judgeVerdict(shown, { ...opts, policy, ctx });
   // Consequential classes never drop below the policy's floor, whatever the judge said, unless the driver asked for
   // this very action (never for paying or signing in; applyContext).
   return { ...j, decision: j.authorized ? j.decision : stricter(j.decision, policy[j.effect] ?? "ask") };

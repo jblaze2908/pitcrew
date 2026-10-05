@@ -18,4 +18,5 @@ export const CHANGELOG: { date: string; note: string }[] = [
   { date: "2026-10-04", note: "Images: generate_image makes or edits images with any OpenRouter model (pass images to edit); on the ChatGPT plan Codex's image_gen works too. Both save to /bot/work/out/images and show in the chat. harness_help images." },
   { date: "2026-10-04", note: "Image edits: the driver can brush an area and pin notes on an image. You get [Edit of <image>] with a marked copy, the pins and a How line; generate_image now takes mask, and Pitcrew keeps everything outside it unchanged. Each result is a new version of the image it came from." },
   { date: "2026-10-05", note: "propose_crew_member: the hue you pass is kept only if no active member wears it; otherwise the hire gets the least-worn colour. The driver can change any face from the member's Settings." },
+  { date: "2026-10-05", note: "jev reads shell through sh -c / bash -c wrappers, loops and sleep, and treats code it can read (python3 -c, a /bot/work script) by what it does, not as opaque. Write files with cat > /bot/work/f <<'EOF' (quoted delimiter) and they count as plain workspace writes." },
 ];
