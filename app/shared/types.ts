@@ -138,6 +138,9 @@ export interface EngramConnection { id: string; name: string; status: "ok" | "wa
 /** A row of BotCard.threads, or of GET /api/bots/:id/threads?q= (which adds archived and a snippet). */
 export interface ThreadRow { id: string; title: string; status?: ThreadStatus; pinned?: number; archived?: number; snippet?: string; created_at: number; updated_at: number }
 
+/** GET /api/threads: a thread on the Threads page, any member's, with the last thing said (or the search hit). */
+export interface ThreadListRow { id: string; bot_id: string; title: string; status: ThreadStatus; pinned: number; archived: number; created_at: number; updated_at: number; snippet?: string }
+
 export type SiteMode = "allowed" | "read" | "blocked";
 export interface SiteRow { scope: string; domain: string; mode: SiteMode; overrides: Record<string, Decision>; by: string; created_at: number; updated_at: number }
 export interface SitesView { scope: string; modes: SiteMode[]; sites: SiteRow[] }

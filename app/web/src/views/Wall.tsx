@@ -1,17 +1,16 @@
-// The pit wall: the front door, your asks, what's waiting on you, Engram's digest, spend, and the crew.
+// Home: ask the crew, decide what's waiting, see what's on track and pick up where you left off. The rest folds away.
 import { useState } from "react";
 import { AskBox } from "../components/AskBox";
 import { AsksList } from "../components/AsksList";
-import { CrewCard } from "../components/CrewCard";
 import { DigestCard } from "../components/Engram";
 import { PitCard } from "../components/PitCard";
 import { Surface } from "../components/Surface";
 import { toast } from "../lib/toast";
 import { useFetch } from "../lib/useFetch";
 import type { KeptSurface } from "../../../shared/types";
-import { Meter } from "../components/ui";
+import { Face, Loader } from "../components/ui";
 import { api } from "../lib/api";
-import { hourNow, plural, usd } from "../lib/format";
+import { ago, hourNow, plural, usd } from "../lib/format";
 import { connected, useStore } from "../lib/store";
 
 interface Idea { id: string; bot_name: string; area: string; title: string; evidence: string; proposal: string; votes: number }
@@ -23,6 +22,12 @@ export function Wall() {
   // Pit stops block a run; Engram notes only wait for your review, so they sit apart and don't count.
   const pits = S.pitstops.filter((p) => p.kind !== "engram"), notes = S.pitstops.filter((p) => p.kind === "engram");
   const n = pits.length;
+  // On track and recent come from the state's threads (12 a member): no extra fetch.
+  const rows = S.bots.flatMap((b) => b.threads.map((t) => ({ ...t, b })));
+  const waiting = new Set(pits.map((p) => p.thread_id));
+  const track = rows.filter((t) => t.status === "running");
+  const recent = rows.filter((t) => t.status === "idle" && !waiting.has(t.id)).sort((x, y) => y.updated_at - x.updated_at).slice(0, 3);
+  const shells = S.bots.filter((b) => b.computer.up).length, screens = S.bots.filter((b) => b.computer.desktop).length;
   // Kept dashboards bound to a ledger: always current, since they read the ledger on view (server/ledger.ts).
   const boards = useFetch(() => api.get<KeptSurface[]>("/api/surfaces?bound=1", { quiet: true }), []);
   // Harness suggestions the crew filed after retros (runtime/retro.ts): accept the ones worth building, dismiss the rest.
@@ -46,20 +51,38 @@ export function Wall() {
         </div>)}
       {n > 0 && (
         <section className="col">
-          <div className="spread"><p className="pc-lab">Box, box: waiting on you</p>{n > 1 && <a className="small faint" href="#/pitstops">Batch decide</a>}</div>
+          <div className="spread"><p className="pc-lab sig">Box, box · waiting on you</p>{n > 1 && <a className="small faint" href="#/pitstops">Decide all ›</a>}</div>
           <div className="grid2">{pits.slice(0, 6).map((p) => <PitCard key={p.id} p={p} />)}</div>
         </section>)}
+      {track.length > 0 && (
+        <section className="col">
+          <p className="pc-lab">On track</p>
+          <div className="pc-card tight">{track.map((t) => (
+            <a key={t.id} className="hrow" href={`#/t/${t.id}`}><Face b={t.b} size="sm" mood="working" /><b className="trunc">{t.title}</b><span className="small faint">{t.b.name}</span><Loader /></a>))}</div>
+        </section>)}
+      {recent.length > 0 && (
+        <section className="col">
+          <div className="spread"><p className="pc-lab">Pick up where you left off</p><a className="small faint" href="#/threads">All threads ›</a></div>
+          <div className="pc-card tight">{recent.map((t) => (
+            <a key={t.id} className="hrow" href={`#/t/${t.id}`}><Face b={t.b} size="xs" /><b className="trunc">{t.title}</b><span className="small faint">{t.b.name}</span><span className="pc-m small faint">{ago(t.updated_at)}</span></a>))}</div>
+        </section>)}
+      <div className="hfoot">
+        <span>Today <b>{usd(S.today.usd)}</b>{` · ${plural(S.today.runs, "run")}`}</span>
+        <span>Week <b>{usd(S.week.usd)}</b>{` of ${usd(S.weekCap)}`}</span>
+        <span>{shells || screens ? `${shells} shell${shells === 1 ? "" : "s"} · ${screens} screen${screens === 1 ? "" : "s"} up` : "all in the garage"}</span>
+        <span style={{ flex: 1 }} /><a href="#/telemetry">Telemetry ›</a>
+      </div>
       {notes.length > 0 && (
         <details className="col">
           <summary className="pc-lab">{`Notes for Engram · ${notes.length} to review`}</summary>
           <div className="grid2">{notes.slice(0, 8).map((p) => <PitCard key={p.id} p={p} />)}</div>
         </details>)}
       {!!boards.data?.length && (
-        <section className="col">
-          <p className="pc-lab">Dashboards</p>
+        <details className="col">
+          <summary className="pc-lab">{`Dashboards · ${boards.data.length}`}</summary>
           <div className="grid2">{boards.data.slice(0, 4).map((s) => <Surface key={s.id} s={s} extra={<a className="small faint" href={`#/t/${s.thread_id}`} style={{ marginLeft: "auto" }}>{s.bot_name}</a>}
             onAction={async (action, values) => { await api.post(`/api/surfaces/${s.id}/action`, { action, values }); toast("Sent to the crew"); }} />)}</div>
-        </section>)}
+        </details>)}
       {!!ideas.data?.length && (
         <details className="col">
           <summary className="pc-lab">{`Crew suggestions · ${ideas.data.length}`}</summary>
@@ -70,19 +93,7 @@ export function Wall() {
               <div className="acts"><button className="pc-pill sig s" onClick={() => decideIdea(i.id, "accepted")}>Accept</button><button className="pc-pill o s" onClick={() => decideIdea(i.id, "dismissed")}>Dismiss</button></div>
             </div>))}</div>
         </details>)}
-      {S.engram.linked && <DigestCard />}
-      <div className="grid3">
-        <div className="pc-card col"><p className="pc-lab">Today</p><span className="big num">{usd(S.today.usd)}</span><p className="small muted">{`${plural(S.today.runs, "run")} · billed cost where the provider reports it`}</p></div>
-        <div className="pc-card col"><p className="pc-lab">This week</p><span className="big num">{usd(S.week.usd)}</span><Meter pct={(S.week.usd / (S.weekCap || 1)) * 100} /><p className="small muted">{`of ${usd(S.weekCap)} across the crew's caps`}</p></div>
-        <div className="pc-card col"><p className="pc-lab">Computers</p><span className="big num">{String(S.computersUp)}</span><p className="small muted">up now. Idle computers go back to the garage after 10 minutes.</p></div>
-      </div>
-      <section className="col">
-        <p className="pc-lab">The crew</p>
-        <div className="grid3">
-          {S.bots.map((b) => <CrewCard key={b.id} b={b} />)}
-          <a className="pc-card crewcard" href="#/hire" style={{ justifyContent: "center", alignItems: "center", borderStyle: "dashed" }}><b className="pc-h3">+ New crew member</b><p className="small faint">Every hire is reviewed by you.</p></a>
-        </div>
-      </section>
+      {S.engram.linked && <details className="col"><summary className="pc-lab">Engram digest</summary><DigestCard /></details>}
     </div>
   );
 }

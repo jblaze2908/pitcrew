@@ -29,7 +29,7 @@ function HireForm({ ps }: { ps: PitStop | null }) {
     name: spec.name || "", job: spec.job || "", role: p.role || "", quirks: (p.quirks || []).join("; "), signoff: p.signoff || "", callMe: p.callMe || "",
     cap: String(spec.weekly_cap_usd ?? 5), sSpec: spec.schedule?.spec || "", sPrompt: spec.schedule?.prompt || "",
     provider: (spec.provider || S.defaultProvider) as string, model: spec.model || "",
-    hue: (spec.hue || ["c2", "c3", "c5", "c6"][Math.floor(Math.random() * 4)]) as Hue, shape: (spec.shape || "round") as Shape,
+    hue: (spec.hue || HUES.find((h) => !S.bots.some((x) => x.hue === h)) || HUES[Math.floor(Math.random() * HUES.length)]) as Hue, shape: (spec.shape || "round") as Shape,
     warmth: p.warmth || 3, talk: p.talk || 3, humour: p.humour || 3,
     scope: (["personal", "finance", "health"].includes(spec.engram_scope || "") ? spec.engram_scope : "personal") as EngramScope, conns: [] as string[], household: false,
   }));

@@ -1,7 +1,7 @@
 // Pitcrew's own dynamic tools: surfaces, shared screenshots, memory, schedules, finding threads, hiring, and the
 // Chief's delegation and plans. Browser and pixel tools go on to runtimeTool.
 import { one, run, now, uid, audit, getSetting } from "../db.js";
-import { getBot, listBots, normaliseSpec } from "../crew.js";
+import { freeHue, getBot, listBots, normaliseSpec } from "../crew.js";
 import { validateSurface } from "../surfaces.js";
 import { resolveSurface, ledgerPath, listLedgers, mayRead, runQueries } from "../ledger.js";
 import { imageFrom, saveShot, type ToolResult } from "../shots.js";
@@ -280,7 +280,8 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
     case "plan": return planTool(b, threadId, a);
     case "propose_crew_member": {
       if (b.kind !== "chief") return say("Only the Crew Chief can propose crew members.", false);
-      const spec = normaliseSpec(a);
+      // The Chief's colour pick stands only if nobody wears it yet: a crew of one colour can't be told apart.
+      const spec = { ...normaliseSpec(a), hue: freeHue(a?.hue) };
       pitStop({ botId: b.id, threadId, kind: "hire", effect: "hire", title: `Hire ${spec.name}: ${spec.job.slice(0, 120)}`, detail: { spec }, expiresMin: 7 * 24 * 60 });
       return say(`Proposal sent. ${getSetting("driver_name", "The driver")} reviews it as a HIRE pit stop; don't create anything else for it.`);
     }

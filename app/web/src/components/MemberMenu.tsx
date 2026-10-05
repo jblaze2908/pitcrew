@@ -20,16 +20,18 @@ interface Props {
   current?: string | null;
   exclude?: string | null;
   handle?: Ref<MenuHandle>;
+  /** Relabels the first row, e.g. "Everyone" when the menu filters rather than routes. */
+  autoLabel?: [string, string];
 }
 type Row = { id: string; name: string; auto?: boolean; bot?: BotCard };
 
 export const jobLine = (b: Pick<BotCard, "kind" | "job">) => (b.kind === "chief" ? "Anything else; can ask the others" : b.job || "");
 
-export function MemberMenu({ anchor, onPick, onClose, auto = true, filter = null, current = null, exclude = null, handle }: Props) {
+export function MemberMenu({ anchor, onPick, onClose, auto = true, filter = null, current = null, exclude = null, handle, autoLabel }: Props) {
   const { S } = useStore();
   const q = (filter || "").toLowerCase();
   const list: Row[] = [
-    ...(auto && filter == null ? [{ id: "", name: "Auto", auto: true }] : []),
+    ...(auto && filter == null ? [{ id: "", name: autoLabel?.[0] || "Auto", auto: true }] : []),
     ...S.bots.filter((b) => b.id !== exclude && (!q || b.name.toLowerCase().includes(q))).map((b) => ({ id: b.id, name: b.name, bot: b })),
   ];
   const [at, setAt] = useState(() => Math.max(0, list.findIndex((r) => r.id === (current ?? ""))));
@@ -61,10 +63,10 @@ export function MemberMenu({ anchor, onPick, onClose, auto = true, filter = null
     <div ref={el} className="menu" style={{ left: Math.min(r.left, innerWidth - 400), top: r.bottom + 6 }}>
       {list.map((row, i) => (
         <button key={row.id || "auto"} className={`mi${i === at ? " on" : ""}`} onMouseDown={(e) => { e.preventDefault(); pick(i); }}>
-          {row.auto ? <span className="dot">A</span> : <Face b={row.bot} size="sm" />}
+          {row.auto ? <span className="dot">{(autoLabel?.[0] || "Auto")[0]}</span> : <Face b={row.bot} size="sm" />}
           <span className="col" style={{ gap: 2, minWidth: 0, textAlign: "left" }}>
             <b>{row.name}</b>
-            <span className="small faint ell">{row.auto ? "Pitcrew picks from each member's job" : jobLine(row.bot!)}</span>
+            <span className="small faint ell">{row.auto ? autoLabel?.[1] || "Pitcrew picks from each member's job" : jobLine(row.bot!)}</span>
           </span>
           {row.bot?.private ? <span className="pc-chip">Private</span>
             : row.id && row.id === current ? <span className="pc-chip">Picked</span>

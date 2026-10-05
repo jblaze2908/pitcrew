@@ -9,6 +9,12 @@ import type { Bot, EngramScope, Hue, Shape, Personality, ProviderId } from "../s
 import type { BotRow } from "./models.js";
 
 export const HUES: Hue[] = ["c1", "c2", "c3", "c5", "c6"];
+/** A colour no active member wears yet, else the least worn; ties go to palette order. One query per hire. */
+export function freeHue(prefer?: string | null): Hue {
+  const worn = new Map<string, number>(all<{ hue: string; n: number }>("SELECT hue, COUNT(*) n FROM bots WHERE archived=0 GROUP BY hue").map((r) => [r.hue, r.n]));
+  if (prefer && HUES.includes(prefer as Hue) && !worn.get(prefer)) return prefer as Hue;
+  return [...HUES].sort((a, b) => (worn.get(a) || 0) - (worn.get(b) || 0))[0];
+}
 // The computer's loopback-only, read-only view of /bot/work (computer/files.mjs, started by desktop.sh).
 export { FILES_URL } from "./manual.js";
 import { FILES_URL, TOPICS } from "./manual.js";
