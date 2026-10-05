@@ -47,8 +47,11 @@ export const until = (t: number) => {
 
 export const kb = (n: number) => (n < 1024 ? `${n} B` : n < 1 << 20 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 export const tokens = (n: number | null | undefined) => (n || 0).toLocaleString("en-IN");
-export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+/** "1 memory", "2 memories"; pass `many` for other irregular words. */
+export const plural = (n: number, word: string, many?: string) => `${n} ${n === 1 ? word : many ?? (/[^aeiou]y$/.test(word) ? `${word.slice(0, -1)}ies` : `${word}s`)}`;
 
+/** Markdown flattened to one line for a list cell: heading, list and quote markers go; inline code and bold stay for <Inline>. */
+export const flat = (t: string | null | undefined) => String(t || "").replace(/^\s*(?:#{1,6}|[-*>]|\d+\.)\s+/gm, "").replace(/\s+/g, " ").trim();
 export const plainText = (t: string | null | undefined) => String(t || "").replace(/[*_#`>|]/g, "").replace(/\s+/g, " ").trim();
 // Older events carry the model-facing snapshot attributes; show role and name only.
 export const tidyTitle = (s: string | null | undefined) => String(s || "").replace(/\s*\[[a-z-]+(=[^\]]*)?\]/g, "").replace(/:(?=\s|$)/g, "");

@@ -1,6 +1,7 @@
 // A file's change as unified or side-by-side hunks. The diff runs once per opened file (memoised on its texts).
 import { useMemo } from "react";
 import { diffLines, hunks, type DiffOp } from "../../../shared/diff";
+import { textLines } from "../../../shared/text";
 
 const Ln = ({ n }: { n?: number }) => <span className="ln">{n == null ? "" : String(n + 1)}</span>;
 
@@ -19,7 +20,8 @@ function splitRows(hk: DiffOp[]): [DiffOp | null, DiffOp | null][] {
 }
 
 export function Diff({ before, after, split }: { before: string | null | undefined; after: string | null | undefined; split: boolean }) {
-  const ops = useMemo(() => diffLines((before ?? "").split("\n"), (after ?? "").split("\n")), [before, after]);
+  // textLines: a new file has no old lines, so nothing pairs with a phantom empty "line 1".
+  const ops = useMemo(() => diffLines(textLines(before), textLines(after)), [before, after]);
   if (!ops) return <p className="empty">This change is too large to diff here. Download the file instead.</p>;
   const added = ops.filter((o) => o.t === "+").length, removed = ops.filter((o) => o.t === "-").length;
   const hs = hunks(ops);

@@ -19,7 +19,7 @@ function dayLabel(t: number) {
 }
 
 export function Threads() {
-  const { S, bot } = useStore();
+  const { S, bot, name } = useStore();
   const [q, setQ] = useState("");
   const [member, setMember] = useState<string | null>(null);
   const [state, setState] = useState<State>("all");
@@ -66,7 +66,7 @@ export function Threads() {
                 <a key={r.id} className={`trow ${needs(r) ? "need" : ""}`} href={`#/t/${r.id}`}>
                   <Face b={b} size="sm" mood={needs(r) ? "needs" : r.status === "running" ? "working" : "idle"} />
                   <span className="tt"><b>{r.title}</b>{r.snippet ? <small>{r.snippet}</small> : null}</span>
-                  <span className="tm">{b?.name || r.bot_id}</span>
+                  <span className="tm">{name(r.bot_id)}</span>
                   <span className="ts">{needs(r) ? <span className="pc-chip hot">Pit stop</span> : r.status === "running" ? <span className="pc-chip blue"><Loader />Working</span> : r.pinned ? <span className="pc-chip">Pinned</span> : null}</span>
                   <span className="tw">{ago(r.updated_at)}</span>
                 </a>); })}

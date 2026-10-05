@@ -18,7 +18,7 @@ const SCOPE: Record<string, string> = { once: "You · once", thread: "You · thi
 const title = (p: PitStop) => { const v = pitLabel(p); return p.kind === "mcp" || p.kind === "command" ? `${v.label}${v.detail ? ` ${v.detail}` : ""}` : plainWords(p.title); };
 
 export function PitStops() {
-  const { bot } = useStore();
+  const { name } = useStore();
   const { data, error, reload } = useFetch(async (): Promise<Data> => {
     const [pending, history, rules, learned] = await Promise.all([
       api.get<PitStop[]>("/api/pitstops?status=pending"), api.get<PitStop[]>("/api/pitstops"), api.get<Rule[]>("/api/rules"), api.get<Learned[]>("/api/learned")]);
@@ -59,8 +59,8 @@ export function PitStops() {
           <thead><tr><th>When</th><th>Crew</th><th>Effect</th><th>What</th><th>Outcome</th><th>Decided by</th></tr></thead>
           <tbody>{data.history.filter((p) => p.status !== "pending").slice(0, 80).map((p) => (
             <tr key={p.id}>
-              <td className="small faint">{when(p.created_at)}</td><td>{bot(p.bot_id)?.name || p.bot_id}</td><td><EffectChip kind={p.effect} /></td><td>{title(p)}</td>
-              <td><span className={`pc-chip ${p.status === "approved" ? "ok" : p.status === "denied" ? "bad" : ""}`}>{p.status === "expired" ? "No answer" : cap(p.status)}</span></td>
+              <td className="small faint nw">{when(p.created_at)}</td><td className="nw">{name(p.bot_id)}</td><td><EffectChip kind={p.effect} /></td><td className="what"><span className="clamp2" title={title(p)}>{title(p)}</span></td>
+              <td className="nw"><span className={`pc-chip ${p.status === "approved" ? "ok" : p.status === "denied" ? "bad" : ""}`}>{p.status === "expired" ? "No answer" : cap(p.status)}</span></td>
               <td className="small faint">{p.kind === "engram" ? p.note || "Memory app" : p.status === "expired" ? "Timed out" : SCOPE[p.scope || "once"] || cap(p.scope || "")}</td>
             </tr>))}
           </tbody>

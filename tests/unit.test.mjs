@@ -1901,3 +1901,19 @@ test("retros run on a fork: the thread keeps its context and gets one summary li
     assert.equal(Rt.retroOutcome("b_rf", Date.now() + 1000, [], "QUIET: the run was fine", "completed"), "nothing to change: the run was fine");
   } finally { rmSync(`${root}/chatgpt`, { recursive: true, force: true }); rmSync(`${root}/data/tools-manifest.json`, { force: true }); }
 });
+
+test("text helpers: file lines and run errors", async () => {
+  const { textLines, errorLine, errorDetail } = await import("../app/dist/shared/text.js");
+  assert.deepEqual(textLines(""), []);
+  assert.deepEqual(textLines(null), []);
+  assert.deepEqual(textLines("a\nb\n"), ["a", "b"]);
+  assert.deepEqual(textLines("a\r\nb"), ["a", "b"]);
+  // A new file diffs as all additions: no phantom shared empty line.
+  assert.ok(diffLines(textLines(""), textLines("x\ny\n")).every((o) => o.t === "+"));
+  const raw = `400 {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The 'gpt-6.1-sol' model is not supported"}}`;
+  assert.equal(errorLine(raw), "The 'gpt-6.1-sol' model is not supported");
+  assert.match(errorDetail(raw), /^400\n\{\n {2}"type": "error"/);
+  assert.equal(errorLine("Control plane restarted"), "Control plane restarted");
+  assert.equal(errorDetail("Control plane restarted"), null);
+  assert.equal(errorLine('{"detail":"Usage limit reached"}'), "Usage limit reached");
+});

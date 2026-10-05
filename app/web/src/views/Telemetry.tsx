@@ -1,9 +1,9 @@
 // What the crew did this week, what it cost, and what's left with each provider.
 import type { ReactNode } from "react";
 import type { OpenRouterUsage, PlanLimits, PlanWindow, Telemetry as T } from "../../../shared/types";
-import { Meter, Track } from "../components/ui";
+import { ErrorText, Meter, Track } from "../components/ui";
 import { api } from "../lib/api";
-import { ago, cap, tokens, until, usd, when } from "../lib/format";
+import { ago, cap, plural, tokens, until, usd, when } from "../lib/format";
 import { useLiveReload } from "../lib/live";
 import { go } from "../lib/router";
 import { useFetch } from "../lib/useFetch";
@@ -33,7 +33,7 @@ export function Telemetry() {
       <div className="pc-card col">{t.bots.map((b) => (
         <div key={b.id} className="col" style={{ gap: 4 }}>
           <div className="spread">
-            <div className="row"><pc-bot key={`${b.hue}.${b.shape}`} size="xs" hue={b.hue} shape={b.shape} /><b>{b.name}</b><span className="small faint">{`${b.runs} runs${b.failed ? ` · ${b.failed} failed` : ""}`}</span></div>
+            <div className="row"><pc-bot key={`${b.hue}.${b.shape}`} size="xs" hue={b.hue} shape={b.shape} /><b>{b.name}</b><span className="small faint">{`${plural(b.runs, "run")}${b.failed ? ` · ${b.failed} failed` : ""}`}</span></div>
             <span className="pc-m small">{`${usd(b.spend)} / ${usd(b.cap)}`}</span>
           </div>
           <Track pct={(b.spend / (b.cap || 1)) * 100} hue={b.hue} shape={b.shape} />
@@ -54,8 +54,8 @@ export function Telemetry() {
           <thead><tr><th>Started</th><th>Crew</th><th>Thread</th><th>Trigger</th><th>Outcome</th><th className="num">Tokens in/out</th><th className="num">Cost</th></tr></thead>
           <tbody>{t.runs.map((r) => (
             <tr key={r.id} style={{ cursor: "pointer" }} onClick={() => go(`#/t/${r.thread_id}`)}>
-              <td className="small faint">{when(r.started_at)}</td><td>{r.bot_name}</td><td>{r.thread_title}</td><td className="small">{TRIGGER[r.trigger] || cap(r.trigger)}</td>
-              <td><span className={`pc-chip ${r.status === "completed" ? "ok" : r.status === "failed" ? "bad" : ""}`}>{cap(r.status)}</span>{r.error && <p className="small badc">{r.error.slice(0, 120)}</p>}</td>
+              <td className="small faint nw">{when(r.started_at)}</td><td className="nw">{r.bot_name}</td><td className="what">{r.thread_title}</td><td className="small">{TRIGGER[r.trigger] || cap(r.trigger)}</td>
+              <td className="outc"><span className={`pc-chip ${r.status === "completed" ? "ok" : r.status === "failed" ? "bad" : ""}`}>{cap(r.status)}</span>{r.error && <ErrorText raw={r.error} />}</td>
               <td className="num pc-m small">{`${tokens(r.input_tokens)} / ${tokens(r.output_tokens)}`}</td>
               <td className="num pc-m" title={r.cost_basis === "billed" ? "Billed by the provider" : r.cost_basis === "list" ? "Estimate from list price" : ""}>
                 {r.cost_basis === "plan" ? "plan" : r.cost_basis === "unknown" ? "?" : `${usd(r.cost_usd)}${r.cost_basis === "list" ? " est." : ""}`}</td>
