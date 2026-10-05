@@ -1,4 +1,4 @@
-// The signed-in app: the sidebar (threads, nav, crew) and the routed view.
+// The signed-in app: the sidebar (links, crew, recent threads) and the routed view.
 import { useEffect, useLayoutEffect } from "react";
 import { api } from "./lib/api";
 import { DockProvider } from "./components/Dock";
@@ -9,7 +9,6 @@ import { CrewIndex } from "./views/CrewIndex";
 import { Hire } from "./views/Hire";
 import { Library } from "./views/Library";
 import { Live } from "./views/Live";
-import { NewThread } from "./views/NewThread";
 import { PitStops } from "./views/PitStops";
 import { Schedules } from "./views/Schedules";
 import { Settings } from "./views/Settings";
@@ -23,7 +22,8 @@ function View({ route }: { route: Route }) {
   switch (route.name) {
     case "crew": return a ? <Crew key={a} id={a} tab={b || "threads"} rest={[c, d]} /> : <CrewIndex />;
     case "threads": return <Threads />;
-    case "new": return <NewThread key={a || ""} to={a} />;
+    // Home is the new-thread page (Draft M4b); #/new focuses its box, #/new/<member> starts on that member.
+    case "new": return <Wall to={a} focus />;
     case "t": return <Thread key={a} id={a} />;
     case "pitstops": return <PitStops />;
     case "schedules": return <Schedules />;

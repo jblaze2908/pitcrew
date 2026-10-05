@@ -11,6 +11,7 @@ import { signedIn, type Env } from "../http/guard.js";
 import { readJson, jsonBody, given, pick, raw } from "../http/body.js";
 import { state } from "./views.js";
 import { telemetrySummary } from "./lists.js";
+import { AUTONOMY } from "../runtime/autonomy.js";
 
 const PROVIDER_IDS = ["openrouter", "aigateway", "openai"] as const;
 const Settings = z.object({
@@ -18,6 +19,7 @@ const Settings = z.object({
   defaultProvider: pick(PROVIDER_IDS, null),
   plainVoice: given((v) => (v ? "1" : "0")),
   plans: given((v) => (v ? "1" : "0")),
+  newThreadMode: pick(AUTONOMY, null),
 });
 const Key = z.object({ key: raw });
 
@@ -53,6 +55,7 @@ export const systemRoutes = new Hono<Env>()
     if (b.defaultProvider) setSetting("default_provider", b.defaultProvider);
     if (b.plainVoice !== undefined) setSetting("plain_voice", b.plainVoice);
     if (b.plans !== undefined) setSetting("plans", b.plans);
+    if (b.newThreadMode) setSetting("new_thread_mode", b.newThreadMode);
     audit("driver", "settings.updated", { fields: Object.keys(sent) });
     return c.json(state());
   })

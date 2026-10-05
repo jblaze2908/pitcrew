@@ -17,7 +17,7 @@ import { toast } from "../lib/toast";
 import { useFetch } from "../lib/useFetch";
 import { Composer } from "./thread/Composer";
 import { SideAsk } from "./thread/SideAsk";
-import { renderEvent, Steps, type EventCtx } from "./thread/Events";
+import { noteFolds, renderEvent, Steps, type EventCtx } from "./thread/Events";
 import { isCommand, TAB_LABEL, tabFor, useThreadRuns, WorkPanel, type LiveCmd, type Tab } from "./thread/WorkPanel";
 
 export function Thread({ id }: { id?: string }) {
@@ -226,8 +226,10 @@ function LiveThread({ d }: { d: ThreadView }) {
     return new Set(lastOf.values());
   }, [events, running]);
   const onRewound = async () => { const fresh = await api.get<ThreadView>(`/api/threads/${id}`, { quiet: true }).catch(() => null); if (fresh) setEvents(fresh.events); };
+  const folds = useMemo(() => noteFolds(events), [events]);
+  const setMode = async (a: string) => { await api.patch(`/api/threads/${id}`, { autonomy: a }); setAutonomy(a); };
   const evCtx: EventCtx = {
-    b, fromName, pits, latest, images, rewind: { ids: rewindIds, onRewound },
+    b, fromName, pits, latest, images, rewind: { ids: rewindIds, onRewound }, hide: folds.hide, modeNote: folds.modeNote, autonomy, onAutonomy: setMode,
     onView: (im) => setViewing({ im }), onCompare: (im) => setViewing({ im, cmp: true }), onEdit: (im) => { setViewing(null); setEditing(im); },
     onMore: (im) => api.post(`/api/threads/${id}/messages`, { text: "Make 4 more variations of this image, same brief.", mode: "queue", edit: { image: im.path } }),
     onKeep: (imageId) => api.post(`/api/images/${imageId}/keep`),
@@ -258,7 +260,6 @@ function LiveThread({ d }: { d: ThreadView }) {
           {origin ? <OriginChip origin={origin} threadId={id} b={b} /> : <a className="who" style={hueStyle(b.hue)} href={`#/crew/${b.id}`} title={`${b.name}'s profile`}><Face b={b} size="xs" mood={running ? "working" : undefined} />{b.name}</a>}
           <span style={{ flex: 1 }} />
           {lease && <button className="pc-pill s" onClick={handBack}>Hand back</button>}
-          <Power b={card} />
           {!showPanel && !side && tabs.length > 0 && <button className="reo" title="Open the work panel" onClick={() => setOpen(true)}><Icon name="panel" size={14} />{TAB_LABEL[cur!]}</button>}
         </header>
         <div ref={stream} className="stream">
@@ -316,13 +317,6 @@ function TitleMenu({ id, title, onRenamed, b, pinned, onPinned }: { id: string; 
         </div>
       </>}
     </span>);
-}
-
-/** What's awake on the member's computer: the shell (stage 1) and the screen (stage 2) wake and sleep on their own. */
-function Power({ b }: { b: BotCard }) {
-  const { up, desktop } = b.computer;
-  const tip = !up ? "The computer is idle: it wakes on the first command or page" : desktop ? "Shell and screen up · sleeps after 10 idle minutes" : "Shell up, screen asleep · sleeps after 10 idle minutes";
-  return <span className={`power ${up ? "up" : ""}`} title={tip}><i />{!up ? "Idle" : desktop ? "Shell and screen up" : "Shell up"}</span>;
 }
 
 // Where a thread came from: routed by the front door (its pill changes who takes it) or asked by another member.

@@ -1,87 +1,55 @@
-// Memory and schedules: a small add row over a table.
+// Memory: one "Remember…" field, what only this member reads, what the whole crew reads, and its how-tos.
 import { useState } from "react";
-import type { BotCard, Memory, Schedule } from "../../../../shared/types";
-import { Inline } from "../../components/ui";
+import type { BotCard, Memory } from "../../../../shared/types";
+import { Seg } from "../../components/ui";
 import { api } from "../../lib/api";
-import { flat, when } from "../../lib/format";
-import { toast } from "../../lib/toast";
+import { when } from "../../lib/format";
+import { HowTos } from "./DataTab";
 import { SCOPE_LABEL } from "./ProfileTab";
 
-// A linked member's memories live in Engram (shown as "shared memory"); this lists that member's own and adds or forgets there.
-// Two tiers: the member's own memory (it writes freely, capped at 3,000 chars) and global notes in Engram (about you,
-// for the whole crew; a member's go through your review, yours save directly).
+type Scope = "agent" | "global";
+
+// Own memory is capped at 3,000 characters and only it reads it. Shared memory (when linked) is about you, for the
+// whole crew: a member's new notes wait for your review there; ones you add here save directly.
 export function MemoryTab({ b, memory, global, error, reload }: { b: BotCard; memory: Memory[]; global: Memory[] | null; error: string | null; reload: () => void }) {
+  const [text, setText] = useState(""), [scope, setScope] = useState<Scope>("agent");
+  const add = async () => { if (!text.trim()) return; await api.post(`/api/bots/${b.id}/memory`, { text, scope }); setText(""); reload(); };
   const used = memory.reduce((n, m) => n + m.text.length, 0);
   return (
-    <div className="col">
-      <MemoryList b={b} title={`Own memory · ${used} / 3,000 chars`} help={`${b.name}'s working knowledge: how its job runs, site quirks, where things are. Only it reads this.`} items={memory} scope="agent" reload={reload} />
-      {global && <MemoryList b={b} title="Shared with the whole crew" help={`Facts about you that ${b.name} saved for everyone, kept as ${SCOPE_LABEL[b.engram_scope]}. Its new ones wait for your review in the memory app; ones you add here save directly.`} items={global} scope="global" reload={reload} />}
+    <div className="mem">
+      <div className="remember">
+        <input placeholder={scope === "agent" ? `Remember… something ${b.name} should know for its job` : "Remember… a fact about you for the whole crew"} value={text}
+          onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); }} aria-label="Remember" />
+        {global && <Seg options={[["agent", "Only this member"], ["global", "Whole crew"]] as const} value={scope} onChange={setScope} />}
+        <button className="pc-pill s" disabled={!text.trim()} onClick={add}>Remember</button>
+      </div>
+      <MemoryList b={b} title="Only this member" note={`${used.toLocaleString("en-IN")} of 3,000 characters`} help={`How its job runs, site quirks, where things are. Only ${b.name} reads this.`} items={memory} scope="agent" reload={reload} />
+      {global && <MemoryList b={b} title="Shared with the crew" help={`Facts about you that every member can read, kept under ${SCOPE_LABEL[b.engram_scope]}. New ones ${b.name} saves wait for your review in shared memory.`} items={global} scope="global" reload={reload} />}
       {error && <p className="small badc">{`Couldn't read shared memory: ${error}`}</p>}
+      <section>
+        <h3>How-tos</h3>
+        <p className="intro">{`Steps ${b.name} wrote down once it worked out how a task runs. Kept in its workspace.`}</p>
+        <HowTos b={b} />
+      </section>
     </div>
   );
 }
-function MemoryList({ b, title, help, items, scope, reload }: { b: BotCard; title: string; help: string; items: Memory[]; scope: "agent" | "global"; reload: () => void }) {
-  const [text, setText] = useState("");
-  const add = async () => { if (!text.trim()) return; await api.post(`/api/bots/${b.id}/memory`, { text, scope }); setText(""); reload(); };
-  // Shared memories carry the memory app's source ("pitcrew:Finance Strategist"); show who added it.
+
+function MemoryList({ b, title, note, help, items, scope, reload }: { b: BotCard; title: string; note?: string; help: string; items: Memory[]; scope: Scope; reload: () => void }) {
+  // Shared memories carry their source ("pitcrew:Finance Strategist"); show who added it.
   const who = (m: Memory) => (scope === "global" ? (m.source ? `added by ${m.source.replace(/^pitcrew:/, "")}` : "shared memory") : m.source === "driver" ? "you" : "learned in a thread");
   return (
-    <section className="col">
-      <p className="pc-lab">{title}</p><p className="small muted">{help}</p>
-      <div className="row"><div style={{ flex: 1 }}><input placeholder={scope === "agent" ? "Add something this member should know for its job" : "Add a fact about you for the whole crew"} value={text} onChange={(e) => setText(e.target.value)} /></div><button className="pc-pill s" onClick={add}>Add</button></div>
-      <div className="pc-card tight">
-        {items.length ? (
-          <table className="tbl"><tbody>{items.map((m) => (
-            <tr key={m.id}>
-              <td>{m.text}</td><td className="small faint">{who(m)}</td><td className="num faint small">{when(m.created_at)}</td>
-              <td className="num"><button className="small faint" onClick={async () => { await api.post(`/api/bots/${b.id}/memory/${m.id}/forget`); reload(); }}>Forget</button></td>
-            </tr>))}</tbody></table>
-        ) : <p className="empty">Nothing yet.</p>}
+    <section>
+      <div className="ms-hrow"><h3>{title}</h3>{note && <span className="ms-h">{note}</span>}</div>
+      <p className="intro">{help}</p>
+      <div className="mrows">
+        {items.length ? items.map((m) => (
+          <div key={m.id} className="mrow">
+            <div className="grow"><p>{m.text}</p><p className="ms-h">{`${who(m)} · ${when(m.created_at)}`}</p></div>
+            <button className="lk2" onClick={async () => { await api.post(`/api/bots/${b.id}/memory/${m.id}/forget`); reload(); }}>Forget</button>
+          </div>))
+          : <p className="none">Nothing yet.</p>}
       </div>
     </section>
-  );
-}
-
-export function SchedulesTab({ b, list, reload }: { b: BotCard; list: Schedule[]; reload: () => void }) {
-  const [spec, setSpec] = useState(""), [prompt, setPrompt] = useState("");
-  const add = async () => { await api.post(`/api/bots/${b.id}/schedules`, { spec, prompt }); setSpec(""); setPrompt(""); reload(); };
-  return (
-    <div className="col">
-      <div className="grid2">
-        <input placeholder="daily 09:00 · weekly mon 08:30 · every 6 hours" value={spec} onChange={(e) => setSpec(e.target.value)} />
-        <div className="row"><div style={{ flex: 1 }}><input placeholder="What to do" value={prompt} onChange={(e) => setPrompt(e.target.value)} /></div><button className="pc-pill s" onClick={add}>Add</button></div>
-      </div>
-      <div className="pc-card tight">
-        {list.length ? (
-          <table className="tbl"><tbody>{list.map((s) => <ScheduleRow key={s.id} s={s} reload={reload} />)}</tbody></table>
-        ) : <p className="empty">No schedules.</p>}
-      </div>
-    </div>
-  );
-}
-
-function ScheduleRow({ s, reload }: { s: Schedule; reload: () => void }) {
-  const [edit, setEdit] = useState<{ spec: string; prompt: string } | null>(null);
-  const patch = async (b: object) => { await api.patch(`/api/schedules/${s.id}`, b); setEdit(null); reload(); };
-  const remove = async () => { if (!window.confirm(`Delete the schedule “${s.prompt.slice(0, 60)}”?`)) return; await api.del(`/api/schedules/${s.id}`); toast("Schedule deleted"); reload(); };
-  if (edit) return (
-    <tr>
-      <td><input value={edit.spec} onChange={(e) => setEdit({ ...edit, spec: e.target.value })} aria-label="When" /></td>
-      <td colSpan={2}><textarea rows={3} value={edit.prompt} onChange={(e) => setEdit({ ...edit, prompt: e.target.value })} aria-label="What to do" style={{ width: "100%" }} /></td>
-      <td className="num"><div className="row" style={{ justifyContent: "flex-end" }}>
-        <button className="small" onClick={() => patch(edit)}>Save</button><button className="small faint" onClick={() => setEdit(null)}>Cancel</button></div></td>
-    </tr>
-  );
-  return (
-    <tr>
-      <td className="pc-m">{s.spec}</td><td>{s.prompt}</td>
-      <td className="small faint">{s.enabled ? (s.next_run ? `Next ${when(s.next_run)}` : "") : "Paused"}
-        {s.last &&<a className={`clamp2 sch-last ${s.last.status === "failed" ? "badc" : "faint"}`} href={s.last.threadId ? `#/t/${s.last.threadId}` : undefined} title={flat(s.last.summary)}>
-          {`last ${when(s.last.at)} · ${s.last.status}`}{s.last.summary && <>{" · "}<Inline text={flat(s.last.summary)} /></>}</a>}</td>
-      <td className="num"><div className="row" style={{ justifyContent: "flex-end" }}>
-        <button className="small faint" onClick={() => setEdit({ spec: s.spec, prompt: s.prompt })}>Edit</button>
-        <button className="small faint" onClick={() => patch({ enabled: !s.enabled })}>{s.enabled ? "Pause" : "Resume"}</button>
-        <button className="small faint" onClick={remove}>Delete</button></div></td>
-    </tr>
   );
 }
