@@ -32,35 +32,40 @@ const parseOrigin = (s: string | null): Origin | null => { try { return s ? JSON
 
 type Item = { key: string; el: ReactNode } | { key: string; steps: ThreadEvent[] };
 
-/** Lays events out in order. Consecutive tool calls of one run share a Steps group; events that draw nothing don't
- * break a group, and a plan or delegation card draws once, where it first appeared, with its newest snapshot. */
+/** Lays events out in order. Consecutive tool calls of one run share a Steps group, and so do pit stops already decided
+ * (a pending one is a card that breaks the group until it's answered). Events that draw nothing don't break a group, and
+ * a plan or delegation card draws once, where it first appeared, with its newest snapshot. */
 function layout(events: ThreadEvent[], ctx: EventCtx): Item[] {
   const items: Item[] = [];
   const drawn = new Set<string>();
   let group: { turn: string | null; steps: ThreadEvent[] } | null = null;
   let lastAgent = false;  // the last drawn item, steps aside, was this member's message
-  for (const e of events) {
+  let lastUser = -1;
+  events.forEach((e, i) => { if (e.kind === "user") lastUser = i; });
+  events.forEach((e, i) => {
     // A script's output is drawn inside its script step (Steps results), never as a row of its own.
-    if (e.kind === "tool" && e.data.type === "scriptResult") continue;
-    if (e.kind === "tool") {
+    if (e.kind === "tool" && e.data.type === "scriptResult") return;
+    const p = e.kind === "pitstop" ? ctx.pits[e.data.id] : undefined;
+    if (e.kind === "tool" || (p && p.status !== "pending")) {
       const last = items[items.length - 1];
       if (group && last && "steps" in last && last.steps === group.steps && group.turn === e.turn_id) group.steps.push(e);
       else { group = { turn: e.turn_id, steps: [e] }; items.push({ key: `g${e.id}`, steps: group.steps }); }
-      continue;
+      return;
     }
     // A surface updated in place (render_surface with its id) draws where it first appeared, with its newest spec.
-    if ((e.kind === "plan" || e.kind === "delegation" || e.kind === "surface") && drawn.has(e.data.id)) continue;
-    const el = renderEvent(e, e.kind === "agent" && lastAgent ? { ...ctx, cont: true } : ctx);
-    if (el == null) continue;
+    if ((e.kind === "plan" || e.kind === "delegation" || e.kind === "surface") && drawn.has(e.data.id)) return;
+    const c = e.kind === "agent" && lastAgent ? { ...ctx, cont: true } : i < lastUser ? { ...ctx, onContinue: undefined } : ctx;
+    const el = renderEvent(e, c);
+    if (el == null) return;
     lastAgent = e.kind === "agent";
     if (e.kind === "plan" || e.kind === "delegation" || e.kind === "surface") drawn.add(e.data.id);
     group = null;
     items.push({ key: `e${e.id}`, el });
-  }
+  });
   return items;
 }
 /** Whether the newest drawn item (steps aside) is the member's own message, so a streaming reply continues it. */
-const endsWithAgent = (events: ThreadEvent[]) => { for (let i = events.length - 1; i >= 0; i--) { const k = events[i].kind; if (k === "tool") continue; return k === "agent"; } return false; };
+const endsWithAgent = (events: ThreadEvent[], pits: Record<string, PitStop>) => { for (let i = events.length - 1; i >= 0; i--) { const e = events[i]; if (e.kind === "tool" || (e.kind === "pitstop" && pits[e.data.id]?.status !== "pending")) continue; return e.kind === "agent"; } return false; };
 
 function LiveThread({ d }: { d: ThreadView }) {
   const { bot } = useStore();
@@ -197,6 +202,7 @@ function LiveThread({ d }: { d: ThreadView }) {
     onKeep: (imageId) => api.post(`/api/images/${imageId}/keep`),
     surface: (sid) => { const s = surfaces[sid]; return s ? <ThreadSurface s={s} /> : null; },
     onPlan: () => { setTab("plan"); setFollow(false); setOpen(true); },
+    onContinue: running ? undefined : () => api.post(`/api/threads/${id}/messages`, { text: "continue", mode: "auto" }),
   };
   const items = layout(events, evCtx);
   // The last group is open on load if the run is still going; groups that arrive live start open.
@@ -225,9 +231,9 @@ function LiveThread({ d }: { d: ThreadView }) {
         </header>
         <div ref={stream} className="stream">
           {items.map((it) => "steps" in it
-            ? <Steps key={it.key} events={it.steps} results={scriptResults} closeSignal={closeSteps} initialOpen={it.key === openOnLoad.current || liveIds.current.has(it.steps[0].id)} />
+            ? <Steps key={it.key} events={it.steps} pits={pits} results={scriptResults} closeSignal={closeSteps} initialOpen={it.key === openOnLoad.current || liveIds.current.has(it.steps[0].id)} />
             : <Fragment key={it.key}>{it.el}</Fragment>)}
-          {streaming && <div className={`msg bot${endsWithAgent(events) ? " cont" : ""}`}>{endsWithAgent(events) ? <span /> : <Face b={b} size="sm" mood="working" />}<div className="md">{streaming.text}</div></div>}
+          {streaming && <div className={`msg bot${endsWithAgent(events, pits) ? " cont" : ""}`}>{endsWithAgent(events, pits) ? <span /> : <Face b={b} size="sm" mood="working" />}<div className="md">{streaming.text}</div></div>}
           {painting.map((p) => <CatchThePaint key={p.id} p={p} b={b} />)}
           <div className={`live ${running ? "" : "hidden"}`}><Loader /><span>{activity}</span></div>
         </div>
@@ -277,7 +283,7 @@ function TitleMenu({ id, title, onRenamed, b, pinned, onPinned }: { id: string; 
 function Power({ b }: { b: BotCard }) {
   const { up, desktop } = b.computer;
   const tip = !up ? "Computer in the garage: it wakes on the first command or page" : desktop ? "Shell and screen up · back in the garage after 10 idle minutes" : "Shell up, screen asleep · back in the garage after 10 idle minutes";
-  return <span className="power" title={tip}><span className={up ? "up" : ""}><i />Shell</span><span className={desktop ? "up" : ""}><i />Screen</span></span>;
+  return <span className={`power ${up ? "up" : ""}`} title={tip}><i />{!up ? "In the garage" : desktop ? "Shell and screen up" : "Shell up"}</span>;
 }
 
 // Where a thread came from: routed by the front door (its pill changes who takes it) or asked by another member.
