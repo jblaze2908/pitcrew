@@ -13,8 +13,8 @@ import { backfillTitles } from "./titles.js";
 export async function killSwitch() {
   setSetting("paused", "1");
   const inFlight = [...active.keys()].map((t) => ({ threadId: t, title: getThread(t)?.title }));
-  // Hires and Engram proposals hold no running work; the kill switch leaves them for the driver.
-  for (const ps of all<{ id: string }>("SELECT id FROM pitstops WHERE status='pending' AND kind NOT IN ('hire','engram')")) await decide(ps.id, "deny", { note: "Kill switch" });
+  // Hires, Engram proposals and done-checks hold no running work; the kill switch leaves them for the driver.
+  for (const ps of all<{ id: string }>("SELECT id FROM pitstops WHERE status='pending' AND kind NOT IN ('hire','engram','check')")) await decide(ps.id, "deny", { note: "Kill switch" });
   await Promise.all([...active.keys()].map((t) => interrupt(t)));
   await Promise.all([...allComputers().map((c) => c.stop()), ...allBrains().map((x) => x.stop())]);
   audit("driver", "killswitch", { inFlight });
@@ -25,8 +25,9 @@ export function resumeCrew() { setSetting("paused", "0"); audit("driver", "crew.
 
 /** Returns the turns this restart cut off; the caller resumes them once reapOrphans has restarted the brains. */
 export function bootRuntime() {
-  // Pit stops from a previous process can't be answered: their Codex requests died with the computers.
-  for (const ps of all<{ id: string }>("SELECT id,thread_id FROM pitstops WHERE status='pending' AND kind NOT IN ('hire','engram')")) run("UPDATE pitstops SET status='expired', note='Control plane restarted', decided_at=? WHERE id=?", now(), ps.id);
+  // Pit stops from a previous process can't be answered: their Codex requests died with the computers. A done-check's
+  // decision is applied in decide(), not by a waiting request, so it survives (a deploy shouldn't expire it).
+  for (const ps of all<{ id: string }>("SELECT id,thread_id FROM pitstops WHERE status='pending' AND kind NOT IN ('hire','engram','check')")) run("UPDATE pitstops SET status='expired', note='Control plane restarted', decided_at=? WHERE id=?", now(), ps.id);
   const cut = settleCutTurns();
   run("UPDATE threads SET status='idle' WHERE status!='idle'"); // also clears pre-v1.2 'done'/'failed' thread states
   // Name threads left untitled (from before naming existed, or still on small talk) from their first real message.

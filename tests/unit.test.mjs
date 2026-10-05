@@ -1358,3 +1358,179 @@ test("a side question reads the thread's record on a tool-less plan ask, and sto
     assert.match(R.sidePrompt("th_side", "x").text, /Status: not running/);
   } finally { active.delete("th_side"); }
 });
+test("done-check: the grader's JSON is validated and pass is computed, never taken from the reply", () => {
+  const given = ["ledger.db has 6 orders", "weekly.csv is updated"];
+  const ok = R.parseGrade('Sure!\n```json\n{"criteria":[{"text":"paraphrased","verdict":"pass","why":"6 rows in sqlite output"},{"text":"x","verdict":"pass","why":"cat shows new totals"}],"evidence":"6 rows printed by sqlite3","headline":"","fix":""}\n```', given);
+  assert.equal(ok.passed, true);
+  assert.deepEqual(ok.criteria.map((c) => c.text), given, "given criteria keep their own words");
+  assert.equal(ok.evidence, "6 rows printed by sqlite3");
+  const bad = R.parseGrade(JSON.stringify({ passed: true, criteria: [{ verdict: "pass", why: "" }, { verdict: "unknown", why: "no output shown" }], headline: "" }), given);
+  assert.equal(bad.passed, false, "a top-level passed flag is ignored");
+  assert.equal(bad.headline, "weekly.csv is updated", "no headline falls back to the first unconfirmed criterion");
+  for (const raw of ["no json here", "{not json}", JSON.stringify({ criteria: [{ verdict: "pass" }] }), JSON.stringify({ criteria: [1, 2] }),
+    JSON.stringify({ criteria: given.map(() => ({ verdict: "maybe" })) }), JSON.stringify({ criteria: Array(5).fill({ text: "t", verdict: "pass" }) }), JSON.stringify({ verdict: "pass" })])
+    assert.equal(R.parseGrade(raw, given), null, raw);
+  const own = R.parseGrade(JSON.stringify({ criteria: [{ text: "a refund id is shown", verdict: "fail", why: "page shows an error" }], headline: "the refund was requested", fix: "Retry the form" }), []);
+  assert.deepEqual([own.passed, own.criteria[0].text, own.headline, own.fix], [false, "a refund id is shown", "the refund was requested", "Retry the form"]);
+  assert.equal(R.parseGrade(JSON.stringify({ criteria: [{ text: "", verdict: "pass" }] }), []), null, "a criterion it wrote needs words");
+  assert.deepEqual(R.normCriteria(["- ledger has 6 rows", "  2) csv  updated ", "4 rows printed"]), ["ledger has 6 rows", "csv updated", "4 rows printed"]);
+  assert.match(R.normCriteria([]), /1 to 6/); assert.match(R.normCriteria(Array(7).fill("x")), /At most 6/);
+});
+
+test("done-check: fail steers the member twice, then a pit stop; Try again, Accept, no grader and chat-only runs", async () => {
+  const { active } = await import("../app/dist/src/runtime/state.js");
+  run("INSERT INTO bots(id,name,created_at) VALUES('b_dc','Grocer',0)");
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_dc','b_dc','Ledger',0,0),('th_dc2','b_dc','Chat',0,0)");
+  let at = Date.now() - 600000;
+  const turn = (id, trigger, th = "th_dc", criteria = null) => { at += 1000; run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,started_at,criteria) VALUES(?,?,?,?,?,?,?)", id, th, "b_dc", "completed", trigger, at, criteria); return id; };
+  const ev = (th, turnId, kind, data) => run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES(?,?,?,?,?)", th, turnId, kind, JSON.stringify(data), at);
+  const asks = [];
+  const grader = (reply) => async () => ({ by: "fake", close: () => {}, ask: async (s, u) => { asks.push(u); return reply; } });
+  const fail = JSON.stringify({ criteria: [{ verdict: "pass", why: "4 rows" }, { verdict: "fail", why: "Zepto showed a sign-in page" }], headline: "the ledger has this week's 6 orders, found 4", fix: "Sign in to Zepto again." });
+  const pass = JSON.stringify({ criteria: [{ verdict: "pass", why: "6 rows" }, { verdict: "pass", why: "2 Zepto rows" }], evidence: "6 rows printed by sqlite3" });
+  const crit = JSON.stringify(["ledger.db has a row per Blinkit order", "ledger.db has this week's Zepto orders"]);
+
+  // The member sets criteria once per task; a retry turn can't move the goalposts.
+  active.set("th_dc", { turnId: turn("tu_dc_r", "check"), codexTurnId: null, base: null, total: null, last: null, usageFrom: 0 });
+  assert.equal(R.setDoneCriteria("th_dc", ["anything"]).ok, false);
+  active.set("th_dc", { turnId: turn("tu_dc_set", "driver"), codexTurnId: null, base: null, total: null, last: null, usageFrom: 0 });
+  assert.equal(R.setDoneCriteria("th_dc", ["ok one"]).ok, true);
+  assert.deepEqual(json(one("SELECT criteria FROM turns WHERE id='tu_dc_set'").criteria), ["ok one"]);
+  active.delete("th_dc"); run("UPDATE turns SET grade='{\"status\":\"passed\"}' WHERE id IN ('tu_dc_r','tu_dc_set')");
+
+  ev("th_dc", null, "user", { text: "update this week's grocery ledger" });
+  const root = turn("tu_dc1", "driver", "th_dc", crit);
+  ev("th_dc", root, "tool", { type: "commandExecution", input: "sqlite3 ledger.db 'select count(*) from orders'", exitCode: 0, output: "4" });
+  ev("th_dc", root, "agent", { text: "Done: all 6 orders are in." });
+  const grade = (id) => json(one("SELECT grade FROM turns WHERE id=?", id).grade);
+  assert.equal(await R.doneCheck("th_dc", root, { grader: grader(fail) }), "retrying");
+  assert.match(asks[0], /ledger\.db has a row per Blinkit order/); assert.match(asks[0], /its claim, not evidence/); assert.match(asks[0], /exit 0\n4/);
+  assert.match(asks[0], /update this week's grocery ledger/);
+  let q = R.listQueued("th_dc");
+  assert.equal(q.length, 1, "the retry waits in the queue (this member is blocked: no provider)");
+  assert.equal(q[0].via, "check"); assert.match(q[0].text, /^\[Done-check\].*try 1 of 2/); assert.match(q[0].text, /failed: ledger.db has this week's Zepto orders \(Zepto showed a sign-in page\)/);
+  assert.deepEqual([grade(root).status, grade(root).attempt], ["retrying", 1]);
+  R.removeQueued("th_dc", q[0].id);
+
+  assert.equal(await R.doneCheck("th_dc", turn("tu_dc2", "check"), { grader: grader(fail) }), "retrying");
+  assert.equal(grade(root).attempt, 2);
+  R.removeQueued("th_dc", R.listQueued("th_dc")[0].id);
+  assert.equal(await R.doneCheck("th_dc", turn("tu_dc3", "check"), { grader: grader(fail) }), "failed");
+  const ps = one("SELECT * FROM pitstops WHERE thread_id='th_dc' AND kind='check' AND status='pending'");
+  assert.equal(ps.title, "Couldn't confirm the ledger has this week's 6 orders, found 4");
+  assert.equal(json(ps.detail).attempts, 2); assert.equal(one("SELECT status FROM threads WHERE id='th_dc'").status, "needs");
+  assert.equal(R.listQueued("th_dc").length, 0, "no third retry on its own");
+  assert.deepEqual(all("SELECT data FROM events WHERE thread_id='th_dc' AND kind='check'").map((e) => json(e.data).status), ["retrying", "retrying"]);
+
+  await R.decide(ps.id, "approve", { scope: "retry" });
+  q = R.listQueued("th_dc");
+  assert.equal(q.length, 1); assert.equal(q[0].display, "Done-check · trying again");
+  assert.equal(grade(root).status, "retrying");
+  R.removeQueued("th_dc", q[0].id);
+  assert.equal(await R.doneCheck("th_dc", turn("tu_dc4", "check"), { grader: grader(pass) }), "passed");
+  assert.equal(grade(root).status, "passed");
+  const passed = json(all("SELECT data FROM events WHERE thread_id='th_dc' AND kind='check' ORDER BY id DESC LIMIT 1")[0].data);
+  assert.deepEqual([passed.status, passed.evidence, passed.n], ["passed", "6 rows printed by sqlite3", 2]);
+
+  // Accept as is, after a fresh task fails all the way.
+  const t2 = turn("tu_dc5", "driver", "th_dc", crit);
+  run("UPDATE turns SET grade=? WHERE id=?", JSON.stringify({ status: "retrying", attempt: 2 }), t2);
+  assert.equal(await R.doneCheck("th_dc", turn("tu_dc6", "check"), { grader: grader(fail) }), "failed");
+  await R.decide(one("SELECT id FROM pitstops WHERE thread_id='th_dc' AND kind='check' AND status='pending'").id, "approve");
+  assert.equal(grade(t2).status, "accepted");
+  assert.equal(one("SELECT status FROM threads WHERE id='th_dc'").status, "idle");
+
+  // No grader: unchecked, and nothing waits. A bad reply twice: unchecked too. Chat-only and retro runs: never graded.
+  const t3 = turn("tu_dc7", "driver", "th_dc", crit);
+  assert.equal(await R.doneCheck("th_dc", t3, { grader: async () => null }), "unchecked");
+  assert.equal(grade(t3).status, "unchecked");
+  const t4 = turn("tu_dc8", "driver", "th_dc", crit);
+  assert.equal(await R.doneCheck("th_dc", t4, { grader: grader("I think it's fine") }), "unchecked");
+  assert.match(grade(t4).why, /wasn't valid/);
+  const t5 = turn("tu_dc9", "driver", "th_dc2");
+  ev("th_dc2", t5, "agent", { text: "Hi! How can I help?" });
+  let called = 0;
+  assert.equal(await R.doneCheck("th_dc2", t5, { grader: async () => { called++; return null; } }), "skipped");
+  assert.equal(await R.doneCheck("th_dc2", turn("tu_dc10", "retro", "th_dc2", crit), { grader: async () => { called++; return null; } }), "skipped");
+  assert.equal(called, 0, "skipped runs never open a grader");
+});
+
+test("rewind: files go back to before a run, links are never followed, the chat is marked and recapped", async () => {
+  const { utimesSync, readFileSync, existsSync, statSync, chmodSync, lstatSync, unlinkSync } = await import("node:fs");
+  const S = await import("../app/dist/src/snapshot.js");
+  const { active } = await import("../app/dist/src/runtime/state.js");
+  const id = "b_rw", w = `${root}/bots/${id}/work`; mkdirSync(`${w}/data`, { recursive: true });
+  run("INSERT INTO bots(id,name,created_at) VALUES('b_rw','Rewinder',0)");
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_rw','b_rw','Ledger',0,0),('th_rw2','b_rw','Other',0,0)");
+  let mt = 1e9; const put = (p, body, mode) => { writeFileSync(`${w}/${p}`, body); if (mode) chmodSync(`${w}/${p}`, mode); utimesSync(`${w}/${p}`, mt, mt); mt += 10; };
+  const bin = Buffer.from([0, 1, 2, 255, 0, 7, 9]);
+  put("a.txt", "v1"); put("data/bin.dat", bin); put("run.sh", "#!/bin/sh\necho 1\n", 0o755); put("keep.txt", "same");
+  const s0 = S.snapshot(id);
+  put("a.txt", "v2"); put("run.sh", "echo 2\n", 0o644); put("new.txt", "made by run 1"); unlinkSync(`${w}/data/bin.dat`);
+  const s1 = S.snapshot(id), ch1 = S.changes(id, s0, s1);
+  assert.deepEqual(ch1.map((c) => `${c.status} ${c.path}`), ["modified a.txt", "deleted data/bin.dat", "added new.txt", "modified run.sh"]);
+  put("a.txt", "v3"); put("other.txt", "made by run 2");
+  const ch2 = S.changes(id, s1, S.snapshot(id));
+  const t0 = Date.now() - 60000;
+  const ev = (turn, kind, data, ts) => run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('th_rw',?,?,?,?)", turn, kind, JSON.stringify(data), ts);
+  ev(null, "user", { text: "first ask" }, t0 - 5000);
+  run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,started_at) VALUES('tu_rw0','th_rw','b_rw','completed','driver',?)", t0 - 4000);
+  ev("tu_rw0", "agent", { text: "first answer" }, t0 - 3000);
+  ev(null, "user", { text: "rebuild the ledger" }, t0 - 1);
+  run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,started_at,changes) VALUES('tu_rw1','th_rw','b_rw','completed','driver',?,?)", t0, JSON.stringify(ch1));
+  ev("tu_rw1", "tool", { type: "browser", title: "navigate", output: "- Page URL: https://www.zepto.com/orders\n" }, t0 + 10);
+  ev("tu_rw1", "agent", { text: "Done, rebuilt." }, t0 + 20);
+  run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,started_at,changes) VALUES('tu_rw2','th_rw2','b_rw','completed','driver',?,?)", t0 + 1000, JSON.stringify(ch2));
+
+  const p = R.rewindPlan("tu_rw1", "both");
+  assert.deepEqual(p.files.map((f) => `${f.kind} ${f.path}`).sort(), ["A data/bin.dat", "D new.txt", "D other.txt", "M a.txt", "M run.sh"]);
+  assert.ok(p.files.every((f) => f.ok)); assert.equal(p.otherThreads, 1); assert.equal(p.messages, 2); assert.deepEqual(p.websites, ["zepto.com"]);
+
+  // Something running on this member's workspace: no file rewind.
+  active.set("th_rw2", { turnId: "tu_x", codexTurnId: null, base: null, total: null, last: null, usageFrom: 0 });
+  await assert.rejects(R.rewind("tu_rw1", "files"), /running something/);
+  active.delete("th_rw2");
+
+  const r = await R.rewind("tu_rw1", "files");
+  assert.equal(r.failed.length, 0);
+  assert.equal(readFileSync(`${w}/a.txt`, "utf8"), "v1");
+  assert.deepEqual(readFileSync(`${w}/data/bin.dat`), bin, "binary files come back byte for byte");
+  assert.equal(readFileSync(`${w}/run.sh`, "utf8"), "#!/bin/sh\necho 1\n"); assert.equal(statSync(`${w}/run.sh`).mode & 0o777, 0o755);
+  assert.ok(!existsSync(`${w}/new.txt`) && !existsSync(`${w}/other.txt`)); assert.equal(readFileSync(`${w}/keep.txt`, "utf8"), "same");
+  assert.match(one("SELECT carry FROM threads WHERE id='th_rw'").carry, /^\[Pitcrew\] .* rewound your workspace files .*a\.txt/);
+  assert.equal(one("SELECT COUNT(*) n FROM events WHERE thread_id='th_rw' AND rewound IS NOT NULL").n, 0, "files only keeps the chat");
+  assert.equal(json(one("SELECT data FROM audit WHERE action='run.rewound' ORDER BY id DESC LIMIT 1").data).files, 5);
+  assert.equal(R.rewindPlan("tu_rw1", "files").files.length, 0, "a second look finds nothing left to change back");
+
+  // A link planted on the way never takes a write outside the workspace.
+  const outside = `${root}/outside`; mkdirSync(outside); symlinkSync(outside, `${w}/link`);
+  const h = s0.files["a.txt"].hash;
+  const res = S.restoreFiles(id, [{ path: "link/evil.txt", kind: "A", hash: h, mode: null, ok: true }, { path: "../escape.txt", kind: "A", hash: h, mode: null, ok: true }]);
+  assert.deepEqual(res.done, []); assert.match(res.failed[0].why, /link/);
+  assert.ok(!existsSync(`${outside}/evil.txt`) && !existsSync(`${root}/bots/${id}/escape.txt`));
+  symlinkSync(`${outside}/target.txt`, `${w}/a.lnk`);
+  S.restoreFiles(id, [{ path: "a.lnk", kind: "M", hash: h, mode: null, ok: true }]);
+  assert.ok(lstatSync(`${w}/a.lnk`).isFile() && !existsSync(`${outside}/target.txt`), "a link at the path is replaced, not followed");
+
+  // Chat: what followed the message is marked rewound; with no fork possible, the next message gets a recap without it.
+  run("UPDATE threads SET codex_id=NULL, carry=NULL WHERE id='th_rw'");
+  assert.equal(R.boundaryOf(one("SELECT * FROM turns WHERE id='tu_rw1'")), one("SELECT id FROM events WHERE thread_id='th_rw' AND kind='user' AND json_extract(data,'$.text')='rebuild the ledger'").id);
+  const c = await R.rewind("tu_rw1", "chat");
+  assert.equal(c.how, "recap");
+  assert.deepEqual(all("SELECT kind FROM events WHERE thread_id='th_rw' AND rewound IS NOT NULL ORDER BY id").map((e) => e.kind), ["user", "tool", "agent", "system"], "everything from the message on, the earlier file rewind's note too");
+  assert.match(json(one("SELECT data FROM events WHERE thread_id='th_rw' AND rewound IS NULL ORDER BY id DESC LIMIT 1").data).text, /^Rewound: the chat went back to before/);
+  assert.ok(one("SELECT rewound_at FROM turns WHERE id='tu_rw1'").rewound_at); assert.equal(one("SELECT rewound_at FROM turns WHERE id='tu_rw0'").rewound_at, null);
+  const carry = one("SELECT carry FROM threads WHERE id='th_rw'").carry;
+  assert.match(carry, /rewound by the driver/); assert.match(carry, /first answer/); assert.doesNotMatch(carry, /rebuild the ledger|Done, rebuilt/);
+  assert.match(carry, /files that run changed in \/bot\/work were kept/);
+  await assert.rejects(R.rewind("tu_rw1", "chat"), /already rewound/);
+  active.set("th_rw", { turnId: "tu_y", codexTurnId: null, base: null, total: null, last: null, usageFrom: 0 });
+  assert.throws(() => R.rewindPlan("tu_rw1", "files"), /Wait for the run/);
+  active.delete("th_rw");
+
+  // When the shadow must shrink, what the current manifest uses stays.
+  const now = S.snapshot(id);
+  S.pruneShadow(id, 0);
+  for (const f of Object.values(now.files)) assert.ok(existsSync(`${root}/data/shadow/${id}/objects/${f.hash}`));
+  assert.ok(!existsSync(`${root}/data/shadow/${id}/objects/${s1.files["new.txt"].hash}`), "an object nothing uses goes first");
+});

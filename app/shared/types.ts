@@ -93,8 +93,16 @@ export interface Thread {
   autonomy: string;
 }
 
-export type EventKind = "user" | "agent" | "tool" | "system" | "error" | "shot" | "image" | "changes" | "pitstop" | "surface" | "delegation" | "plan" | "learned";
-export interface ThreadEvent<D = Record<string, any>> { id: number; thread_id: string; turn_id: string | null; kind: EventKind; data: D; ts: number }
+export type EventKind = "user" | "agent" | "tool" | "system" | "error" | "shot" | "image" | "changes" | "pitstop" | "surface" | "delegation" | "plan" | "learned" | "check";
+/** rewound: when a rewind took this event out of the member's conversation (still drawn, under "Rewound"). */
+export interface ThreadEvent<D = Record<string, any>> { id: number; thread_id: string; turn_id: string | null; kind: EventKind; data: D; ts: number; rewound?: number | null }
+/** A done-check result as the thread draws it (runtime/donecheck.ts). */
+export interface CheckCriterion { text: string; verdict: "pass" | "fail" | "unknown"; why: string }
+/** What a rewind would change back (runtime/rewind.ts), for the confirm sheet. */
+export interface RewindPlan {
+  turnId: string; threadId: string; at: number; mode: "both" | "chat" | "files"; rewound: boolean;
+  files: { path: string; kind: "A" | "D" | "M"; ok: boolean; why?: string }[]; otherThreads: number; partial: boolean; messages: number; websites: string[];
+}
 
 /** A message waiting for the thread's run to end; it enters the transcript only when it goes to the member. via: the trigger. */
 export interface QueuedItem { id: string; text: string; attachments: string[]; via: string; display: string | null; created_at: number }

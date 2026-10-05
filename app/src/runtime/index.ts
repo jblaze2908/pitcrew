@@ -25,3 +25,5 @@ export { nextRun, addSchedule, listSchedules, updateSchedule, deleteSchedule } f
 export { takeControl, handBack, leaseHeld } from "./lease.js";
 export { killSwitch, resumeCrew, bootRuntime, settleCutTurns, resumable, resumeCut } from "./lifecycle.js";
 export { pushConfig, setPushConfig, pushTest, markPresent, readActToken, phoneMayApprove, pitForAct } from "./push.js";
+export { doneCheck, parseGrade, normCriteria, setDoneCriteria, gatherEvidence, retryPrompt, MAX_RETRIES } from "./donecheck.js";
+export { rewind, rewindPlan, boundaryOf, type RewindMode } from "./rewind.js";

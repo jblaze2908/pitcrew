@@ -20,7 +20,7 @@ export const ROOT = process.env.PITCREW_ROOT || "/srv/pitcrew";
 export const IMAGE = process.env.PITCREW_COMPUTER_IMAGE || "pitcrew-computer:1";
 export const BRAIN = process.env.PITCREW_BRAIN_CONTAINER || "pitcrew-brain";
 const CODEX_BIN = "/opt/pitcrew/brain/codex"; // harness/Dockerfile links it to the native binary
-const CREW_UID = 1500;
+export const CREW_UID = 1500;
 const MAX_UP = Number(process.env.PITCREW_MAX_COMPUTERS || 3);
 const IDLE_MS = Number(process.env.PITCREW_IDLE_MS || 10 * 60 * 1000);
 const BRAIN_IDLE_MS = 20 * 60 * 1000;
@@ -254,7 +254,7 @@ const SIDE = { id: "_side" };
 const SIDE_OFF = ["apps", "plugins", "remote_plugin", "plugin_sharing", "recommended_plugins", "tool_suggest", "skill_mcp_dependency_install", "skill_search",
   "browser_use", "browser_use_external", "browser_use_full_cdp_access", "computer_use", "in_app_browser", "in_app_chat", "image_generation", "multi_agent",
   "realtime_conversation", "goals", "shell_tool", "unified_exec", "shell_snapshot", "view_image", "sleep_tool", "code_mode_host", "workspace_dependencies", "hooks", "worktrees"];
-export type PlanAsk = (instructions: string, text: string, opts?: { model?: string; timeoutMs?: number }) => Promise<string>;
+export type PlanAsk = (instructions: string, text: string, opts?: { model?: string; timeoutMs?: number; images?: string[] }) => Promise<string>;
 /** Opens one side server for a batch of asks; close() when done. Null when the ChatGPT plan isn't connected. */
 export async function openPlanSide(): Promise<{ ask: PlanAsk; close: () => void } | null> {
   if (!existsSync(chatgptAuthPath())) return null;
@@ -267,13 +267,13 @@ export async function openPlanSide(): Promise<{ ask: PlanAsk; close: () => void 
     if (m === "item/completed" && q.item?.type === "agentMessage") t.text = q.item.text || "";
     else if (m === "turn/completed") t.done({ text: t.text, error: q.turn?.status === "completed" ? undefined : q.turn?.error?.message || q.turn?.status });
   });
-  const ask: PlanAsk = async (instructions, text, { model = "gpt-6-luna", timeoutMs = 60000 } = {}) => {
+  const ask: PlanAsk = async (instructions, text, { model = "gpt-6-luna", timeoutMs = 60000, images = [] } = {}) => {
     const st = await s.rpc.request("thread/start", { ephemeral: true, model, modelProvider: "openai", baseInstructions: instructions, sandbox: "read-only", approvalPolicy: "never", cwd: `/brains/${SIDE.id}/home` }, 30000);
     const id = st.thread.id;
     const out = new Promise<{ text: string; error?: string }>((done) => turns.set(id, { text: "", done }));
     let timer: NodeJS.Timeout | undefined;
     try {
-      await s.rpc.request("turn/start", { threadId: id, effort: "low", input: [{ type: "text", text, text_elements: [] }] }, 30000);
+      await s.rpc.request("turn/start", { threadId: id, effort: "low", input: [{ type: "text", text, text_elements: [] }, ...images.map((url) => ({ type: "image", url }))] }, 30000);
       const r = await Promise.race([out, new Promise<never>((_, no) => { timer = setTimeout(() => no(new Error("plan ask timed out")), timeoutMs); })]);
       if (r.error) throw new Error(r.error);
       return r.text;
