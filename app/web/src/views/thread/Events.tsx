@@ -14,6 +14,7 @@ import { StepIcon } from "../../components/StepIcon";
 import { api } from "../../lib/api";
 import { useFetch } from "../../lib/useFetch";
 import { catches } from "./Painting";
+import { ReplyActions } from "./Rewind";
 
 export const stepOk = (e: ThreadEvent) => e.data.status === "completed" && (e.data.exitCode == null || e.data.exitCode === 0);
 const isImg = (p: string) => /\.(png|jpe?g|webp|gif)$/i.test(p);
@@ -210,18 +211,36 @@ export interface EventCtx { cont?: boolean; b: Bot; fromName: string; pits: Reco
   onPlan?: () => void;
   /** Sends "continue" after a restart cut a run that won't resume on its own; unset once the driver has written since. */
   onContinue?: () => void;
-  images?: ImageIndex; onView?: (im: Img) => void; onCompare?: (im: Img) => void; onEdit?: (im: Img) => void; onMore?: (im: Img) => void; onKeep?: (id: string) => Promise<unknown> }
+  images?: ImageIndex; onView?: (im: Img) => void; onCompare?: (im: Img) => void; onEdit?: (im: Img) => void; onMore?: (im: Img) => void; onKeep?: (id: string) => Promise<unknown>;
+  /** The last reply of each finished, not yet rewound run: those get Copy and Rewind (Rewind.tsx). */
+  rewind?: { ids: Set<number>; onRewound: () => void } }
+
+/** A done-check result (runtime/donecheck.ts): "Checked" with its proof, a retry line, or why it wasn't checked. */
+function CheckLine({ d }: { d: Record<string, any> }) {
+  if (d.status === "retrying") return <p className="sys bad">{`Done-check couldn't confirm ${d.headline} · trying again (${d.attempt} of ${d.of})`}</p>;
+  if (d.status !== "passed") return <p className="sys faint">{`Not checked · ${d.why || "no grader"}`}</p>;
+  const src = d.proof?.file ? `/shots/${d.proof.botId}/${d.proof.file}` : null;
+  return (
+    <div className="ck">
+      {src && <a className="th" href={src} target="_blank" rel="noopener"><img src={src} alt="Proof" loading="lazy" /></a>}
+      <div className="tx"><b>Checked</b>{d.evidence ? ` · ${d.evidence}` : ""}
+        <small>{`Graded by a second model against ${d.n} criteri${d.n === 1 ? "on" : "a"}${d.attempt ? ` after ${d.attempt} ${d.attempt === 1 ? "retry" : "retries"}` : ""}${src ? " · proof kept" : ""}`}</small></div>
+    </div>
+  );
+}
 
 /** The element for one event, or null when it draws nothing (an unknown pit stop or surface). */
 export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
   const d = e.data;
   switch (e.kind) {
     // A scheduled run's prompt is the same every time: one line, not a message bubble.
-    case "user": return d.via === "retro" ? <p className="sys">{d.display || "Retro"}</p> : d.via === "resume" ? <p className="sys">{/^Pitcrew restarted/.test(d.text || "") ? "Picked up again after the restart" : "Picked up again after the usage limit reset"}</p> : d.via === "schedule" ? <p className="sys">{/^\[Event\]/.test(d.text || "") ? d.display || "Event" : `Scheduled run · ${String(d.text || "").replace(/^\[Scheduled: ([^\]]+)\][\s\S]*/, "$1")}`}</p> : <UserMsg e={e} botId={c.b.id} fromName={c.fromName} images={c.images} onView={c.onView} />;
+    case "user": return d.via === "check" ? <p className="sys bad">{d.display || "Done-check"}</p> : d.via === "retro" ? <p className="sys">{d.display || "Retro"}</p> : d.via === "resume" ? <p className="sys">{/^Pitcrew restarted/.test(d.text || "") ? "Picked up again after the restart" : "Picked up again after the usage limit reset"}</p> : d.via === "schedule" ? <p className="sys">{/^\[Event\]/.test(d.text || "") ? d.display || "Event" : `Scheduled run · ${String(d.text || "").replace(/^\[Scheduled: ([^\]]+)\][\s\S]*/, "$1")}`}</p> : <UserMsg e={e} botId={c.b.id} fromName={c.fromName} images={c.images} onView={c.onView} />;
     // A follow-on message from the same member (only steps between) drops the face; the column stays for alignment.
     // A scheduled run with nothing notable (runtime/turns.ts isQuiet): one faint line.
     case "agent": if (/^\s*QUIET\b/.test(d.text || "")) return <p className="sys faint">{`Nothing new · ${String(d.text).replace(/^\s*QUIET:?\s*/, "")}`}</p>;
-      return <div className={`msg bot${c.cont ? " cont" : ""}`}>{c.cont ? <span /> : <Face b={c.b} size="sm" mood="idle" />}<Md text={d.text} /></div>;
+      return <div className={`msg bot${c.cont ? " cont" : ""}`}>{c.cont ? <span /> : <Face b={c.b} size="sm" mood="idle" />}
+        {c.rewind?.ids.has(e.id) && e.turn_id ? <div className="reply"><Md text={d.text} /><ReplyActions text={d.text} turnId={e.turn_id} name={c.b.name} onRewound={c.rewind.onRewound} /></div> : <Md text={d.text} />}</div>;
+    case "check": return <CheckLine d={d} />;
     case "shot": return <Shot e={e} b={c.b} />;
     case "image": return <Images e={e} b={c.b} c={c} />;
     case "tool": return <Tool e={e} />;

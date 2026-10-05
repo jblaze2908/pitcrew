@@ -27,6 +27,7 @@ import { memberLinked } from "../engramStore.js";
 import { generateImage, paletteFor, DEFAULT_IMAGE_MODEL, recordImage, imageAt } from "../images.js";
 import { startPainting, endPainting } from "./painting.js";
 import { weekSpend } from "./spend.js";
+import { setDoneCriteria } from "./donecheck.js";
 
 const ist = (t: number | null) => (t ? new Date(t + IST).toISOString().slice(0, 16).replace("T", " ") : "—");
 
@@ -255,6 +256,10 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
       if (!s.title || !s.evidence) return say("A suggestion needs a title and the evidence (runs, numbers, what happened).", false);
       const r = suggest(b.id, threadId, s);
       return say(r.repeat ? "Already suggested; your evidence was added to it." : `Filed as ${r.id} for ${getSetting("driver_name", "the driver")} to review.`);
+    }
+    case "set_done_criteria": {
+      const r = setDoneCriteria(threadId, a.criteria);
+      return say(r.text, r.ok);
     }
     case "harness_help": {
       const page = harnessHelp(String(a.topic || ""), getSetting("driver_name", "the driver"));

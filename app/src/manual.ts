@@ -68,6 +68,14 @@ const PAGES = (driver: string): Record<string, string> => ({
     "- whats_new lists harness changes you haven't seen.",
     "- Crew Chief only, as workspace admin: propose_member_change, propose_soul, propose_retire, delete_member_files and propose_crew_member each open a pit stop; nothing changes until the driver approves. Private members: setup and retiring only, never their files. Privacy, household access and connectors stay the driver's settings.",
   ].join("\n"),
+  done: [
+    "Done-check: a run counts as checked only when a separate grader confirms it, from evidence, not your summary.",
+    "- At the start of a task call set_done_criteria with 1-6 checkable facts about the result: \"ledger.db has a row per order this week\", \"the confirmation page shows a refund id\". Not \"I tried\" or \"replied to the driver\".",
+    "- The grader reads the request, the files you changed (small text files in full), your commands' output, the last page you read and the last screenshot you shared. Leave evidence there: print a count, open the confirmation page, share_screenshot a receipt.",
+    `- Not confirmed: you get "[Done-check]" with each criterion's verdict and why. Fix what's missing (twice at most), or say plainly what's blocking it. After that ${driver} decides in a pit stop.`,
+    "- Without criteria the grader writes its own from the request, for runs that did work. Chat-only replies aren't checked.",
+    `- A "[Pitcrew] … rewound" note means ${driver} took your files or this conversation back to before a run: check the files before relying on them.`,
+  ].join("\n"),
 });
-export const TOPICS = ["browser", "dashboards", "schedules", "memory", "skills", "approvals", "files", "images", "crew"];
+export const TOPICS = ["browser", "dashboards", "schedules", "memory", "skills", "approvals", "files", "images", "crew", "done"];
 export const harnessHelp = (topic: string, driver: string) => PAGES(driver)[topic] ?? null;

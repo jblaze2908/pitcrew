@@ -12,7 +12,8 @@ import { readJson, jsonBody, pick, field } from "../http/body.js";
 import { pitRow, LEARNED, liveLearned } from "./views.js";
 import type { LearnedRow, PitstopRow } from "../models.js";
 
-const SCOPES = ["once", "thread", "always", "site", "full", "block"] as const;
+// retry: a done-check pit stop's "Try again" (runtime/donecheck.ts).
+const SCOPES = ["once", "thread", "always", "site", "full", "block", "retry"] as const;
 const Decide = z.object({ decision: pick(["approve"], "deny"), scope: pick(SCOPES, "once"), note: field((v) => v || ""), spec: field((v) => v || null) });
 const Batch = z.object({ ids: field((v): unknown[] => (v || []).slice(0, 50)), decision: pick(["approve"], "deny") });
 
