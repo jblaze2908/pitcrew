@@ -15,7 +15,9 @@ const GUESS_AFTER_MS = 600;
 const STARTERS = ["Pay this month's electricity bill", "Compare my health-insurance renewal", "Watch BLR → GOI fares for 14 Dec"];
 
 const short = (t: string, n = 48) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
-export function AskBox({ onSent }: { onSent: () => void }) {
+type Sent = (r: { threadId: string; botId: string }) => void;
+/** to: a member to start with (New thread with …); the pill and @ can still change it. */
+export function AskBox({ onSent, to }: { onSent: Sent; to?: string | null }) {
   const { S, setS } = useStore();
   if (S.paused || !connected(S)) {
     return (
@@ -28,7 +30,7 @@ export function AskBox({ onSent }: { onSent: () => void }) {
       </div>
     );
   }
-  return <LiveAskBox onSent={onSent} />;
+  return <LiveAskBox onSent={onSent} start={to ?? null} />;
 }
 
 /** Name matching for the crew: who a text names, and the text split into plain runs and highlighted names. */
@@ -61,11 +63,11 @@ function useNames(bots: BotCard[]) {
 
 type Menu = { mode: "pill" } | { mode: "mention"; filter: string; start: number; caret: number };
 
-function LiveAskBox({ onSent }: { onSent: () => void }) {
+function LiveAskBox({ onSent, start }: { onSent: Sent; start: string | null }) {
   const { S, bot, chief } = useStore();
   const { specialists, namedIn, highlight } = useNames(S.bots);
   const [text, setText] = useState("");
-  const [to, setTo] = useState<string | null>(null);
+  const [to, setTo] = useState<string | null>(start);
   const [guess, setGuess] = useState<RoutePick | null>(null);
   const [pending, setPending] = useState(false);
   const [menu, setMenu] = useState<Menu | null>(null);
@@ -141,7 +143,7 @@ function LiveAskBox({ onSent }: { onSent: () => void }) {
       if ("choose" in r) { setGuess({ botId: r.choose[0], confidence: 0, alternatives: r.choose.slice(1).map((x) => ({ botId: x })), by: "choose" }); return; }
       setText(""); setTo(null); setGuess(null);
       toast(`Sent to ${bot(r.botId)?.name || "the crew"}`);
-      onSent();
+      onSent(r);
     } finally { setSending(false); }
   };
 

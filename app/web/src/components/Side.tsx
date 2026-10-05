@@ -54,7 +54,7 @@ export function Side({ route }: { route: Route }) {
     <aside className="side folded">
       <a href="#/" className="logo" title="Home"><pc-logo size="sm" wordmark="none" /></a>
       <button className="ib" title="Show the sidebar" onClick={toggle}><Icon name="rail" /></button>
-      <a className="ib nb" href="#/" title="New thread"><Icon name="plus" /></a>
+      <a className="ib nb" href="#/new" title="New thread"><Icon name="plus" /></a>
       <span className="sep" />
       {nav("wall", "home", "Home", "#/", pending.length)}
       {nav("threads", "threads", "Threads", "#/threads")}
@@ -69,7 +69,7 @@ export function Side({ route }: { route: Route }) {
     <aside className="side">
       <div className="top"><a href="#/" className="logo"><pc-logo size="sm" /></a><button className="ib" title="Fold the sidebar" onClick={toggle}><Icon name="rail" /></button></div>
       {S.paused && <a className="stopped" href="#/">Crew stopped · resume</a>}
-      <a className="newt" href="#/"><Icon name="plus" />New thread</a>
+      <a className={`newt ${route.name === "new" ? "on" : ""}`} href="#/new"><Icon name="plus" />New thread</a>
       <nav>
         {nav("wall", "home", "Home", "#/", pending.length)}
         {nav("threads", "threads", "Threads", "#/threads")}

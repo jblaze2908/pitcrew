@@ -87,6 +87,13 @@ function ScreenTab({ b, lease, onHandBack }: { b: BotCard; lease: boolean; onHan
     </div>);
 }
 
+/** jev's call on the line: what kind of action it was and whether it ran without asking. */
+function Gate({ g }: { g?: { effect: string; decision: string } | null }) {
+  if (!g) return null;
+  const label = g.decision === "allow" ? "allowed" : g.decision === "ask" ? "pit stop" : g.decision === "block" ? "blocked" : g.decision;
+  return <span className={`gate ${g.decision === "allow" ? "" : "sig"}`} title="jev's call on this command">{`${g.effect.replace(/_/g, " ")} · ${label}`}</span>;
+}
+
 const cwdName = (cwd: string | null | undefined) => (cwd ? cwd.replace(/^\/bot\/work\/?/, "~/work/").replace(/\/$/, "") || "~/work" : "~/work");
 const secs = (ms: number | null | undefined) => (ms == null ? "" : ms < 1000 ? `${(ms / 1000).toFixed(1)} s` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms / 60000)} min`);
 
@@ -109,13 +116,13 @@ function TerminalTab({ b, events, live }: { b: BotCard; events: ThreadEvent[]; l
           return (
             <div key={e.id} className="blk">
               <div className="pr"><span className="cwd">{cwdName(e.data.cwd)}</span><span className="cmd">{`$ ${cmd}`}</span>
-                <span className="meta">{e.data.status === "declined" ? <span className="bad">declined</span> : code != null && <span className={code === 0 ? "ok" : "bad"}>{code}</span>}<span>{secs(e.data.durationMs)}</span><span>{hm(e.ts)}</span></span></div>
+                <span className="meta"><Gate g={e.data.gate} />{e.data.status === "declined" ? <span className="bad">declined</span> : code != null && <span className={code === 0 ? "ok" : "bad"}>{code}</span>}<span>{secs(e.data.durationMs)}</span><span>{hm(e.ts)}</span></span></div>
               {e.data.output ? <pre className="out">{String(e.data.output)}</pre> : null}
             </div>);
         })}
         {live.filter((c) => match(c.command)).map((c) => (
           <div key={c.itemId} className="blk hl">
-            <div className="pr"><span className="cwd">{cwdName(c.cwd)}</span><span className="cmd">{`$ ${c.command}`}</span><span className="meta"><Loader /></span></div>
+            <div className="pr"><span className="cwd">{cwdName(c.cwd)}</span><span className="cmd">{`$ ${c.command}`}</span><span className="meta"><Gate g={c.gate} /><Loader /></span></div>
             <pre className="out">{c.output}<span className="cur" /></pre>
           </div>))}
       </div>

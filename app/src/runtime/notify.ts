@@ -3,7 +3,7 @@ import { run } from "../db.js";
 import { recordChatgptLimits } from "../providers.js";
 import type { Brain } from "../computer.js";
 import { bus } from "./bus.js";
-import { active, byCodex, items, liveCommands, OUT_CAP, usage } from "./state.js";
+import { active, byCodex, items, liveCommands, OUT_CAP, shellVerdicts, usage } from "./state.js";
 import { addEvent } from "./threads.js";
 import { finishTurn } from "./turns.js";
 import { subtract } from "./spend.js";
@@ -52,8 +52,9 @@ export function onNotify(c: Brain, method: string, p: Record<string, any>) {
       const it = p.item; items.set(it.id, it);
       if (it.type === "commandExecution") {
         const command = String(it.command || "").replace(/^\/bin\/(ba)?sh -l?c /, "").slice(0, 8000), cwd = it.cwd ?? null;
-        liveCommands.set(it.id, { itemId: it.id, threadId, command, cwd, startedAt: Date.now(), output: "" });
-        bus.emit("output", { threadId, itemId: it.id, command, cwd });
+        const gate = shellVerdicts.get(`${threadId}\n${it.command}`) || null;
+        liveCommands.set(it.id, { itemId: it.id, threadId, command, cwd, startedAt: Date.now(), output: "", gate });
+        bus.emit("output", { threadId, itemId: it.id, command, cwd, gate });
       }
       // A Code Mode script's nested call: show the script (from the rollout) before its calls.
       if (typeof it.id === "string" && it.id.startsWith("exec-")) scanScripts(threadId, a?.turnId, c.bot.id, p.threadId);
@@ -67,8 +68,8 @@ export function onNotify(c: Brain, method: string, p: Record<string, any>) {
       const it = p.item; items.delete(it.id); liveCommands.delete(it.id);
       const via = typeof it.id === "string" && it.id.startsWith("exec-") ? { viaScript: true } : {};
       if (it.type === "agentMessage" && it.text?.trim()) addEvent(threadId, a?.turnId, "agent", { text: it.text, itemId: it.id });
-      else if (it.type === "commandExecution") addEvent(threadId, a?.turnId, "tool", { type: it.type, itemId: it.id, title: toolTitle(it), status: it.status, exitCode: it.exitCode ?? null, output: String(it.aggregatedOutput || "").slice(-8000),
-        input: String(it.command || "").slice(0, 8000), cwd: it.cwd ?? null, durationMs: it.durationMs ?? null, ...via });
+      else if (it.type === "commandExecution") { const k = `${threadId}\n${it.command}`, g = shellVerdicts.get(k) || null; shellVerdicts.delete(k); addEvent(threadId, a?.turnId, "tool", { type: it.type, itemId: it.id, gate: g, title: toolTitle(it), status: it.status, exitCode: it.exitCode ?? null, output: String(it.aggregatedOutput || "").slice(-8000),
+        input: String(it.command || "").slice(0, 8000), cwd: it.cwd ?? null, durationMs: it.durationMs ?? null, ...via }); }
       else if (it.type === "mcpToolCall") addEvent(threadId, a?.turnId, "tool", { type: it.type, title: toolTitle(it), status: it.status, output: mcpResultText(it, 8000), error: it.error?.message ? String(it.error.message).slice(0, 4000) : null,
         server: it.server, tool: it.tool, input: debugArgs(it.arguments), durationMs: it.durationMs ?? null,
         ...(it.server === "engram" ? { conn: connName(c.bot.id, String(it.tool)) } : {}), ...via });
