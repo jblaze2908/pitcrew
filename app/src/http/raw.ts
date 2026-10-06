@@ -9,20 +9,24 @@ import { serveShot, SHOT_NAME } from "../shots.js";
 import { send, serveFile as serveCached } from "../delivery.js";
 import { proxyCode } from "../code.js";
 import { authed } from "./guard.js";
+import { pipeline } from "node:stream";
 
 // Files from a crew member's workspace, served as downloads only (never rendered inline).
 function serveFile(req: IncomingMessage, res: ServerResponse, botId: string, rel: string) {
   if (!getBot(botId)) return send(res, 404, "Not found");
   let base: string, full: string;
   try { base = realpathSync(`${botDir(botId)}/work`); full = realpathSync(join(base, normalize(decodeURIComponent(rel)))); } catch { return send(res, 404, "Not found"); }
-  if (!full.startsWith(base + "/") || !statSync(full).isFile()) return send(res, 404, "Not found");
+  const st = full.startsWith(base + "/") ? statSync(full) : null;
+  if (!st?.isFile()) return send(res, 404, "Not found");
   // Images may render inline (thumbnails); everything else is a download. Inline responses are sandboxed.
   const IMG: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml" };
   const inline = new URL(req.url!, "http://x").searchParams.get("inline") === "1" && IMG[extname(full).toLowerCase()];
   res.writeHead(200, inline
-    ? { "Content-Type": inline, "Content-Security-Policy": "sandbox; default-src 'none'", "X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600", "Content-Length": statSync(full).size }
-    : { "Content-Type": "application/octet-stream", "Content-Disposition": `attachment; filename="${full.split("/").pop()!.replace(/[^\w.-]/g, "_")}"`, "X-Content-Type-Options": "nosniff", "Content-Length": statSync(full).size });
-  createReadStream(full).pipe(res);
+    ? { "Content-Type": inline, "Content-Security-Policy": "sandbox; default-src 'none'", "X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600", "Content-Length": st.size }
+    : { "Content-Type": "application/octet-stream", "Content-Disposition": `attachment; filename="${full.split("/").pop()!.replace(/[^\w.-]/g, "_")}"`, "X-Content-Type-Options": "nosniff", "Content-Length": st.size });
+  // pipeline, not pipe: a file gone since the stat ends the response instead of an unhandled stream error, and an aborted
+  // download closes the file.
+  pipeline(createReadStream(full), res, () => {});
 }
 
 // App files revalidate on every load (no-cache + ETag, so a deploy shows at once); vendored noVNC keeps a day.

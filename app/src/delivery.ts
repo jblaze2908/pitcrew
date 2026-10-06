@@ -1,5 +1,6 @@
 // Response delivery: compressed, revalidatable static files and gzipped JSON. node:zlib only.
 import { statSync, readFileSync, createReadStream } from "node:fs";
+import { pipeline } from "node:stream";
 import { createHash } from "node:crypto";
 import { extname } from "node:path";
 import type { IncomingMessage, ServerResponse, OutgoingHttpHeaders } from "node:http";
@@ -49,7 +50,7 @@ export function serveFile(req: IncomingMessage, res: ServerResponse, full: strin
   let st: Stats; try { st = statSync(full); } catch { return false; }
   if (!st.isFile()) return false;
   const type = TYPES[extname(full)] || "application/octet-stream";
-  if (st.size > MAX_CACHED) { res.writeHead(200, { "Content-Type": type, "Cache-Control": cacheControl, "Content-Length": st.size }); createReadStream(full).pipe(res); return true; }
+  if (st.size > MAX_CACHED) { res.writeHead(200, { "Content-Type": type, "Cache-Control": cacheControl, "Content-Length": st.size }); pipeline(createReadStream(full), res, () => {}); return true; }
   const e = entry(full, st), enc = negotiate(req.headers["accept-encoding"], ["br", "gzip"].filter((k) => e[k as Encoding])) as Encoding | null;
   const h: OutgoingHttpHeaders = { "Content-Type": e.type, "Cache-Control": cacheControl, ETag: `"${e.hash}${enc ? `.${enc}` : ""}"`, "Last-Modified": e.modified };
   if (e.br || e.gzip) h.Vary = "Accept-Encoding";

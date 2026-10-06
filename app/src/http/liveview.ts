@@ -43,6 +43,9 @@ export function liveView(req: IncomingMessage, sock: Duplex) {
       else if (op === 2 || op === 0 || op === 1) vnc.write(data);
     }
   });
-  const close = () => { if (comp && comp.viewers > 0) { comp.viewers--; comp.lastActive = Date.now(); } vnc.destroy(); sock.destroy(); };
+  // Once per viewer: destroy() re-fires close/error on both sockets, and a second decrement would let the idle sweeper
+  // stop a computer another tab still watches.
+  let closed = false;
+  const close = () => { if (closed) return; closed = true; if (comp && comp.viewers > 0) { comp.viewers--; comp.lastActive = Date.now(); } vnc.destroy(); sock.destroy(); };
   vnc.on("close", close); vnc.on("error", close); sock.on("close", close); sock.on("error", close);
 }
