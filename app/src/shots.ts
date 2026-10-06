@@ -2,6 +2,7 @@
 import { spawn } from "node:child_process";
 import { posix } from "node:path";
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, unlinkSync, realpathSync, createReadStream } from "node:fs";
+import { pipeline } from "node:stream";
 import { ROOT, botDir, PW_OUT } from "./computer.js";
 import type { ServerResponse } from "node:http";
 
@@ -66,5 +67,5 @@ export function serveShot(res: ServerResponse, botId: string, file: string) {
   const full = `${DIR(botId)}/${file}`;
   let size: number; try { size = statSync(full).size; } catch { res.writeHead(404); return res.end("Not found"); }
   res.writeHead(200, { "Content-Type": "image/jpeg", "Content-Security-Policy": "sandbox; default-src 'none'", "X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=86400", "Content-Length": size });
-  createReadStream(full).pipe(res);
+  pipeline(createReadStream(full), res, () => {}); // a file pruned since the stat must not crash the process
 }

@@ -103,3 +103,11 @@ test("/api/bots/:id/changes?thread= reaches a thread's older runs past the membe
   assert.equal((await get(`/api/bots/${m.id}/changes`)).some((r) => r.id === "tu_ch_old"), false);
   assert.deepEqual((await get(`/api/bots/${m.id}/changes?thread=th_ch_old`)).map((r) => r.id), ["tu_ch_old"]);
 });
+
+test("a stored schedule whose spec no longer parses is switched off, not thrown out of the tick", async () => {
+  const { tickSchedules } = await import("../app/dist/src/runtime/schedules.js");
+  const { one } = await import("../app/dist/src/db.js");
+  run("INSERT INTO schedules(id,bot_id,spec,prompt,next_run,enabled,created_at) VALUES(?,?,?,?,?,1,?)", "sc_stale", "chief", "every 5 minutes", "x", now() - 1000, now());
+  assert.doesNotThrow(() => tickSchedules());
+  assert.equal(one("SELECT enabled FROM schedules WHERE id=?", "sc_stale").enabled, 0);
+});

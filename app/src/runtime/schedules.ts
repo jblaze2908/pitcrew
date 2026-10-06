@@ -127,7 +127,10 @@ export function tickSchedules() {
     sendMessage(r.threadId, { text: "[Pitcrew] The usage limit has reset. Continue where you stopped; don't redo work that's already done.", mode: "queue", trigger: "resume" }).catch((e) => addEvent(r.threadId, null, "error", { text: e.message }));
   }
   for (const s of all<ScheduleRow>("SELECT * FROM schedules WHERE enabled=1 AND next_run<=?", now())) {
-    run("UPDATE schedules SET last_run=?, next_run=? WHERE id=?", now(), nextRun(s.spec), s.id);
+    // A stored spec that no longer parses (rules tightened since) would throw out of the interval and crash every tick.
+    let next: number | null;
+    try { next = nextRun(s.spec); } catch (e: any) { run("UPDATE schedules SET enabled=0 WHERE id=?", s.id); audit("system", "schedule.disabled", { id: s.id, spec: s.spec, why: String(e.message) }); continue; }
+    run("UPDATE schedules SET last_run=?, next_run=? WHERE id=?", now(), next, s.id);
     fire(s, "time", s.next_run!);
   }
 }
