@@ -42,7 +42,9 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
   };
   // The main choice is the plain primary pill; orange stays for "needs you" (the card's ring), not for buttons.
   const btn = (label: string, onClick: () => void, main = false) => <button className={`pc-pill ${main ? "" : "o"} s`} onClick={onClick}>{label}</button>;
-  const openLink = (label: string) => p.thread_id && <a className="small faint" href={`#/t/${p.thread_id}`} style={{ marginLeft: "auto" }}>{label}</a>;
+  // Inside that thread already, a link to it would do nothing.
+  const here = !!p.thread_id && location.hash.startsWith(`#/t/${p.thread_id}`);
+  const openLink = (label: string) => p.thread_id && !here && <a className="small faint" href={`#/t/${p.thread_id}`} style={{ marginLeft: "auto" }}>{label}</a>;
   const noteInput = <input placeholder="Note for the crew (optional)" className="small" value={note} onChange={(e) => setNote(e.target.value)} />;
   const noAlways = ["pay", "delete", "share"].includes(p.effect) || p.kind === "hire" || p.kind === "plan";
 
@@ -113,8 +115,8 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
   else if (p.kind === "files") actions = <div className="acts">{btn("Delete", () => decide("approve", "once"), true)}{btn("Keep files", () => decide("deny"))}{openLink("Open thread")}</div>;
   // Done-check: approve once accepts the run as is; approve with scope retry sends the member back once more.
   else if (p.kind === "check") actions = <div className="acts">
-    {p.thread_id && <a className="pc-pill s" href={`#/t/${p.thread_id}`}>Open the thread</a>}
-    {btn("Accept as is", () => decide("approve", "once"))}
+    {p.thread_id && !here && <a className="pc-pill s" href={`#/t/${p.thread_id}`}>Open the thread</a>}
+    {btn("Accept as is", () => decide("approve", "once"), here)}
     {btn("Try again", () => decide("approve", "retry"))}</div>;
   else if (p.kind === "teach") actions = <div className="acts">{btn("Save as skill", () => decide("approve", "once"), true)}{btn("Not now", () => decide("deny"))}</div>;
   else if (p.kind === "plan") actions = <div className="acts">

@@ -66,7 +66,7 @@ export function parseGrade(raw: string, given: string[]): Grade | null {
     criteria.push({ text, verdict: c.verdict, why: clip(c.why, 300) });
   }
   const passed = criteria.every((c) => c.verdict === "pass"), miss = criteria.find((c) => c.verdict !== "pass");
-  return { criteria, passed, evidence: clip(o.evidence, 160), fix: clip(o.fix, 240), headline: passed ? "" : clip(o.headline, 140) || miss!.text };
+  return { criteria, passed, evidence: clip(o.evidence, 160), fix: clip(o.fix, 240), headline: passed ? "" : clip(String(o.headline || "").replace(/^couldn'?t confirm:?\s*/i, ""), 140) || miss!.text };
 }
 
 // ---------- evidence ----------
