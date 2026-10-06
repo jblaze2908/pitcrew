@@ -1,12 +1,13 @@
 // Member Settings: one column of sections with a pinned list on the left. Everything saves as you change it:
 // toggles and choices at once, text when you leave the field.
-import { useEffect, useRef, useState, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
-import type { BotCard, BotDetail, Decision, EngramScope, Hue, ProviderId, Shape, SitesView } from "../../../../shared/types";
-import { RuleLabel } from "../../components/Approvals";
+import { useEffect, useRef, useState, type ReactNode, type TextareaHTMLAttributes } from "react";
+import type { BotCard, BotDetail, Decision, EngramScope, ProviderId, SitesView } from "../../../../shared/types";
+import { RuleLabel } from "../../components/RuleLabel";
 import { MailboxCard } from "../../components/MailboxCard";
 import { ModelPicker } from "../../components/ModelPicker";
+import { useFlash } from "../settings/kit";
 import { Sites as SiteList } from "../settings/Sites";
-import { ConfirmButton, Face, Seg, hueStyle } from "../../components/ui";
+import { BlurInput, ConfirmButton, Face, HUES, Seg, SHAPES, Switch, hueStyle } from "../../components/ui";
 import { api } from "../../lib/api";
 import { when } from "../../lib/format";
 import { go } from "../../lib/router";
@@ -14,9 +15,8 @@ import { useStore } from "../../lib/store";
 import { toast } from "../../lib/toast";
 import { useFetch } from "../../lib/useFetch";
 
-export const DIALS = ["warmth", "talk", "humour"] as const;
+const DIALS = ["warmth", "talk", "humour"] as const;
 export const SCOPE_LABEL: Record<EngramScope, string> = { personal: "Personal", finance: "Money", health: "Health" };
-export const splitQuirks = (s: string) => s.split(";").map((x) => x.trim()).filter(Boolean);
 const DIAL_ENDS: Record<(typeof DIALS)[number], [string, string]> = { warmth: ["Dry", "Warm"], talk: ["Brief", "Chatty"], humour: ["Serious", "Playful"] };
 
 /** Hire's checkbox for household facts; member Settings uses a toggle row instead. */
@@ -35,14 +35,12 @@ type Save = (key: string, patch: Record<string, unknown>) => Promise<void>;
 
 export function ProfileTab({ b, d, section, reload }: { b: BotCard; d: BotDetail; section?: string; reload: () => void }) {
   const { refresh } = useStore();
-  const [saved, setSaved] = useState<string | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  useEffect(() => () => clearTimeout(timer.current), []);
+  const [saved, flash] = useFlash<string>(2000);
   // One PATCH per change; the store refresh carries it to the header and sidebar. "Saved" shows by that row for 2 s.
   const save: Save = async (key, patch) => {
     await api.patch(`/api/bots/${b.id}`, patch);
     await refresh();
-    setSaved(key); clearTimeout(timer.current); timer.current = setTimeout(() => setSaved(null), 2000);
+    flash(key);
   };
   const chief = b.kind === "chief";
   const sections = SECTIONS.filter(([k]) => !(chief && k === "retire"));
@@ -58,8 +56,8 @@ export function ProfileTab({ b, d, section, reload }: { b: BotCard; d: BotDetail
 
         <Section id="profile" title="Profile">
           <Row label="Face" help="Shows everywhere this member appears." saved={ok("face")}><FacePicker b={b} save={save} /></Row>
-          <Row label="Name" help={chief ? "The Crew Chief keeps its name." : undefined} saved={ok("name")}><Text aria-label="Name" value={b.name} disabled={chief} onSave={(v) => v.trim() && save("name", { name: v.trim() })} /></Row>
-          <Row label="Role line" help="One line, shown under its name." saved={ok("role")}><Text aria-label="Role line" value={p.role || ""} placeholder="Calm race engineer. Facts first." onSave={(v) => save("role", { personality: { role: v } })} /></Row>
+          <Row label="Name" help={chief ? "The Crew Chief keeps its name." : undefined} saved={ok("name")}><BlurInput aria-label="Name" value={b.name} disabled={chief} onSave={(v) => v.trim() && save("name", { name: v.trim() })} /></Row>
+          <Row label="Role line" help="One line, shown under its name." saved={ok("role")}><BlurInput aria-label="Role line" value={p.role || ""} placeholder="Calm race engineer. Facts first." onSave={(v) => save("role", { personality: { role: v } })} /></Row>
         </Section>
 
         <Section id="job" title="Job and instructions" intro="The job says what it's for. Instructions say how it works. Most members only need a job.">
@@ -74,15 +72,15 @@ export function ProfileTab({ b, d, section, reload }: { b: BotCard; d: BotDetail
         <Section id="voice" title="Voice" intro="How it sounds, nothing more. Voice never changes permissions, spending or the safety check, and pit stops and money are always plain.">
           {DIALS.map((k) => <Row key={k} label={k[0].toUpperCase() + k.slice(1)} saved={ok(k)}><Dial value={p[k] || 3} ends={DIAL_ENDS[k]} label={k} onSave={(v) => save(k, { personality: { [k]: v } })} /></Row>)}
           <Block label="Quirks" help="Up to three habits it keeps." saved={ok("quirks")}><Quirks list={p.quirks || []} onSave={(q) => save("quirks", { personality: { quirks: q } })} /></Block>
-          <Row label="Calls you" saved={ok("callMe")}><Text aria-label="Calls you" value={p.callMe || ""} placeholder="Your name" onSave={(v) => save("callMe", { personality: { callMe: v } })} /></Row>
-          <Row label="Sign-off" help="Optional. Added to the end of longer replies." saved={ok("signoff")}><Text aria-label="Sign-off" value={p.signoff || ""} placeholder="None" onSave={(v) => save("signoff", { personality: { signoff: v } })} /></Row>
+          <Row label="Calls you" saved={ok("callMe")}><BlurInput aria-label="Calls you" value={p.callMe || ""} placeholder="Your name" onSave={(v) => save("callMe", { personality: { callMe: v } })} /></Row>
+          <Row label="Sign-off" help="Optional. Added to the end of longer replies." saved={ok("signoff")}><BlurInput aria-label="Sign-off" value={p.signoff || ""} placeholder="None" onSave={(v) => save("signoff", { personality: { signoff: v } })} /></Row>
           <Row label="Plain voice" help="Drops the personality and writes plainly." saved={ok("plain")}><Toggle on={!!p.plain} label="Plain voice" onChange={(v) => save("plain", { personality: { plain: v } })} /></Row>
         </Section>
 
         <Section id="model" title="Model and spending">
           <Block label="Model" help="Set up providers in Settings, Models." saved={ok("model")}><Model b={b} save={save} /></Block>
           <Row label="Weekly cap" help="New runs stop once this week's estimate reaches it." saved={ok("cap")}>
-            <span className="cap"><span className="faint">$</span><Text aria-label="Weekly cap in dollars" type="number" min={0} step="0.5" value={String(b.weekly_cap_usd)} onSave={(v) => v !== "" && +v >= 0 && save("cap", { weekly_cap_usd: +v })} /></span>
+            <span className="cap"><span className="faint">$</span><BlurInput aria-label="Weekly cap in dollars" type="number" min={0} step="0.5" value={String(b.weekly_cap_usd)} onSave={(v) => v !== "" && +v >= 0 && save("cap", { weekly_cap_usd: +v })} /></span>
           </Row>
         </Section>
 
@@ -146,12 +144,6 @@ function Block({ label, help, saved, children }: { label: string; help?: string;
   return <div className="br"><div className="brh"><p className="ms-l">{label}</p><Saved on={saved} /></div>{help && <p className="ms-h">{help}</p>}{children}</div>;
 }
 
-/** An input that saves when you leave it, and only if it changed. */
-function Text({ value, onSave, ...rest }: { value: string; onSave: (v: string) => unknown } & Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange">) {
-  const [v, setV] = useState(value);
-  useEffect(() => setV(value), [value]);
-  return <input {...rest} value={v} onChange={(e) => setV(e.target.value)} onBlur={() => v !== value && onSave(v)} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />;
-}
 function Area({ value, max, onSave, ...rest }: { value: string; max?: number; onSave: (v: string) => unknown } & Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "value" | "onChange">) {
   const [v, setV] = useState(value);
   useEffect(() => setV(value), [value]);
@@ -160,9 +152,7 @@ function Area({ value, max, onSave, ...rest }: { value: string; max?: number; on
     {max && <p className="cnt">{`${v.length.toLocaleString("en-IN")} / ${max.toLocaleString("en-IN")}`}</p>}
   </>;
 }
-function Toggle({ on, label, onChange }: { on: boolean; label: string; onChange: (v: boolean) => void }) {
-  return <button role="switch" aria-checked={on} aria-label={label} className={`tg${on ? " on" : ""}`} onClick={() => onChange(!on)} />;
-}
+const Toggle = (p: { on: boolean; label: string; onChange: (v: boolean) => void }) => <Switch className="tg" {...p} />;
 /** A 1–5 slider with words at each end; saves 400 ms after the last move. */
 function Dial({ value, ends, label, onSave }: { value: number; ends: [string, string]; label: string; onSave: (v: number) => void }) {
   const [v, setV] = useState(value);
@@ -172,8 +162,6 @@ function Dial({ value, ends, label, onSave }: { value: number; ends: [string, st
   return <span className="sl"><span>{ends[0]}</span><input type="range" min={1} max={5} value={v} aria-label={label} onChange={(e) => move(+e.target.value)} /><span>{ends[1]}</span></span>;
 }
 
-const HUES: Hue[] = ["c1", "c2", "c3", "c5", "c6"];
-const SHAPES: Shape[] = ["square", "round", "blob"];
 function FacePicker({ b, save }: { b: BotCard; save: Save }) {
   return (
     <span className="face">
@@ -277,5 +265,5 @@ function Privacy({ b, save, ok }: { b: BotCard; save: Save; ok: (k: string) => b
 function Email({ b }: { b: BotCard }) {
   const f = useFetch(() => api.get<{ domain: string }>("/api/mail", { quiet: true }), []);
   if (f.error) return <p className="ms-h">{`Couldn't load email settings: ${f.error}`}</p>;
-  return f.data ? <div className="mailbox"><MailboxCard botId={b.id} name={b.name} domain={f.data.domain} onSaved={() => {}} /></div> : null;
+  return f.data ? <div className="mailbox"><MailboxCard botId={b.id} name={b.name} domain={f.data.domain} /></div> : null;
 }

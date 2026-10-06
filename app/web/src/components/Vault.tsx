@@ -102,9 +102,8 @@ function VaultEditor({ v, bots, done }: { v: VaultEntry | null; bots: BotCard[];
   );
 }
 
-// A one-time-code seed: base32, an otpauth:// link, or Google Authenticator's export (otpauth-migration://, the
-// "Transfer accounts" QR's text), decoded here so only the account picked is sent. A QR image works where the browser
-// reads barcodes itself (BarcodeDetector); otherwise paste the QR's text.
+// A one-time-code seed (base32, otpauth://, or Authenticator's otpauth-migration:// export), decoded here so only the
+// account picked is sent. A QR image works where the browser has BarcodeDetector; otherwise paste the QR's text.
 function TotpField({ has, value, onChange }: { has: boolean; value: string; onChange: (v: string) => void }) {
   const [accounts, setAccounts] = useState<OtpAccount[] | null>(null);
   const [picked, setPicked] = useState<string>("");

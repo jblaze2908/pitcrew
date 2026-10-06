@@ -23,11 +23,10 @@ function quick(p: PitStop): { label: string; scope: string } | null {
 }
 
 export function Waiting({ pits }: { pits: PitStop[] }) {
-  const { S } = useStore();
-  const titles = new Map(S.bots.flatMap((b) => b.threads.map((t) => [t.id, t.title] as const)));
+  const { threadTitle } = useStore();
   return (
     <section className="wait" aria-label="Waiting on you">
-      {pits.slice(0, SHOWN).map((p) => <Row key={p.id} p={p} where={(p.thread_id && titles.get(p.thread_id)) || ""} />)}
+      {pits.slice(0, SHOWN).map((p) => <Row key={p.id} p={p} where={threadTitle(p.thread_id) || ""} />)}
       {pits.length > SHOWN && <div className="wf"><a href="#/pitstops">{`${pits.length - SHOWN} more waiting`}</a></div>}
     </section>);
 }

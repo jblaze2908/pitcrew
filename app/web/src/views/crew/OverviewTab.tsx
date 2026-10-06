@@ -13,6 +13,7 @@ import { useFetch } from "../../lib/useFetch";
 import { specWords } from "../Schedules";
 
 const FIRST = 5; // threads shown before "All N threads"
+const LIST_MAX = 50; // api/lists.ts limitOf caps a page here
 const short = (t: number) => { const d = dayLabel(t); return d === "Today" ? hm(t) : d; };
 
 export function OverviewTab({ b, d }: { b: BotCard; d: BotDetail }) {
@@ -56,10 +57,9 @@ function Composer({ b }: { b: BotCard }) {
 
 // The only orange on the page: pit stops this member is waiting on.
 function Waiting({ b }: { b: BotCard }) {
-  const { S } = useStore();
+  const { S, threadTitle: title } = useStore();
   const pits = S.pitstops.filter((p) => p.bot_id === b.id && p.status === "pending");
   if (!pits.length) return null;
-  const title = (id: string | null) => b.threads.find((t) => t.id === id)?.title;
   return (
     <section>
       <h3>Waiting on you</h3>
@@ -78,7 +78,7 @@ const flat = (p: ThreadPage) => [...p.pinned, ...p.rows];
 // Its threads with the last thing said; search covers titles and anything said in them.
 function Threads({ b }: { b: BotCard }) {
   const [q, setQ] = useState(""), [all, setAll] = useState(false);
-  const list = useFetch(() => api.get<ThreadPage>(`/api/threads?bot=${encodeURIComponent(b.id)}`, { quiet: true }).then(flat), [b.id]);
+  const list = useFetch(() => api.get<ThreadPage>(`/api/threads?bot=${encodeURIComponent(b.id)}&limit=${LIST_MAX}`, { quiet: true }).then(flat), [b.id]);
   useLiveReload((e) => e.type === "thread" && "botId" in e.data && e.data.botId === b.id, list.reload);
   const [found, setFound] = useState<ThreadListRow[] | null>(null);
   // Search waits for a 200 ms pause in typing.

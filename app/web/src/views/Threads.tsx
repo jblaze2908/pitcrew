@@ -45,7 +45,7 @@ export function Threads() {
   const item = (r: ThreadListRow) => <ThreadItem r={r} kids={kids[r.id] || []} waiting={waiting.get(r.id) ?? (r.status === "needs" ? "Needs you" : null)} />;
 
   return (
-    <ListPage title="Threads" lede={archived ? "Archived threads. Open one to bring it back." : undefined} className="threads2">
+    <ListPage title="Threads" lede={archived ? "Archived threads." : undefined} className="threads2">
       <ListFilters right={<label className="lp-switch"><input type="checkbox" checked={test} onChange={(e) => setTest(e.target.checked)} /><i />Show test threads</label>}>
         <ListSearch wide value={q} onChange={setQ} placeholder="Search titles and messages" />
         <div className="lp-seg" role="group" aria-label="Group by">{([["recent", "Recent"], ["member", "By member"]] as const).map(([k, l]) => <button key={k} className={mode === k ? "on" : ""} onClick={() => setMode(k)}>{l}</button>)}</div>

@@ -4,7 +4,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { BusyButton, ConfirmButton, Face, Field, Inline, Loader, Seg } from "../components/ui";
 import { Icon } from "../components/Icon";
 import { api } from "../lib/api";
-import { dayLabel, flat, hm, sinceLabel, until } from "../lib/format";
+import { dayLabel, dayMonth, flat, hm, plural, sinceLabel, until } from "../lib/format";
 import { useStore } from "../lib/store";
 import { toast } from "../lib/toast";
 import { useFetch } from "../lib/useFetch";
@@ -45,24 +45,23 @@ function result(r: Run): [string, string] {
   if (late(r) > LATE_MS) return [`Late ${Math.round(late(r) / 60000)} min`, "late"];
   return r.status === "quiet" ? ["Nothing new", "quiet"] : ["Alerted you", "news"];
 }
-const dm = (t: number) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" }).format(new Date(t));
 /** The next run as a day word and a time: "Tonight 22:00", "Tomorrow 08:00", "Thu 10:00", "1 Nov 09:00". */
 function nextWhen(t: number): [string, string] {
   const d = dayLabel(t), h = +hm(t).slice(0, 2);
   if (d === "Today") return [h >= 18 ? "Tonight" : "Today", hm(t)];
   if (dayLabel(t - 86400000) === "Today") return ["Tomorrow", hm(t)];
-  return [t - Date.now() < 6 * 86400000 ? d.split(" ")[0] : dm(t), hm(t)];
+  return [t - Date.now() < 6 * 86400000 ? d.split(" ")[0] : dayMonth(t), hm(t)];
 }
 /** The last 14 runs in words: "All 14 ran · 3 alerts", "1 failed on 1 Oct", "Last run failed". Empty when it never ran. */
 function outcome(runs: Run[]): [string, boolean] {
   const done = runs.filter((r) => r.ended_at), bad = done.filter((r) => result(r)[1] === "bad");
   if (!done.length) return ["", false];
   if (result(done[0])[1] === "bad") return ["Last run failed", true];
-  if (bad.length) return [`${bad.length} failed${bad.length === 1 ? ` on ${dm(bad[0].fired_at)}` : `, last on ${dm(bad[0].fired_at)}`}`, true];
+  if (bad.length) return [`${bad.length} failed${bad.length === 1 ? ` on ${dayMonth(bad[0].fired_at)}` : `, last on ${dayMonth(bad[0].fired_at)}`}`, true];
   const ran = done.filter((r) => ["quiet", "news", "late"].includes(result(r)[1])).length, skipped = done.filter((r) => r.status === "skipped").length;
   const alerts = done.filter((r) => r.status === "reported").length;
   const head = ran === 1 && done.length === 1 ? "Ran once" : skipped ? `${ran} ran · ${skipped} skipped` : `All ${ran} ran`;
-  return [`${head}${alerts ? ` · ${alerts} ${alerts === 1 ? "alert" : "alerts"}` : ""}`, false];
+  return [`${head}${alerts ? ` · ${plural(alerts, "alert")}` : ""}`, false];
 }
 
 export function Schedules() {
@@ -101,12 +100,13 @@ function Row({ s, open, onOpen, reload }: { s: Sched; open: boolean; onOpen: () 
   const runNow = async () => { await api.post(`/api/schedules/${s.id}/run`); toast("Started"); setTimeout(reload, 1500); };
   const toggle = async () => { await api.patch(`/api/schedules/${s.id}`, { enabled: !s.enabled }); reload(); };
   const next = s.next_run ? nextWhen(s.next_run) : null;
+  const oldestFirst = [...s.runs].reverse();
   return (
     <tr className={`sch2-row${open ? " on" : ""}${s.enabled ? "" : " off"}`} onClick={onOpen}>
       <td className="sch2-name"><b>{s.title || s.prompt.split("\n")[0]}</b><span className="sch2-who"><Face b={bot(s.bot_id)} size="xs" />{s.bot_name}</span></td>
       <td className="nw">{specWords(s.spec)}</td>
       <td className="nw">{!s.enabled ? <span className="faint">{isEvent(s.spec) ? "On the next event" : "When resumed"}</span> : next ? <>{`${next[0]} `}<span className="pc-m">{next[1]}</span></> : isEvent(s.spec) ? "On the next event" : ""}</td>
-      <td className="nw">{s.runs.length ? <span className="dots">{Array.from({ length: 14 }, (_, i) => { const r = [...s.runs].reverse()[i - (14 - s.runs.length)]; return <i key={i} className={r ? result(r)[1] : "none"} title={r ? `${sinceLabel(r.fired_at)} · ${result(r)[0]}` : ""} />; })}</span>
+      <td className="nw">{s.runs.length ? <span className="dots">{Array.from({ length: 14 }, (_, i) => { const r = oldestFirst[i - (14 - s.runs.length)]; return <i key={i} className={r ? result(r)[1] : "none"} title={r ? `${sinceLabel(r.fired_at)} · ${result(r)[0]}` : ""} />; })}</span>
         : <span className="faint">No runs yet</span>}</td>
       <td className={`nw${bad ? " badc" : ""}`}>{word}</td>
       <td className="sch2-acts" onClick={(e) => e.stopPropagation()}>

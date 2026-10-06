@@ -17,7 +17,7 @@ const ACTIONS_SHOWN = 6, ACTIVITY_PAGE = 40, READ_KEEP = 8; // READ_KEEP: runtim
 interface Ev { key: string; at: number; b?: BotCard; mood?: string; text: ReactNode; quote?: string; unread?: boolean; failed?: boolean; quiet?: boolean; live?: boolean; href?: string; action?: boolean }
 
 export function Today() {
-  const { S, bot, name, refresh } = useStore();
+  const { S, bot, name, refresh, threadTitle } = useStore();
   // Per Home view: one inbox read (at most 80 turns) and one activity page (two indexed reads of 41 rows); both are
   // refetched once per burst of run or pit stop events. Running work comes from the state, with no fetch.
   const box = useFetch(() => api.get<Inbox>("/api/inbox", { quiet: true }), [], { keep: true });
@@ -25,10 +25,9 @@ export function Today() {
   useLiveReload((e) => e.type === "turn" || e.type === "pitstop", () => { box.reload(); acts.reload(); }, 1000);
 
   const midnight = Math.floor((Date.now() + IST) / DAY) * DAY - IST, yesterday = midnight - DAY;
-  const titles = new Map(S.bots.flatMap((b) => b.threads.map((t) => [t.id, t.title] as const)));
   const runEv = (i: InboxItem): Ev => {
     // A scheduled run's thread title ends in its date ("… · 5 Oct"); the row's time already says when.
-    const who = name(i.botId), title = (i.sub || titles.get(i.threadId) || "a thread").replace(/ · \d{1,2} [A-Z][a-z]{2}$/, "").replace(/\.$/, "");
+    const who = name(i.botId), title = (i.sub || threadTitle(i.threadId) || "a thread").replace(/ · \d{1,2} [A-Z][a-z]{2}$/, "").replace(/\.$/, "");
     // Scheduled prompts ask for a "QUIET:" reply when nothing changed.
     const quiet = i.status === "quiet" || /^QUIET:/i.test(i.text || "");
     const text = i.kind === "delegation" ? <>{who} answered {name(i.fromBot)}</>
@@ -39,7 +38,7 @@ export function Today() {
       failed: i.status === "failed", quiet, href: `#/t/${i.threadId}` };
   };
   const actEv = (r: ActivityRow): Ev => {
-    const where = r.threadId && titles.get(r.threadId);
+    const where = threadTitle(r.threadId);
     return { key: r.id, at: r.at, b: bot(r.botId), text: <>{name(r.botId)}: {plainWords(r.what)}{where && <>, in <b>{where}</b></>}</>,
       href: r.threadId ? `#/t/${r.threadId}` : undefined, action: true };
   };

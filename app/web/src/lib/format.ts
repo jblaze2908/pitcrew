@@ -9,11 +9,9 @@ export const ago = (t: number | null | undefined) => {
   return s < 60 ? "just now" : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`;
 };
 
-const clockFmt = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: IST });
 const whenFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: IST });
 const hourFmt = new Intl.DateTimeFormat("en-GB", { hour: "numeric", timeZone: IST });
 
-export const clock = () => clockFmt.format(new Date()).replace(",", "");
 export const when = (t: number | null | undefined) => (t ? whenFmt.format(new Date(t)) : "");
 export const hourNow = () => +hourFmt.format(new Date());
 
@@ -29,15 +27,17 @@ export const dayLabel = (t: number) => {
 
 const wdFmt = new Intl.DateTimeFormat("en-GB", { weekday: "short", timeZone: IST });
 const dmFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: IST });
+/** "3 Oct" by the IST calendar; newer ICU writes September "Sept", the rest of the app says "Sep". */
+export const dayMonth = (t: number | null | undefined) => (t ? dmFmt.format(new Date(t)).replace("Sept", "Sep") : "");
 /** A log time: "07:38" today, "Sun 23:31" within the week, "3 Oct" before that. */
 export const stamp = (t: number) => {
   if (keyFmt.format(new Date(t)) === keyFmt.format(new Date())) return hm(t);
-  return Date.now() - t < 6 * 86400000 ? `${wdFmt.format(new Date(t))} ${hm(t)}` : dmFmt.format(new Date(t));
+  return Date.now() - t < 6 * 86400000 ? `${wdFmt.format(new Date(t))} ${hm(t)}` : dayMonth(t);
 };
 /** "07:02" today, "yesterday 22:00", "Fri 23:33" within the week, else "3 Oct 23:33". */
 export const sinceLabel = (t: number) => {
   const d = dayLabel(t);
-  return d === "Today" ? hm(t) : d === "Yesterday" ? `yesterday ${hm(t)}` : Date.now() - t < 6 * 86400000 ? `${wdFmt.format(new Date(t))} ${hm(t)}` : `${dmFmt.format(new Date(t))} ${hm(t)}`;
+  return d === "Today" ? hm(t) : d === "Yesterday" ? `yesterday ${hm(t)}` : Date.now() - t < 6 * 86400000 ? `${wdFmt.format(new Date(t))} ${hm(t)}` : `${dayMonth(t)} ${hm(t)}`;
 };
 
 export const until = (t: number) => {
@@ -46,7 +46,6 @@ export const until = (t: number) => {
 };
 
 export const kb = (n: number) => (n < 1024 ? `${n} B` : n < 1 << 20 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
-export const tokens = (n: number | null | undefined) => (n || 0).toLocaleString("en-IN");
 /** "1 memory", "2 memories"; pass `many` for other irregular words. */
 export const plural = (n: number, word: string, many?: string) => `${n} ${n === 1 ? word : many ?? (/[^aeiou]y$/.test(word) ? `${word.slice(0, -1)}ies` : `${word}s`)}`;
 
