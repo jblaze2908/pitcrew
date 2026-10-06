@@ -9,6 +9,7 @@ import { getBot, listBots } from "../crew.js";
 import { botDir, listFiles } from "../computer.js";
 import { objectText, type Change } from "../snapshot.js";
 import { signedIn, type Env } from "../http/guard.js";
+import { idOf } from "./lists.js";
 
 function workPath(botId: string, rel: unknown) {
   let base: string, full: string;
@@ -33,7 +34,14 @@ export const fileRoutes = new Hono<Env>()
     if (!out.image && st.size <= 1 << 20) { const buf = readFileSync(w.full); if (!buf.subarray(0, 8000).includes(0)) out.text = buf.toString("utf8"); }
     return c.json(out);
   })
-  .get("/api/bots/:id/changes", signedIn, (c) => c.json(all<{ id: string; thread_id: string; started_at: number; changes: string; thread_title: string; cost_usd: number | null }>("SELECT t.id, t.thread_id, t.started_at, t.changes, t.cost_usd, th.title thread_title FROM turns t JOIN threads th ON th.id=t.thread_id WHERE t.bot_id=? AND t.changes IS NOT NULL ORDER BY t.started_at DESC LIMIT 40", c.req.param("id")).map((r) => ({ ...r, changes: json<Change[]>(r.changes, []) }))))
+  // The member's 40 newest runs that changed files; ?thread= narrows to one thread's (the work panel), so its older runs
+  // aren't crowded out by the member's other threads.
+  .get("/api/bots/:id/changes", signedIn, (c) => {
+    const thread = idOf(c.req.query("thread"));
+    return c.json(all<{ id: string; thread_id: string; started_at: number; changes: string; thread_title: string; cost_usd: number | null }>(`SELECT t.id, t.thread_id, t.started_at, t.changes, t.cost_usd, th.title thread_title
+      FROM turns t JOIN threads th ON th.id=t.thread_id WHERE t.bot_id=?${thread ? " AND t.thread_id=?" : ""} AND t.changes IS NOT NULL ORDER BY t.started_at DESC LIMIT 40`, c.req.param("id"), ...(thread ? [thread] : []))
+      .map((r) => ({ ...r, changes: json<Change[]>(r.changes, []) })));
+  })
   .get("/api/turns/:id/diff", signedIn, (c) => {
     const t = one<{ bot_id: string; changes: string | null }>("SELECT bot_id, changes FROM turns WHERE id=?", c.req.param("id")); if (!t) throw httpErr(404, "No such run");
     const path = c.req.query("path") ?? null;

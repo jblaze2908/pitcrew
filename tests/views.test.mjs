@@ -93,3 +93,13 @@ test("creating or editing a schedule never returns its webhook secret; the hook 
   const hook = await get(`/api/schedules/${made.id}/hook`);
   assert.ok(hook.secret && hook.secret.length >= 16, "the driver still reads it from the hook route");
 });
+
+test("/api/bots/:id/changes?thread= reaches a thread's older runs past the member's 40 newest", async () => {
+  const m = C.createBot(C.normaliseSpec({ name: "Changer", job: "c" }));
+  thread("th_ch_old", m.id); thread("th_ch_busy", m.id);
+  const ch = JSON.stringify([{ path: "a.txt", status: "added" }]);
+  run("INSERT INTO turns(id,thread_id,bot_id,status,started_at,changes) VALUES(?,?,?,?,?,?)", "tu_ch_old", "th_ch_old", m.id, "completed", 1, ch);
+  for (let i = 0; i < 41; i++) run("INSERT INTO turns(id,thread_id,bot_id,status,started_at,changes) VALUES(?,?,?,?,?,?)", `tu_ch_${i}`, "th_ch_busy", m.id, "completed", 100 + i, ch);
+  assert.equal((await get(`/api/bots/${m.id}/changes`)).some((r) => r.id === "tu_ch_old"), false);
+  assert.deepEqual((await get(`/api/bots/${m.id}/changes?thread=th_ch_old`)).map((r) => r.id), ["tu_ch_old"]);
+});
