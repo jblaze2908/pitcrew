@@ -234,7 +234,7 @@ function LiveThread({ d }: { d: ThreadView }) {
       <section className="convo">
         <header className="thd">
           <TitleMenu id={id} title={title} onRenamed={setTitle} b={card} pinned={pinned} onPinned={setPinned} />
-          {origin ? <OriginChip origin={origin} threadId={id} b={b} /> : <a className="who" style={hueStyle(b.hue)} href={`#/crew/${b.id}`} title={`${b.name}'s profile`}><Face b={b} size="xs" mood={running ? "working" : "idle"} />{b.name}</a>}
+          {origin ? <OriginChip origin={origin} threadId={id} b={b} /> : <a className="who" style={hueStyle(b.hue)} href={`#/crew/${b.id}`} title={`${b.name}'s profile`}><Face b={b} size="xs" mood={running ? "working" : undefined} />{b.name}</a>}
           <span style={{ flex: 1 }} />
           {lease && <button className="pc-pill s" onClick={handBack}>Hand back</button>}
           {!showPanel && !side && tabs.length > 0 && <button className="reo" title="Open the work panel" onClick={() => setOpen(true)}><Icon name="panel" size={14} />{TAB_LABEL[cur!]}</button>}
