@@ -6,7 +6,7 @@
 // off its path: ≤6 docker execs (20 s cap each), one gate classification per check (rules, else one jev call), and at
 // most one model ask, only when some criterion has no check. No grader → those criteria are "not checked".
 import { readFileSync } from "node:fs";
-import { one, all, run, now, json, getSetting, audit } from "../db.js";
+import { one, all, run, now, json, getSetting, audit, marks } from "../db.js";
 import { getSecret } from "../auth.js";
 import { getBot } from "../crew.js";
 import { openPlanSide, ROOT } from "../computer.js";
@@ -134,11 +134,11 @@ type Ev = { id: number; turn_id: string | null; kind: string; data: string };
 /** What the grader sees, from the store (about 14 KB at most): the request, the files the runs changed (small text files'
  * contents), their commands' output, the last page read, and the last shared screenshot as an image. */
 export function gatherEvidence(threadId: string, turnIds: string[], botId: string, request: string): Evidence {
-  const marks = turnIds.map(() => "?").join(",");
-  const evs = all<Ev>(`SELECT id, turn_id, kind, data FROM events WHERE thread_id=? AND turn_id IN (${marks}) ORDER BY id`, threadId, ...turnIds);
+  const ph = marks(turnIds);
+  const evs = all<Ev>(`SELECT id, turn_id, kind, data FROM events WHERE thread_id=? AND turn_id IN (${ph}) ORDER BY id`, threadId, ...turnIds);
   const tools = evs.filter((e) => e.kind === "tool").map((e) => json<Record<string, any>>(e.data, {}));
   const changes = new Map<string, Change>();
-  for (const r of all<{ changes: string | null }>(`SELECT changes FROM turns WHERE id IN (${marks}) ORDER BY started_at`, ...turnIds)) for (const c of json<Change[]>(r.changes, [])) changes.set(c.path, c);
+  for (const r of all<{ changes: string | null }>(`SELECT changes FROM turns WHERE id IN (${ph}) ORDER BY started_at`, ...turnIds)) for (const c of json<Change[]>(r.changes, [])) changes.set(c.path, c);
   const last = [...evs].reverse().find((e) => e.kind === "agent"), shot = [...evs].reverse().find((e) => e.kind === "shot");
   const parts = [`## Request\n${request.slice(0, 1500) || "(none recorded)"}`, `## The agent's final message (its claim, not evidence)\n${String(json(last?.data, {}).text || "(none)").slice(0, 2000)}`];
   if (changes.size) {

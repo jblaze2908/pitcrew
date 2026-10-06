@@ -1,7 +1,7 @@
 // Threads and the front door: asking, routing and rerouting, messages, uploads, surfaces and plans.
 import { Hono } from "hono";
 import { z } from "zod";
-import { one, all, run, now, uid, json, audit } from "../db.js";
+import { one, all, run, now, uid, json, audit, marks } from "../db.js";
 import { httpErr } from "../auth.js";
 import * as R from "../runtime/index.js";
 import { routeMessage, SURE, namedMembers, type Candidate } from "../router.js";
@@ -73,14 +73,20 @@ export const threadRoutes = new Hono<Env>()
     return c.json(await openRouted(pick.botId, text, { kind: "routed", by: pick.by, confidence: pick.confidence }, b.test));
   })
   // Your asks on the Pit wall: the latest front-door threads with their live state and a short answer. Per wall render:
-  // one indexed query, then two small reads per row (8 rows max).
-  .get("/api/asks", signedIn, (c) => c.json(all<Pick<ThreadRow, "id" | "bot_id" | "title" | "status" | "origin" | "updated_at">>(`SELECT id,bot_id,title,status,origin,updated_at FROM threads WHERE archived=0 AND origin LIKE '{"kind":"routed"%' ORDER BY updated_at DESC LIMIT 8`).map((t): Ask => {
-    const last = json(one<{ data: string }>("SELECT data FROM events WHERE thread_id=? AND kind='agent' ORDER BY id DESC LIMIT 1", t.id)?.data, {});
-    const plan = one<{ id: string; status: PlanStatus }>("SELECT id,status FROM plans WHERE thread_id=? ORDER BY created_at DESC LIMIT 1", t.id);
-    const items = plan ? all<{ owner_bot: string; status: string }>("SELECT owner_bot,status FROM plan_items WHERE plan_id=? AND status!='cancelled'", plan.id) : [];
-    return { id: t.id, botId: t.bot_id, title: t.title, status: t.status, running: R.isRunning(t.id), updatedAt: t.updated_at, origin: json(t.origin, {}), answer: last.text ? last.text.slice(0, 280) : null,
-      plan: plan && { status: plan.status, members: [...new Set(items.map((i) => i.owner_bot))], done: items.filter((i) => i.status === "done").length, total: items.length } };
-  })))
+  // three statements: the 8 threads, their last reply and latest plan (index probes per thread), and those plans' items.
+  .get("/api/asks", signedIn, (c) => {
+    const threads = all<Pick<ThreadRow, "id" | "bot_id" | "title" | "status" | "origin" | "updated_at">>(`SELECT id,bot_id,title,status,origin,updated_at FROM threads WHERE archived=0 AND origin LIKE '{"kind":"routed"%' ORDER BY updated_at DESC LIMIT 8`);
+    const ids = threads.map((t) => t.id);
+    const extra = new Map(ids.length ? all<{ id: string; last: string | null; plan_id: string | null; plan_status: PlanStatus | null }>(`SELECT th.id, (SELECT data FROM events WHERE thread_id=th.id AND kind='agent' ORDER BY id DESC LIMIT 1) last,
+      p.id plan_id, p.status plan_status FROM threads th LEFT JOIN plans p ON p.id=(SELECT id FROM plans WHERE thread_id=th.id ORDER BY created_at DESC LIMIT 1) WHERE th.id IN (${marks(ids)})`, ...ids).map((r) => [r.id, r]) : []);
+    const planIds = [...extra.values()].flatMap((r) => (r.plan_id ? [r.plan_id] : []));
+    const items = planIds.length ? all<{ plan_id: string; owner_bot: string; status: string }>(`SELECT plan_id,owner_bot,status FROM plan_items WHERE plan_id IN (${marks(planIds)}) AND status!='cancelled'`, ...planIds) : [];
+    return c.json(threads.map((t): Ask => {
+      const x = extra.get(t.id), last = json(x?.last, {}), mine = items.filter((i) => i.plan_id === x?.plan_id);
+      return { id: t.id, botId: t.bot_id, title: t.title, status: t.status, running: R.isRunning(t.id), updatedAt: t.updated_at, origin: json(t.origin, {}), answer: last.text ? last.text.slice(0, 280) : null,
+        plan: x?.plan_id ? { status: x.plan_status!, members: [...new Set(mine.map((i) => i.owner_bot))], done: mine.filter((i) => i.status === "done").length, total: mine.length } : undefined };
+    }));
+  })
   .post("/api/plans/:id/stop", signedIn, (c) => c.json({ ok: R.stopPlan(c.req.param("id")) }))
   // "Change": the message moves to another member; the first thread stops and is archived. Audited, so routing accuracy can be measured.
   .post("/api/threads/:id/reroute", signedIn, async (c) => {

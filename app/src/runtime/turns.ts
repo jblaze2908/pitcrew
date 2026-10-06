@@ -1,7 +1,7 @@
 // Turns on a member's brain: sending a message, starting and finishing a run, steering, interrupting, compacting.
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { one, all, run, now, uid, json, getSetting } from "../db.js";
+import { one, all, run, now, uid, json, getSetting, marks } from "../db.js";
 import { getBot, instructions, dynamicTools, engramBlock } from "../crew.js";
 import { botDir, toolManifest } from "../computer.js";
 import { providerReady, estimateCost } from "../providers.js";
@@ -248,7 +248,7 @@ const EXEC_TOOLS = new Set(["commandExecution", "browser", "computer"]);
 export function warmPlan(threadId: string) {
   const recent = all<{ id: string }>("SELECT id FROM turns WHERE thread_id=? ORDER BY started_at DESC LIMIT 3", threadId).map((t) => t.id);
   if (!recent.length) return null;
-  const used = all<{ turn_id: string; type: string }>(`SELECT turn_id, json_extract(data,'$.type') type FROM events WHERE thread_id=? AND kind='tool' AND turn_id IN (${recent.map(() => "?").join(",")})`, threadId, ...recent);
+  const used = all<{ turn_id: string; type: string }>(`SELECT turn_id, json_extract(data,'$.type') type FROM events WHERE thread_id=? AND kind='tool' AND turn_id IN (${marks(recent)})`, threadId, ...recent);
   if (!used.some((u) => EXEC_TOOLS.has(u.type))) return null;
   return { desktop: used.some((u) => u.turn_id === recent[0] && (u.type === "browser" || u.type === "computer")) };
 }

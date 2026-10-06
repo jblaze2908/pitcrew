@@ -6,7 +6,7 @@ import { readFileSync, realpathSync, openSync, fstatSync, closeSync, constants }
 import { createHash } from "node:crypto";
 import { basename } from "node:path";
 import { z } from "zod";
-import { one, all, run, now, json, audit, getSetting, setSetting } from "./db.js";
+import { one, all, run, now, json, audit, getSetting, setSetting, marks } from "./db.js";
 import { getSecret, putSecret, deleteSecret, secretMeta, httpErr, type HttpError } from "./auth.js";
 import { getBot, listBots } from "./crew.js";
 import { botDir, allBrains } from "./computer.js";
@@ -488,7 +488,7 @@ async function sendEpisodes() {
   // Per tick: one grouped read of the last day's turns (indexed by nothing; a single user's day is small).
   const due = all<{ thread_id: string; bot_id: string; last: number; upto: number | null }>(
     `SELECT tu.thread_id, tu.bot_id, MAX(tu.ended_at) last, ep.upto FROM turns tu LEFT JOIN engram_episodes ep ON ep.thread_id=tu.thread_id
-     WHERE tu.ended_at > ? AND tu.bot_id IN (${ids.map(() => "?").join(",")}) GROUP BY tu.thread_id HAVING last < ? AND last > COALESCE(ep.upto, 0) ORDER BY last LIMIT ?`,
+     WHERE tu.ended_at > ? AND tu.bot_id IN (${marks(ids)}) GROUP BY tu.thread_id HAVING last < ? AND last > COALESCE(ep.upto, 0) ORDER BY last LIMIT ?`,
     since, ...ids, t - EPISODE_IDLE, EPISODES_PER_TICK * 3);
   let sent = 0;
   for (const d of due) {
@@ -505,7 +505,7 @@ async function sendEpisodes() {
   }
 }
 async function sendEpisode(b: Bot, threadId: string, turns: TurnRow[], from: number) {
-  const ids = turns.map((x) => x.id), qs = ids.map(() => "?").join(",");
+  const ids = turns.map((x) => x.id), qs = marks(ids);
   const title = one<{ title: string }>("SELECT title FROM threads WHERE id=?", threadId)?.title || "Thread";
   const ev = (kind: string, order: string) => json<{ text?: string; display?: string }>(one<{ data: string }>(`SELECT data FROM events WHERE thread_id=? AND kind=? AND (turn_id IN (${qs}) OR (turn_id IS NULL AND ts > ?)) ORDER BY id ${order} LIMIT 1`, threadId, kind, ...ids, from)?.data, {});
   const steps = all<{ type: string; n: number }>(`SELECT COALESCE(json_extract(data,'$.server'), json_extract(data,'$.type')) type, COUNT(*) n FROM events WHERE thread_id=? AND kind='tool' AND turn_id IN (${qs}) GROUP BY 1 ORDER BY 2 DESC`, threadId, ...ids);
