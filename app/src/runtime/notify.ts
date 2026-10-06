@@ -63,7 +63,7 @@ export function onNotify(c: Brain, method: string, p: Record<string, any>) {
       if (typeof it.id === "string" && it.id.startsWith("exec-")) scanScripts(threadId, a?.turnId, c.bot.id, p.threadId);
       if (it.type === "imageGeneration") startPainting(threadId, { id: it.id, botId: c.bot.id, n: 1, aspect: "1:1", palette: paletteFor(""), model: "gpt-image-2" });
       // Browser and pixel tools announce themselves from their own handler, with the grounded element.
-      if (!fork && ["commandExecution", "mcpToolCall", "fileChange", "webSearch", "imageGeneration"].includes(it.type) || (it.type === "dynamicToolCall" && !/^(browser|computer)_/.test(it.tool)))
+      if (!fork && (["commandExecution", "mcpToolCall", "fileChange", "webSearch", "imageGeneration"].includes(it.type) || (it.type === "dynamicToolCall" && !/^(browser|computer)_/.test(it.tool))))
         bus.emit("activity", { threadId, botId: c.bot.id, text: toolTitle(it) });
       break;
     }
