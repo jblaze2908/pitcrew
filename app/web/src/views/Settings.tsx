@@ -36,7 +36,7 @@ export function Settings({ tab: asked, item }: { tab: string; item?: string }) {
   return (
     <div className="page st-page" id="st-top">
       <h1>Settings</h1>
-      <div className="st">
+      <div className="st-grid">
         <nav className="st-nav" aria-label="Settings">
           {TABS.map(([k, l]) => <a key={k} href={`#/settings/${k}`} className={tab === k ? "on" : ""} aria-current={tab === k ? "page" : undefined}>{l}{dot[k] && <i className="st-dot" aria-label="needs attention" />}</a>)}
         </nav>

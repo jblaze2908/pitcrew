@@ -1,7 +1,7 @@
 /* Theme revamp: settings. Loaded after app.css, so rules here win ties. One template: left tab list, one 720px column. */
 .st-page{max-width:1080px;padding:40px 56px 72px;gap:0;--st-help:color-mix(in srgb,var(--ink-2) 55%,var(--ink-3))}
 .st-page>h1{font:800 26px/1.1 var(--font-display);letter-spacing:-.02em}
-.st{display:grid;grid-template-columns:184px minmax(0,720px);gap:56px;margin-top:28px;align-items:start}
+.st-grid{display:grid;grid-template-columns:184px minmax(0,720px);gap:56px;margin-top:28px;align-items:start}
 .st-nav{position:sticky;top:24px;display:flex;flex-direction:column;gap:2px}
 .st-nav a{display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:9px;color:var(--ink-2);font-size:14px}
 .st-nav a:hover:not(.on){background:var(--surface)}
@@ -112,7 +112,7 @@
 
 @media (max-width:900px){
   .st-page{padding:24px 16px 56px}
-  .st{grid-template-columns:minmax(0,1fr);gap:20px;margin-top:16px}
+  .st-grid{grid-template-columns:minmax(0,1fr);gap:20px;margin-top:16px}
   .st-nav{position:static;flex-direction:row;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid var(--line);padding-bottom:8px}
   .st-nav a{white-space:nowrap}
 }
