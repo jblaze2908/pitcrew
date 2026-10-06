@@ -59,9 +59,12 @@ export type RunCheck = (botId: string, cmd: string) => Promise<CheckRun>;
 export type Classify = (botId: string, threadId: string, cmd: string) => Promise<Verdict>;
 
 /** The gate's verdict on a check as if the member ran it: same rules, script reading, policy and house rules (gate.ts). */
+const ENV_DUMP = /(^|[;&|(`$]\s*)(printenv\b|env\s*($|[;&|)]))|\/proc\/[^\s]*\/environ/;
 export async function classifyCheck(botId: string, threadId: string, cmd: string): Promise<Verdict> {
   const b = getBot(botId);
   if (!b) return { decision: "ask", effect: "unknown", reason: "member gone", by: "donecheck" };
+  // jev reads printenv as read-only, but a check's output is stored and sent back: environment dumps never auto-run.
+  if (ENV_DUMP.test(cmd)) return { decision: "ask", effect: "read", reason: "prints environment variables", by: "donecheck" };
   return jev(withScript(botId, { kind: "shell", command: cmd, cwd: "/bot/work" }), { policy: b.policy, apiKey: getSecret("openrouter") || "missing", context: () => jevContext(threadId, b.house_rules) });
 }
 // Lazy import: machines.ts → turns.ts → this module.
