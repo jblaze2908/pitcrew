@@ -4,13 +4,14 @@ import { createContext, useContext, useId, useRef, useState, type CSSProperties,
 import type { Surface as SurfaceRow } from "../../../shared/types";
 import { api } from "../lib/api";
 import { ago } from "../lib/format";
+import { toast } from "../lib/toast";
+import { HUES } from "./ui";
 
 type Values = Record<string, unknown>;
 interface Ctx { onAction: (action: string, values: Values) => Promise<void> | void; locked: boolean }
 const SurfaceCtx = createContext<Ctx>({ onAction: () => {}, locked: false });
 
-const HUES = ["c1", "c2", "c3", "c5", "c6"];
-const hueVar = (hue?: string | null, i = 0) => `var(--${hue && HUES.includes(hue) ? hue : HUES[i % HUES.length]})`;
+const hueVar = (hue?: string | null, i = 0) => `var(--${hue && (HUES as readonly string[]).includes(hue) ? hue : HUES[i % HUES.length]})`;
 const inr = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
 function fmt(v: unknown, f?: string): string {
   if (v == null || v === "") return "";
@@ -25,14 +26,18 @@ const toneClass = (t?: string) => ({ ok: "ok", up: "ok", bad: "bad", down: "bad"
 const isNum = (f?: string) => ["number", "money", "percent"].includes(f || "");
 const hue = (h: string) => ({ "--hue": h }) as CSSProperties;
 
-/** `extra` sits in the header (Keep in Library, or a link back); `lockOnAction` disables the inputs once one is sent. */
-export function Surface({ s: given, extra, onAction, lockOnAction = false }: { s: SurfaceRow; extra?: ReactNode; onAction: Ctx["onAction"]; lockOnAction?: boolean }) {
+/** `extra` sits in the header (Keep in Library, or a link back); `lockOnAction` disables the inputs once one is sent.
+ *  An action goes to the crew as a message on the surface's thread. */
+export function Surface({ s: given, extra, lockOnAction = false }: { s: SurfaceRow; extra?: ReactNode; lockOnAction?: boolean }) {
   const [locked, setLocked] = useState(false);
   // A bound dashboard re-reads its ledger on refresh; the server runs the queries (cached per ledger version).
   const [fresh, setFresh] = useState<SurfaceRow | null>(null);
   const s = fresh && fresh.id === given.id ? fresh : given;
   const refresh = async () => setFresh(await api.get<SurfaceRow>(`/api/surfaces/${s.id}`));
-  const act = async (action: string, values: Values) => { await onAction(action, values); if (lockOnAction) setLocked(true); };
+  const act = async (action: string, values: Values) => {
+    await api.post(`/api/surfaces/${s.id}/action`, { action, values }); toast("Sent to the crew");
+    if (lockOnAction) setLocked(true);
+  };
   return (
     <SurfaceCtx.Provider value={{ onAction: act, locked }}>
       <div className="surface">

@@ -6,21 +6,20 @@ import { Icon } from "../components/Icon";
 import { jobLine } from "../components/MemberMenu";
 import { Face } from "../components/ui";
 import { api } from "../lib/api";
-import { cap, dayLabel, hm, plainWords, plural } from "../lib/format";
+import { cap, dayLabel, dayMonth, hm, plainWords, plural } from "../lib/format";
 import { useStore } from "../lib/store";
 import { useFetch } from "../lib/useFetch";
 
 interface Sched { id: string; bot_id: string; title: string | null; prompt: string; spec: string; next_run: number | null; enabled: number }
 
-const dm = (t: number) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" }).format(new Date(t));
 /** "at 22:00" today, "tomorrow 08:00", "Thu 10:00" this week, "1 Nov 09:00" later. */
 function at(t: number): [string, string] {
   const d = dayLabel(t);
   if (d === "Today") return ["at", hm(t)];
   if (dayLabel(t - 86400000) === "Today") return ["tomorrow", hm(t)];
-  return [t - Date.now() < 6 * 86400000 ? d.split(" ")[0] : dm(t), hm(t)];
+  return [t - Date.now() < 6 * 86400000 ? d.split(" ")[0] : dayMonth(t), hm(t)];
 }
-const ago = (t: number) => { const d = dayLabel(t); return d === "Today" ? `at ${hm(t)}` : d === "Yesterday" ? "yesterday" : `on ${dm(t)}`; };
+const lastSeen = (t: number) => { const d = dayLabel(t); return d === "Today" ? `at ${hm(t)}` : d === "Yesterday" ? "yesterday" : `on ${dayMonth(t)}`; };
 
 /** What the member is doing, as one sentence, and its tone: needs (orange), bad (soft red) or plain. */
 function status(b: BotCard, pits: PitStop[]): [string, "" | "needs" | "bad" | "work"] {
@@ -31,8 +30,8 @@ function status(b: BotCard, pits: PitStop[]): [string, "" | "needs" | "bad" | "w
   const all = [...b.threads].sort((x, y) => y.updated_at - x.updated_at), last = all.filter((x) => !x.pinned);
   if (b.mood === "working") { const t = all.find((x) => x.status === "running") || last[0]; return [t && !t.pinned ? t.title : "Working", "work"]; }
   if (b.mood === "failed") return [last[0] ? `Last run didn't finish: ${last[0].title}` : "Last run didn't finish", "bad"];
-  if (last[0]) return [`${last[0].title}, ${ago(last[0].updated_at)}`, ""];
-  return all[0] ? [`Last active ${ago(all[0].updated_at)}`, ""] : ["Hasn't started anything yet", ""];
+  if (last[0]) return [`${last[0].title}, ${lastSeen(last[0].updated_at)}`, ""];
+  return all[0] ? [`Last active ${lastSeen(all[0].updated_at)}`, ""] : ["Hasn't started anything yet", ""];
 }
 
 export function CrewIndex() {

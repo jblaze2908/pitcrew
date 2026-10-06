@@ -56,10 +56,9 @@ function Composer({ b }: { b: BotCard }) {
 
 // The only orange on the page: pit stops this member is waiting on.
 function Waiting({ b }: { b: BotCard }) {
-  const { S } = useStore();
+  const { S, threadTitle: title } = useStore();
   const pits = S.pitstops.filter((p) => p.bot_id === b.id && p.status === "pending");
   if (!pits.length) return null;
-  const title = (id: string | null) => b.threads.find((t) => t.id === id)?.title;
   return (
     <section>
       <h3>Waiting on you</h3>

@@ -6,7 +6,7 @@ import { ListFilters, ListGroups, ListHeading, ListPage, ListPager, ListSearch, 
 import { PitCard } from "../components/PitCard";
 import { effectLabel, Face } from "../components/ui";
 import { api } from "../lib/api";
-import { hm, plainWords, when } from "../lib/format";
+import { hm, plainWords, plural, when } from "../lib/format";
 import { useLiveReload } from "../lib/live";
 import { useRoute } from "../lib/router";
 import { pitLabel } from "../lib/steps";
@@ -118,7 +118,7 @@ function RulesTab({ rules, learned, after }: { rules: Rule[]; learned: Learned[]
   return <>
     {live.length ? <div className="lp-list rules">{live.map(row)}</div>
       : <p className="lp-empty">No rules yet. Approve with "Allow similar always" or "in this thread", or approve the same kind of step twice in a row, and the crew stops asking.</p>}
-    {former.length > 0 && <details className="lp-fold"><summary>{`${former.length} ${former.length === 1 ? "rule" : "rules"} from former members`}</summary><div className="lp-list rules">{former.map(row)}</div></details>}
+    {former.length > 0 && <details className="lp-fold"><summary>{`${plural(former.length, "rule")} from former members`}</summary><div className="lp-list rules">{former.map(row)}</div></details>}
     {learning.length > 0 && <>
       <ListHeading count={learning.length}>Still learning</ListHeading>
       <p className="lp-note">Approve these a few more times in a row and the crew stops asking. Signing in, installing, sending, paying, deleting and sharing always ask.</p>

@@ -1,10 +1,14 @@
 // Small building blocks over the design system's classes and web components.
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type InputHTMLAttributes, type ReactNode } from "react";
 import { errorDetail, errorLine } from "../../../shared/text";
+import type { Hue, Shape } from "../../../shared/types";
 import { cap } from "../lib/format";
 import { mdToHtml } from "../lib/md";
 
 type Size = "xs" | "sm" | "md" | "lg" | "xl";
+/** The colours and shapes a member's face can take (c4 is kept for signal orange). */
+export const HUES: readonly Hue[] = ["c1", "c2", "c3", "c5", "c6"];
+export const SHAPES: readonly Shape[] = ["square", "round", "blob"];
 interface Looks { hue?: string; shape?: string; mood?: string }
 
 /** The hue token as a --hue custom property, which the app's classes read. */
@@ -78,3 +82,17 @@ export function BusyButton({ onClick, className, children, busyLabel }: { onClic
   return <button className={className} disabled={busy} onClick={async () => { setBusy(true); try { await onClick(); } finally { setBusy(false); } }}>{busy && busyLabel ? busyLabel : children}</button>;
 }
 
+
+/** An on/off switch; Settings draws it as .st-tg, member Settings as .tg. */
+export function Switch({ on, onChange, label, className }: { on: boolean; onChange: (v: boolean) => void; label: string; className: string }) {
+  return <button type="button" role="switch" aria-checked={on} aria-label={label} className={`${className}${on ? " on" : ""}`} onClick={() => onChange(!on)} />;
+}
+
+/** An input that saves when you leave it (or press Enter), only if it changed; a failed save puts the old value back. */
+export function BlurInput({ value, onSave, ...rest }: { value: string; onSave: (v: string) => unknown } & Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange">) {
+  const [v, setV] = useState(value);
+  useEffect(() => setV(value), [value]);
+  return <input {...rest} value={v} onChange={(e) => setV(e.target.value)}
+    onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+    onBlur={() => { if (v !== value) Promise.resolve(onSave(v)).catch(() => setV(value)); }} />;
+}

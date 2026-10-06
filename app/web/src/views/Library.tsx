@@ -178,9 +178,8 @@ function Row({ i, on, onPick, face }: { i: Item; on: boolean; onPick: () => void
 }
 
 function Preview({ i, face }: { i: Item; face: { hue: string | null; shape: string | null } }) {
-  const { S } = useStore();
+  const { threadTitle } = useStore();
   const head = i.versions[0];
-  const thread = head?.thread_id ? S.bots.flatMap((b) => b.threads).find((t) => t.id === head.thread_id) : null;
   const d = dayLabel(i.at);
   const updated = d === "Today" || d === "Yesterday" ? `${d.toLowerCase()} at ${hm(i.at)}` : `on ${stamp(i.at)}`;
   const size = head?.size ?? i.file?.size ?? null;
@@ -188,7 +187,7 @@ function Preview({ i, face }: { i: Item; face: { hue: string | null; shape: stri
     <aside className="lib-pv" aria-label="Preview">
       <p className="lib-kind"><TypeIcon type={i.type} size={15} />{`${i.type} · updated ${updated}`}</p>
       <h2>{i.title}</h2>
-      <p className="lib-from"><Face b={{ hue: face.hue || "c1", shape: face.shape || "square" }} size="xs" />{i.botName}{head?.thread_id && <>, in <a href={`#/t/${head.thread_id}`}>{thread?.title || "its thread"}</a></>}</p>
+      <p className="lib-from"><Face b={{ hue: face.hue || "c1", shape: face.shape || "square" }} size="xs" />{i.botName}{head?.thread_id && <>, in <a href={`#/t/${head.thread_id}`}>{threadTitle(head.thread_id) || "its thread"}</a></>}</p>
       {i.state === "working" ? <>
         <div className="lib-state"><b>Working file</b><p>{`It's on ${i.botName}'s computer. Ask them to publish it if you want a link you can open anywhere.`}</p></div>
         <div className="lib-acts">
@@ -233,7 +232,6 @@ function Surfaces() {
       <div className="col" style={{ gap: 6 }}><a className="small faint" href="#/library">Library ›</a><h1 className="lib-h1">Saved from threads</h1></div>
       {!list.data ? null : !list.data.length ? <p className="small faint">Nothing saved from threads yet.</p>
         : <div className="col">{list.data.map((s) => (
-          <Surface key={s.id} s={s} extra={<a className="small faint" href={`#/t/${s.thread_id}`}>{s.bot_name}</a>}
-            onAction={async (action, values) => { await api.post(`/api/surfaces/${s.id}/action`, { action, values }); toast("Sent to the crew"); }} />))}</div>}
+          <Surface key={s.id} s={s} extra={<a className="small faint" href={`#/t/${s.thread_id}`}>{s.bot_name}</a>} />))}</div>}
     </div>);
 }

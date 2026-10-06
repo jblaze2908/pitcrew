@@ -1,13 +1,13 @@
 // One transcript event as an element. Tool calls are grouped by the caller (see groupEvents).
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { Img, ImageIndex } from "../../lib/images";
+import { attachmentName, imgFile, imgSrc, isImagePath, type Img, type ImageIndex } from "../../lib/images";
 import { editOf, type EditAsk } from "../../../../shared/edits";
 import type { Bot, DelegationCard as Deleg, PitStop, PlanSnapshot, ThreadEvent } from "../../../../shared/types";
 import { DelegationCard } from "../../components/DelegationCard";
 import { OUTCOME, PitCard } from "../../components/PitCard";
 import { PlanCard, PlanChip } from "../../components/PlanCard";
 import { BusyButton, Face, Inline, Md } from "../../components/ui";
-import { plainWords, tidyTitle } from "../../lib/format";
+import { plainWords, plural, tidyTitle } from "../../lib/format";
 import { pitLabel, runSummary, stepView } from "../../lib/steps";
 import { Icon } from "../../components/Icon";
 import { StepIcon } from "../../components/StepIcon";
@@ -17,7 +17,6 @@ import { catches } from "./Painting";
 import { ReplyActions } from "./Rewind";
 
 export const stepOk = (e: ThreadEvent) => e.data.status === "completed" && (e.data.exitCode == null || e.data.exitCode === 0);
-const isImg = (p: string) => /\.(png|jpe?g|webp|gif)$/i.test(p);
 
 export function UserMsg({ e, botId, fromName, images, onView }: { e: ThreadEvent; botId: string; fromName: string; images?: ImageIndex; onView?: (im: Img) => void }) {
   const d = e.data;
@@ -29,9 +28,9 @@ export function UserMsg({ e, botId, fromName, images, onView }: { e: ThreadEvent
       {via && <span className="pc-lab">{via}</span>}
       {ed ? <EditAskView ed={ed} botId={botId} at={e.ts} images={images} onView={onView} /> : <Inline text={d.display || d.text} />}
       {atts.length > 0 && (
-        <div className="sent-atts">{atts.map((p) => isImg(p)
-          ? <button key={p} className="img-open" title="Open" onClick={() => onView?.(loose(p))}><img src={`/files/${botId}/${p}?inline=1`} alt={p.split("/").pop()} loading="lazy" /></button>
-          : <a key={p} className="pc-chip" href={`/files/${botId}/${p}`}>{p.split("/").pop()!.replace(/^[a-z0-9]+-/, "")}</a>)}
+        <div className="sent-atts">{atts.map((p) => isImagePath(p)
+          ? <button key={p} className="img-open" title="Open" onClick={() => onView?.(loose(p))}><img src={imgSrc({ botId, path: p })} alt={p.split("/").pop()} loading="lazy" /></button>
+          : <a key={p} className="pc-chip" href={imgFile({ botId, path: p })}>{attachmentName(p)}</a>)}
         </div>)}
     </div>
   );
@@ -43,10 +42,10 @@ function EditAskView({ ed, botId, at, images, onView }: { ed: EditAsk; botId: st
   const ver = im ? images!.chain(im.id).length : 0;
   const thumb = ed.marked || ed.image;
   const pins = ed.pins.length;
-  const sub = [ed.brushed ? "brushed" : "", pins ? `${pins} pin${pins > 1 ? "s" : ""}` : "", ed.model || ""].filter(Boolean).join(" · ");
+  const sub = [ed.brushed ? "brushed" : "", pins ? plural(pins, "pin") : "", ed.model || ""].filter(Boolean).join(" · ");
   return <>
     <button className="edit-ref" title="Open" onClick={() => onView?.(im || { id: `a:${thumb}`, path: thumb, parentId: null, botId, caption: "", at })}>
-      <img src={`/files/${botId}/${thumb}?inline=1`} alt="" loading="lazy" />
+      <img src={imgSrc({ botId, path: thumb })} alt="" loading="lazy" />
       <span><span>{ver ? `Editing v${ver}` : "Editing an image"}</span>{sub && <small>{sub}</small>}</span>
     </button>
     {ed.typed || (pins ? null : "Edit this image")}
@@ -89,14 +88,14 @@ function Images({ e, b, c }: { e: ThreadEvent; b: Bot; c: EventCtx }) {
         <div className={`img-wrap${paths.length > 1 ? " shot-grid" : ""}`}>{paths.map((p, i) => {
           const im = I?.byId.get(ids[i]), kept = I?.kept.has(ids[i]);
           return <div key={p} className={`img-tile${kept ? " kept" : ""}`}>
-            <button className="img-open" title="Open" onClick={() => im && c.onView?.(im)}><img src={`/files/${d.botId}/${p}?inline=1`} alt={d.caption} loading="lazy" /></button>
+            <button className="img-open" title="Open" onClick={() => im && c.onView?.(im)}><img src={imgSrc({ botId: d.botId, path: p })} alt={d.caption} loading="lazy" /></button>
             {!old && paths.length === 1 && <span className="img-tag">Open</span>}
             {kept && <span className="img-tag kept">Kept</span>}
             {im && !old && <span className="img-acts">
               <button onClick={() => c.onEdit?.(im)}>Edit</button>
               {one && parent ? <button onClick={() => c.onCompare?.(im)}>{`Compare with v${ver - 1}`}</button> : <button onClick={() => c.onMore?.(im)}>More like this</button>}
               {!ids[i].startsWith("p:") && !kept && <button onClick={() => keep(ids[i])}>Keep{burst === ids[i] && <Burst />}</button>}
-              <a href={`/files/${d.botId}/${p}`} download title="Download">↓</a>
+              <a href={imgFile({ botId: d.botId, path: p })} download title="Download">↓</a>
             </span>}
           </div>;
         })}{!gone && cover && <div className="unveil" aria-hidden="true">{Array.from({ length: 48 }, (_, i) => <i key={i} style={{ background: cover[i] || undefined, ["--r" as any]: `${((i * 47) % 60) - 30}deg`, animationDelay: `${((i * 29) % 12) * 35}ms` }} />)}</div>}</div>
@@ -107,7 +106,7 @@ function Images({ e, b, c }: { e: ThreadEvent; b: Bot; c: EventCtx }) {
             </figcaption>}
         {fam.length > 1 && <div className="vers" aria-label="Versions">{fam.map((v, i) => <Fragment key={v.id}>{i > 0 && <i className="ln" />}
           <button className={`ver${v.id === one!.id ? " on" : ""}${I!.kept.has(v.id) ? " kept" : ""}`} title="Open this version" onClick={() => c.onView?.(v)}>
-            <img src={`/files/${v.botId}/${v.path}?inline=1`} alt="" loading="lazy" /><span>{`v${I!.chain(v.id).length}`}</span></button></Fragment>)}</div>}
+            <img src={imgSrc(v)} alt="" loading="lazy" /><span>{`v${I!.chain(v.id).length}`}</span></button></Fragment>)}</div>}
       </figure>
     </div>
   );
@@ -117,7 +116,7 @@ function Images({ e, b, c }: { e: ThreadEvent; b: Bot; c: EventCtx }) {
 function Script({ e, result }: { e: ThreadEvent; result?: Record<string, any> }) {
   const failed = !!result && result.status !== "completed", lines = String(e.data.code || "").split("\n").length;
   return (
-    <details className="tool script"><summary><StepIcon name="code" /><span className="lbl">Ran a script</span><span className="det">{`${lines} line${lines === 1 ? "" : "s"}${result ? "" : " · running"}`}</span>{failed && <span className="tag failed">Failed</span>}</summary>
+    <details className="tool script"><summary><StepIcon name="code" /><span className="lbl">Ran a script</span><span className="det">{`${plural(lines, "line")}${result ? "" : " · running"}`}</span>{failed && <span className="tag failed">Failed</span>}</summary>
       <pre>{e.data.code}</pre>
       {result?.output && <><p className="small faint" style={{ margin: "8px 0 4px" }}>Output</p><pre>{result.output}</pre></>}
     </details>

@@ -7,10 +7,10 @@ import { Icon } from "../../components/Icon";
 import { PlanCard } from "../../components/PlanCard";
 import { StepIcon } from "../../components/StepIcon";
 import { Loader } from "../../components/ui";
-import { hm, tidyTitle, unwrapShell } from "../../lib/format";
+import { hm, plural, tidyTitle, unwrapShell } from "../../lib/format";
 import { stepView } from "../../lib/steps";
 import { api } from "../../lib/api";
-import { openScreen } from "../../lib/novnc";
+import { useWatchScreen } from "../../lib/novnc";
 import { FileBlock, Tally } from "../crew/FilesTab";
 
 export type Tab = "plan" | "screen" | "terminal" | "files";
@@ -79,17 +79,8 @@ function ScreenActions({ b, lease, onHandBack }: { b: BotCard; lease: boolean; o
 
 function ScreenTab({ b, events, running }: { b: BotCard; events: ThreadEvent[]; running: boolean }) {
   const el = useRef<HTMLDivElement>(null);
-  const [status, setStatus] = useState("Connecting…");
   const up = b.computer.desktop;
-  useEffect(() => {
-    if (!up) return;
-    let rfb: Awaited<ReturnType<typeof openScreen>> | null = null, gone = false;
-    openScreen(el.current!, b.id, true).then((r) => {
-      if (gone) return r.disconnect();
-      rfb = r; r.addEventListener("connect", () => setStatus("Live")); r.addEventListener("disconnect", () => setStatus("Disconnected"));
-    }).catch((e: Error) => setStatus(e.message));
-    return () => { gone = true; rfb?.disconnect(); };
-  }, [b.id, up]);
+  const status = useWatchScreen(el, b.id, up);
   // The newest screen steps, so the space under a landscape screen says what just happened on it.
   const recent = useMemo(() => events.filter(isScreenTool).slice(-8).reverse(), [events]);
   const shot = useMemo(() => events.findLast((e) => e.kind === "shot"), [events]);
@@ -187,7 +178,7 @@ function FilesTab({ b, runs }: { b: BotCard; runs: ChangeRun[] }) {
     <div className="col" style={{ gap: 14 }}>
       {runs.map((r) => (
         <section key={r.id} className="col" style={{ gap: 6 }}>
-          <p className="pc-lab">{`Run at ${hm(r.started_at)} · ${r.changes.length} file${r.changes.length === 1 ? "" : "s"} `}<Tally cs={r.changes} /></p>
+          <p className="pc-lab">{`Run at ${hm(r.started_at)} · ${plural(r.changes.length, "file")} `}<Tally cs={r.changes} /></p>
           {r.changes.map((c) => { const k = `${r.id}:${c.path}`; return <FileBlock key={k} b={b} turnId={r.id} c={c} open={open === k} focus={false} split={false} onToggle={() => setOpen(open === k ? null : k)} />; })}
         </section>))}
       <a className="small" href={`#/crew/${b.id}/files/workspace`}>{`All of ${b.name}'s files ›`}</a>

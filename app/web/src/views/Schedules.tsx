@@ -4,7 +4,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { BusyButton, ConfirmButton, Face, Field, Inline, Loader, Seg } from "../components/ui";
 import { Icon } from "../components/Icon";
 import { api } from "../lib/api";
-import { dayLabel, flat, hm, sinceLabel, until } from "../lib/format";
+import { dayLabel, dayMonth, flat, hm, plural, sinceLabel, until } from "../lib/format";
 import { useStore } from "../lib/store";
 import { toast } from "../lib/toast";
 import { useFetch } from "../lib/useFetch";
@@ -45,24 +45,23 @@ function result(r: Run): [string, string] {
   if (late(r) > LATE_MS) return [`Late ${Math.round(late(r) / 60000)} min`, "late"];
   return r.status === "quiet" ? ["Nothing new", "quiet"] : ["Alerted you", "news"];
 }
-const dm = (t: number) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" }).format(new Date(t));
 /** The next run as a day word and a time: "Tonight 22:00", "Tomorrow 08:00", "Thu 10:00", "1 Nov 09:00". */
 function nextWhen(t: number): [string, string] {
   const d = dayLabel(t), h = +hm(t).slice(0, 2);
   if (d === "Today") return [h >= 18 ? "Tonight" : "Today", hm(t)];
   if (dayLabel(t - 86400000) === "Today") return ["Tomorrow", hm(t)];
-  return [t - Date.now() < 6 * 86400000 ? d.split(" ")[0] : dm(t), hm(t)];
+  return [t - Date.now() < 6 * 86400000 ? d.split(" ")[0] : dayMonth(t), hm(t)];
 }
 /** The last 14 runs in words: "All 14 ran · 3 alerts", "1 failed on 1 Oct", "Last run failed". Empty when it never ran. */
 function outcome(runs: Run[]): [string, boolean] {
   const done = runs.filter((r) => r.ended_at), bad = done.filter((r) => result(r)[1] === "bad");
   if (!done.length) return ["", false];
   if (result(done[0])[1] === "bad") return ["Last run failed", true];
-  if (bad.length) return [`${bad.length} failed${bad.length === 1 ? ` on ${dm(bad[0].fired_at)}` : `, last on ${dm(bad[0].fired_at)}`}`, true];
+  if (bad.length) return [`${bad.length} failed${bad.length === 1 ? ` on ${dayMonth(bad[0].fired_at)}` : `, last on ${dayMonth(bad[0].fired_at)}`}`, true];
   const ran = done.filter((r) => ["quiet", "news", "late"].includes(result(r)[1])).length, skipped = done.filter((r) => r.status === "skipped").length;
   const alerts = done.filter((r) => r.status === "reported").length;
   const head = ran === 1 && done.length === 1 ? "Ran once" : skipped ? `${ran} ran · ${skipped} skipped` : `All ${ran} ran`;
-  return [`${head}${alerts ? ` · ${alerts} ${alerts === 1 ? "alert" : "alerts"}` : ""}`, false];
+  return [`${head}${alerts ? ` · ${plural(alerts, "alert")}` : ""}`, false];
 }
 
 export function Schedules() {
