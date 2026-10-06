@@ -38,7 +38,7 @@ export function Threads() {
   const pinned = d?.pinned || [];
   const waiting = new Map(S.pitstops.filter((p) => p.kind !== "engram" && p.thread_id).map((p) => [p.thread_id!, plainWords(p.title.replace(/ · (verify|after untrusted|jev blocked)\b.*$/, ""))]));
   const shown = pinned.length + rows.length;
-  const hidden = d?.hidden ? [d.hidden.test && plural(d.hidden.test, "test thread"), d.hidden.sub && plural(d.hidden.sub, "sub-thread")].filter(Boolean) : [];
+  const hidden = d?.hidden?.test ? [plural(d.hidden.test, "test thread")] : [];
   const byMember = (r: ThreadListRow) => (bot(r.bot_id) ? name(r.bot_id) : "Former members");
   const memberSorted = mode === "member" ? [...pinned, ...rows].sort((a, b) => byMember(a).localeCompare(byMember(b)) || b.updated_at - a.updated_at) : [];
   const stale = !!d && d.key !== key;

@@ -187,12 +187,12 @@ function FilesTab({ b, runs }: { b: BotCard; runs: ChangeRun[] }) {
     </div>);
 }
 
-/** The thread's runs that changed files, from the member's change log (40 kept). Refetched when a run ends. */
+/** The thread's 40 newest runs that changed files (the server filters by thread). Refetched when a run ends. */
 export function useThreadRuns(botId: string, threadId: string, bump: number) {
   const [runs, setRuns] = useState<ChangeRun[]>([]);
   useEffect(() => {
     let live = true;
-    api.get<ChangeRun[]>(`/api/bots/${botId}/changes`, { quiet: true }).then((all) => { if (live) setRuns(all.filter((r) => r.thread_id === threadId && r.changes.length)); }).catch(() => {});
+    api.get<ChangeRun[]>(`/api/bots/${botId}/changes?thread=${encodeURIComponent(threadId)}`, { quiet: true }).then((all) => { if (live) setRuns(all.filter((r) => r.changes.length)); }).catch(() => {});
     return () => { live = false; };
   }, [botId, threadId, bump]);
   return runs;
