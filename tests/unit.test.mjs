@@ -1,7 +1,7 @@
 // Unit tests that need no Docker or network: surface validation, diffs, schedules, workspace path safety.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 const root = mkdtempSync(`${tmpdir()}/pitcrew-test-`);
@@ -957,6 +957,14 @@ test("replaying a captured request keeps its headers inside Playwright and appli
   const work = `${root}/bots/b_rep/work`; mkdirSync(work, { recursive: true });
   assert.ok(Bz.workFile("b_rep", "/bot/work/grocery/raw/page2.json").endsWith("/work/grocery/raw/page2.json"));
   for (const bad of ["../x.json", "/etc/x", "a/../../x"]) assert.equal(Bz.workFile("b_rep", bad), null, bad);
+  // Links the member plants are never followed: not as a folder on the way, not as the file itself.
+  mkdirSync(`${root}/rep_outside`, { recursive: true }); writeFileSync(`${root}/rep_outside/db`, "keep");
+  symlinkSync(`${root}/rep_outside`, `${work}/linkdir`); symlinkSync(`${root}/rep_outside/db`, `${work}/linkfile`);
+  assert.equal(Bz.workFile("b_rep", "/bot/work/linkdir/new/x.json"), null);
+  assert.equal(Bz.workFile("b_rep", "/bot/work/linkfile"), null);
+  assert.equal(existsSync(`${root}/rep_outside/new`), false, "nothing made through the link");
+  assert.throws(() => Bz.writeAsBot("b_rep", `${work}/linkfile`, "overwritten"));
+  assert.equal(readFileSync(`${root}/rep_outside/db`, "utf8"), "keep");
 });
 
 test("a usage-limit failure picks the thread back up when the limit resets, at most three times in a row", async () => {
