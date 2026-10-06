@@ -74,6 +74,8 @@ export interface State {
   engram: { linked: boolean; url: string };
   /** Runs that ended since the driver last opened their thread (Home's "Since you last looked"). */
   unread: number;
+  /** One-time notices the driver can dismiss: the OpenRouter balance at 90% used (runtime/balance.ts). */
+  alerts: { id: string; text: string }[];
   /** Retired members' names by id, so their old threads and pit stops show a name rather than an id. */
   formerNames: Record<string, string>;
 }

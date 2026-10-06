@@ -1,10 +1,10 @@
-// Overview: talk to the member, what waits on you, its threads, and a side column for job, schedule, computer and spend.
+// Overview: talk to the member, what waits on you, its threads, and a side column for job, schedule and computer.
 import { useEffect, useState, type KeyboardEvent } from "react";
 import type { AskResult, BotCard, BotDetail, ThreadListRow, ThreadPage } from "../../../../shared/types";
 import { Icon } from "../../components/Icon";
 import { BusyButton } from "../../components/ui";
 import { api } from "../../lib/api";
-import { ago, dayLabel, hm, plainWords, usd, when } from "../../lib/format";
+import { ago, dayLabel, hm, plainWords, when } from "../../lib/format";
 import { useLiveReload } from "../../lib/live";
 import { go } from "../../lib/router";
 import { useStore } from "../../lib/store";
@@ -27,7 +27,6 @@ export function OverviewTab({ b, d }: { b: BotCard; d: BotDetail }) {
         <Job b={b} />
         <ScheduleBlock d={d} />
         <Computer b={b} />
-        <Week b={b} />
       </aside>
     </div>
   );
@@ -165,14 +164,3 @@ function Computer({ b }: { b: BotCard }) {
   );
 }
 
-function Week({ b }: { b: BotCard }) {
-  const pct = b.weekly_cap_usd > 0 ? Math.min(100, (b.spend / b.weekly_cap_usd) * 100) : 0;
-  return (
-    <div className="blk">
-      <p className="k">This week</p>
-      <p className="v">{`${usd(b.spend)} of ${usd(b.weekly_cap_usd)}`}</p>
-      <div className="bar4"><i style={{ width: `${pct.toFixed(0)}%` }} /></div>
-      <p className="after">Resets Monday. <a className="lk2" href={`#/crew/${b.id}/settings/model`}>Change the cap</a></p>
-    </div>
-  );
-}

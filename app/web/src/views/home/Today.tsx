@@ -27,13 +27,16 @@ export function Today() {
   const midnight = Math.floor((Date.now() + IST) / DAY) * DAY - IST, yesterday = midnight - DAY;
   const titles = new Map(S.bots.flatMap((b) => b.threads.map((t) => [t.id, t.title] as const)));
   const runEv = (i: InboxItem): Ev => {
-    const who = name(i.botId), title = i.sub || titles.get(i.threadId) || "a thread";
+    // A scheduled run's thread title ends in its date ("… · 5 Oct"); the row's time already says when.
+    const who = name(i.botId), title = (i.sub || titles.get(i.threadId) || "a thread").replace(/ · \d{1,2} [A-Z][a-z]{2}$/, "").replace(/\.$/, "");
+    // Scheduled prompts ask for a "QUIET:" reply when nothing changed.
+    const quiet = i.status === "quiet" || /^QUIET:/i.test(i.text || "");
     const text = i.kind === "delegation" ? <>{who} answered {name(i.fromBot)}</>
-      : i.kind === "scheduled" ? <>{who} ran <b>{title}</b>{i.status === "quiet" ? ", nothing new" : ""}</>
+      : i.kind === "scheduled" || quiet ? <>{who} ran <b>{title}</b>{quiet ? ", nothing new" : ""}</>
       : i.status === "failed" ? <>{who} couldn't finish <b>{title}</b></>
       : <>{who} finished <b>{title}</b></>;
-    return { key: i.turnId, at: i.endedAt, b: bot(i.botId), text, quote: i.status === "quiet" ? undefined : i.text, unread: i.unread,
-      failed: i.status === "failed", quiet: i.status === "quiet", href: `#/t/${i.threadId}` };
+    return { key: i.turnId, at: i.endedAt, b: bot(i.botId), text, quote: quiet ? undefined : i.text, unread: i.unread,
+      failed: i.status === "failed", quiet, href: `#/t/${i.threadId}` };
   };
   const actEv = (r: ActivityRow): Ev => {
     const where = r.threadId && titles.get(r.threadId);

@@ -187,7 +187,7 @@ export async function doneCheck(threadId: string, turnId: string, { grader = ope
   setGrade(root.id, { ...(root.id === t.id ? base : rg), status: "failed", headline: grade.headline, criteria: grade.criteria, fix: grade.fix });
   audit("system", "donecheck.failed", { threadId, turnId: t.id, root: root.id, attempts: attempt });
   // Not awaited: the driver may take days. Its decision lands in applyCheckDecision (pitstops.ts decide).
-  void pitStop({ botId: t.bot_id, threadId, kind: "check", effect: "check", title: `Couldn't confirm ${grade.headline}`,
+  void pitStop({ botId: t.bot_id, threadId, kind: "check", effect: "check", title: `Couldn't confirm ${String(grade.headline || "").replace(/^couldn'?t confirm:?\s*/i, "")}`,
     detail: { criteria: grade.criteria, fix: grade.fix, attempts: attempt, turnId: t.id, root: root.id, proof: ev.proof }, expiresMin: 7 * 24 * 60 });
   return "failed";
 }

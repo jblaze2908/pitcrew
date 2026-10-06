@@ -1,6 +1,7 @@
 // The signed-in app: the sidebar (links, crew, recent threads) and the routed view.
 import { Component, useEffect, useLayoutEffect, type ReactNode } from "react";
 import { api } from "./lib/api";
+import { useStore } from "./lib/store";
 import { DockProvider } from "./components/Dock";
 import { Side } from "./components/Side";
 import { startStream, useRoute, type Route } from "./lib/router";
@@ -48,6 +49,18 @@ class Guard extends Component<{ children: ReactNode }, { failed: boolean }> {
   }
 }
 
+/** One-time notices (the OpenRouter balance at 90%); dismissing one is remembered on the server, so it stays gone everywhere. */
+function Alerts() {
+  const { S, refresh } = useStore();
+  if (!S.alerts?.length) return null;
+  return <>{S.alerts.map((a) => (
+    <div key={a.id} className="alert" role="status">
+      <i className="dot" /><span>{a.text}</span>
+      <a href="https://openrouter.ai/settings/credits" target="_blank" rel="noreferrer">Top up</a>
+      <button aria-label="Dismiss" title="Dismiss" onClick={async () => { await api.post(`/api/alerts/${encodeURIComponent(a.id)}/dismiss`); await refresh(); }}>×</button>
+    </div>))}</>;
+}
+
 export function Shell() {
   const route = useRoute();
   // A layout effect runs before any view's fetch effect, so the stream is open first and less lands between the two.
@@ -63,7 +76,7 @@ export function Shell() {
       <div className="app">
         <div className="shell">
           <Side route={route} />
-          <main id="view"><Guard key={location.hash}><View route={route} /></Guard></main>
+          <main id="view"><Alerts /><Guard key={location.hash}><View route={route} /></Guard></main>
         </div>
       </div>
     </DockProvider>

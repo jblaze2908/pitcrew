@@ -10,6 +10,7 @@ import * as R from "../runtime/index.js";
 import { signedIn, type Env } from "../http/guard.js";
 import { readJson, jsonBody, given, pick, raw } from "../http/body.js";
 import { state } from "./views.js";
+import { dismissAlert } from "../runtime/balance.js";
 import { telemetrySummary } from "./lists.js";
 import { AUTONOMY } from "../runtime/autonomy.js";
 
@@ -27,6 +28,7 @@ const Push = z.object({ url: given((v) => String(v)), token: given((v) => (v ===
 
 export const systemRoutes = new Hono<Env>()
   .get("/api/state", signedIn, (c) => c.json(state()))
+  .post("/api/alerts/:id/dismiss", signedIn, (c) => { dismissAlert(c.req.param("id")); return c.json({ ok: true }); })
   // Phone push (runtime/push.ts): the topic, a test, the presence beat that keeps pushes off while Pitcrew is in view.
   .get("/api/push", signedIn, (c) => c.json(R.pushConfig()))
   .put("/api/push", signedIn, async (c) => { const b = await jsonBody(c, Push); R.setPushConfig(b.url ?? R.pushConfig().url, b.token); return c.json(R.pushConfig()); })

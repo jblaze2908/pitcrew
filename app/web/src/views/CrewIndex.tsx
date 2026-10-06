@@ -6,7 +6,7 @@ import { Icon } from "../components/Icon";
 import { jobLine } from "../components/MemberMenu";
 import { Face } from "../components/ui";
 import { api } from "../lib/api";
-import { cap, dayLabel, hm, plainWords, plural, usd } from "../lib/format";
+import { cap, dayLabel, hm, plainWords, plural } from "../lib/format";
 import { useStore } from "../lib/store";
 import { useFetch } from "../lib/useFetch";
 
@@ -63,7 +63,7 @@ export function CrewIndex() {
         </div>
       </div>
       {!bots.length ? <p className="small faint">{q ? "No one matches." : "No members yet."}</p> : <div className="crew2-list">
-        <div className="crew2-head"><span>Member</span><span>Right now</span><span>Next up</span><span className="crew2-r">This week</span><span /></div>
+        <div className="crew2-head"><span>Member</span><span>Right now</span><span>Next up</span><span /></div>
         {groups.map(([label, list]) => list.length > 0 && (
           <section key={label}>
             <p className="crew2-grp">{label}<em>{list.length}</em></p>
@@ -75,7 +75,6 @@ export function CrewIndex() {
                     <span className="crew2-who"><Face b={b} size="md" /><span className="col"><b>{b.name}</b><span className="small muted trunc">{jobLine(b)}</span></span></span>
                     <span className={`crew2-now${tone ? ` is-${tone}` : ""}`}>{line}</span>
                     <span className="crew2-next">{s && when ? <>{`${s.title || "Scheduled run"} ${when[0]} `}<span className="pc-m">{when[1]}</span></> : <span className="faint">Nothing scheduled</span>}</span>
-                    <span className="crew2-spend pc-m">{b.spend > 0 ? usd(b.spend) : ""}</span>
                     <Icon name="chev" size={14} className="crew2-go" />
                   </a>);
               })}

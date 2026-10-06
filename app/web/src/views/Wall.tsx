@@ -7,7 +7,7 @@ import { DigestCard } from "../components/Engram";
 import { PitCard } from "../components/PitCard";
 import { Surface } from "../components/Surface";
 import { api } from "../lib/api";
-import { hourNow, usd } from "../lib/format";
+import { hourNow } from "../lib/format";
 import { go } from "../lib/router";
 import { connected, useStore } from "../lib/store";
 import { toast } from "../lib/toast";
@@ -44,7 +44,7 @@ export function Wall({ to, focus }: { to?: string; focus?: boolean }) {
       {pits.length > 0 && <Waiting pits={pits} />}
       <Today />
       <p className="qf">
-        <span>{`${usd(S.today.usd)} today · ${usd(S.week.usd)} of ${usd(S.weekCap)} this week`}</span>
+        <span />
         <span><a href="#/threads">All threads</a><a href="#/telemetry">All activity</a></span>
       </p>
       <div className="folds">

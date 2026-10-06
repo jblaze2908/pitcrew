@@ -91,7 +91,7 @@ test("a member lists, edits, pauses and cancels only its own schedules", () => {
 
 test("schedules carry a short title: given, backfilled from the prompt, or reset to it", () => {
   run("INSERT INTO bots(id,name,created_at) VALUES('b_ttl','Titler',0)");
-  assert.equal(R.scheduleTitle("Review today's spending in Tijori. Then compare it with the goals."), "Review today's spending in Tijori.");
+  assert.equal(R.scheduleTitle("Review today's spending in Tijori. Then compare it with the goals."), "Review today's spending in Tijori");
   assert.equal(R.scheduleTitle("[Scheduled: daily 09:00]\n\nCheck the BESCOM portal"), "Check the BESCOM portal");
   const long = R.scheduleTitle("every day at 22:00 asia/kolkata run one pass over the grocery ledger and the bank feed and label whatever is new");
   assert.ok(long.length <= 60 && long.endsWith("…") && long.startsWith("One pass over"), long);
@@ -2104,4 +2104,21 @@ test("telemetry counts every run once as started, splits it the same way everywh
   assert.equal(L.runPage({ days: "1", bot: "b_tm" }, at).total, 6);
   assert.equal(L.runPage({ days: "1", q: "spend" }, at).total, 5);
   assert.equal(L.runPage({ days: "1", trigger: "driver'--", outcome: "1=1" }, at).total, 7, "unknown filter values are ignored");
+});
+
+test("OpenRouter balance: a notice at 90% used, dismissed once, back after a top-up crosses 90% again", async () => {
+  const B = await import("../app/dist/src/runtime/balance.js");
+  const { setSetting } = await import("../app/dist/src/db.js");
+  setSetting("or_balance", JSON.stringify({ at: 0, used: 8, total: 10, id: "or:credits:10" }));
+  assert.deepEqual(B.balanceAlerts(), [], "80% used says nothing");
+  setSetting("or_balance", JSON.stringify({ at: 0, used: 9.2, total: 10, id: "or:credits:10" }));
+  const [a] = B.balanceAlerts();
+  assert.match(a.text, /92% used: \$0\.80 left of \$10\.00/);
+  B.dismissAlert("or:other");
+  assert.equal(B.balanceAlerts().length, 1, "a stale id dismisses nothing");
+  B.dismissAlert(a.id);
+  assert.deepEqual(B.balanceAlerts(), []);
+  setSetting("or_balance", JSON.stringify({ at: 0, used: 27.5, total: 30, id: "or:credits:30" }));
+  assert.equal(B.balanceAlerts().length, 1, "a new total is a new notice");
+  setSetting("or_balance", "");
 });
