@@ -1,7 +1,7 @@
 // Turns on a member's brain: sending a message, starting and finishing a run, steering, interrupting, compacting.
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { one, all, run, now, uid, json, getSetting, marks } from "../db.js";
+import { one, all, run, now, uid, json, getSetting, marks, driverName } from "../db.js";
 import { getBot, instructions, dynamicTools, engramBlock } from "../crew.js";
 import { botDir, toolManifest } from "../computer.js";
 import { providerReady, estimateCost } from "../providers.js";
@@ -192,7 +192,7 @@ export async function startTurn(threadId: string, text: string, attachments: str
       c.loaded.add(codexId);
       c.mems.set(codexId, seen ?? new Map());  // unknown after a brain restart: every memory goes in as context
       await c.mcpReady(codexId);
-      if (eg && egCtx) refreshed = `Refreshed just now; this replaces any earlier Engram profile and skills list.\n\n${engramBlock(getSetting("driver_name", "the driver"), egCtx, b.engram_scope)}`;
+      if (eg && egCtx) refreshed = `Refreshed just now; this replaces any earlier Engram profile and skills list.\n\n${engramBlock(driverName(), egCtx, b.engram_scope)}`;
     } else if (!c.loaded.has(codexId)) {
       c.mcp.delete(codexId);
       const r = await c.request("thread/resume", { threadId: codexId, ...common, sandbox: "danger-full-access", approvalPolicy: "untrusted", excludeTurns: true }, 120000);

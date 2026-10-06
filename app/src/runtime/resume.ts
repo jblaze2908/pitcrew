@@ -3,7 +3,7 @@
 // Stored in settings, so a restart keeps it. At most RESUME_TRIES in a row, so a limit that won't lift can't loop.
 import { all, run, now, getSetting, setSetting } from "../db.js";
 import { getThread, addEvent } from "./threads.js";
-import { IST } from "./util.js";
+import { istClock, istDayAt } from "./util.js";
 
 const KEY = "resume_at:", RESUME_TRIES = 3, GRACE_MS = 90000;
 export const isUsageLimit = (error: string | null | undefined) => /usage limit|rate limit reached|quota exceeded/i.test(error || "");
@@ -14,8 +14,7 @@ export function retryAt(error: string, at = now()): number | null {
   const clock = /try again at (\d{1,2}):(\d{2})\s*([AP]M)/i.exec(error);
   if (clock) {
     let h = Number(clock[1]) % 12; if (/pm/i.test(clock[3])) h += 12;
-    const ist = new Date(at + IST), day = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate());
-    let t = day + (h * 60 + Number(clock[2])) * 60000 - IST;
+    let t = istDayAt(at, h, Number(clock[2]));
     if (t <= at) t += 86400000;
     return t + GRACE_MS;
   }
@@ -30,7 +29,7 @@ export function armResume(threadId: string, error: string, at = now()) {
   const prev = getSetting(`${KEY}${threadId}`), tries = prev ? Number(prev.split("|")[1] || 0) + 1 : 1;
   if (t == null || tries > RESUME_TRIES) { run("DELETE FROM settings WHERE key=?", `${KEY}${threadId}`); return null; }
   setSetting(`${KEY}${threadId}`, `${t}|${tries}`);
-  addEvent(threadId, null, "system", { text: `Usage limit reached. ${getThread(threadId)?.title ? "This thread" : "It"} picks up again at ${new Date(t + IST).toISOString().slice(11, 16)} IST on its own.` });
+  addEvent(threadId, null, "system", { text: `Usage limit reached. ${getThread(threadId)?.title ? "This thread" : "It"} picks up again at ${istClock(t)} IST on its own.` });
   return t;
 }
 // A run that got going again clears the counter, so a later limit gets its full tries.

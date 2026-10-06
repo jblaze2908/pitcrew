@@ -6,7 +6,7 @@ import { getBot } from "../crew.js";
 import { computer } from "./machines.js";
 import { createHash } from "node:crypto";
 import { sendMessage } from "./turns.js";
-import { IST } from "./util.js";
+import { IST, istClock, istDayAt } from "./util.js";
 import { dueResumes, sentResume } from "./resume.js";
 import { isEventSpec, newHookSecret, EVENT_SPEC, payloadText } from "./hooks.js";
 import { taint } from "./taint.js";
@@ -21,9 +21,8 @@ export function nextRun(spec: string, from = now()): number | null {
     if (ms < 15 * 60000) throw new Error("Schedules run at most every 15 minutes");
     return from + ms;
   }
-  const at = (d: Date, hh: number, mm: number) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), hh, mm) - IST;
   if ((m = /^weekdays (\d{1,2}):(\d{2})$/i.exec(spec))) {
-    let t = at(new Date(from + IST), +m[1], +m[2]);
+    let t = istDayAt(from, +m[1], +m[2]);
     while (t <= from || [0, 6].includes(new Date(t + IST).getUTCDay())) t += 86400000;
     return t;
   }
@@ -35,13 +34,13 @@ export function nextRun(spec: string, from = now()): number | null {
     return t;
   }
   if ((m = /^daily (\d{1,2}):(\d{2})$/i.exec(spec))) {
-    const d = new Date(from + IST); let t = at(d, +m[1], +m[2]);
+    let t = istDayAt(from, +m[1], +m[2]);
     if (t <= from) t += 86400000;
     return t;
   }
   if ((m = /^weekly (mon|tue|wed|thu|fri|sat|sun) (\d{1,2}):(\d{2})$/i.exec(spec))) {
     const d = new Date(from + IST); const today = (d.getUTCDay() + 6) % 7, want = DOW.indexOf(m[1].toLowerCase());
-    let t = at(d, +m[2], +m[3]) + ((want - today + 7) % 7) * 86400000;
+    let t = istDayAt(from, +m[2], +m[3]) + ((want - today + 7) % 7) * 86400000;
     if (t <= from) t += 7 * 86400000;
     return t;
   }
@@ -133,12 +132,11 @@ export function tickSchedules() {
 }
 
 const LATE_MS = 5 * 60000;
-const clock = (ms: number) => new Date(ms + IST).toISOString().slice(11, 16);
 /** Sends a schedule's prompt to its thread and records the run. due: when it should have fired (a late tick after a
  * restart or the kill switch says so in the run's note). */
 function fire(s: ScheduleRow, kind: ScheduleRunRow["kind"], due: number, payload?: string) {
   const id = uid("sr"), at = now();
-  const note = kind === "time" && at - due > LATE_MS ? `Due ${clock(due)}, fired ${clock(at)}: Pitcrew was stopped or restarting` : null;
+  const note = kind === "time" && at - due > LATE_MS ? `Due ${istClock(due)}, fired ${istClock(at)}: Pitcrew was stopped or restarting` : null;
   run("INSERT INTO schedule_runs(id,schedule_id,bot_id,kind,due_at,fired_at,status,note) VALUES(?,?,?,?,?,?,?,?)", id, s.id, s.bot_id, kind, due, at, "queued", note);
   start(s, id, kind, payload).catch((e) => run("UPDATE schedule_runs SET status='failed', ended_at=?, note=? WHERE id=?", now(), String(e.message).slice(0, 300), id));
   return id;

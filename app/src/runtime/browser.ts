@@ -3,7 +3,7 @@
 // browser_read is ours: a gated browser_snapshot turned into text. Page JS and Playwright code run like any other tool:
 // gated per call (gate.ts never lets a fully allowed site skip jev for them), with secrets masked and size capped.
 import { getBot } from "../crew.js";
-import { getSetting, audit } from "../db.js";
+import { audit, driverName } from "../db.js";
 import { chownSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { PW_SETTLE_MS, botDir, type Brain, type Rpc } from "../computer.js";
@@ -29,6 +29,8 @@ import { short, summariseArgs, hostOf, say, debugArgs } from "./util.js";
 const viaScript = (p: { callId?: string }) => (String(p.callId || "").startsWith("exec-") ? { viaScript: true } : {});
 export interface ToolCall { tool: string; threadId: string; callId?: string; arguments?: Record<string, any> }
 
+// The JSON a browser_run_code_unsafe call returned: its "### Result" section, else the whole text; null if neither parses.
+function codeResult<T>(raw: string): T | null { try { return JSON.parse((/### Result\n([\s\S]*?)(?:\n### |$)/.exec(raw)?.[1] ?? raw).trim()); } catch { return null; } }
 export async function runtimeTool(br: Brain, threadId: string, p: ToolCall): Promise<ToolResult> {
   const b = getBot(br.bot.id)!, turnId = active.get(threadId)?.turnId, t0 = Date.now();
   const kind = p.tool.startsWith("browser_") ? "browser" : "computer", reading = p.tool === "browser_read";
@@ -131,8 +133,7 @@ async function replayRequest(br: Brain, threadId: string, p: ToolCall): Promise<
   if (!ok) { addEvent(threadId, turnId, "tool", { type: "browser", title, ...viaScript(p), server: "browser", tool: p.tool, input: debugArgs(a), status: "declined" }); return say(takeRefusal(threadId) || "Not done: this replay was declined at a pit stop. Don't retry it another way; tell the driver what didn't happen.", false); }
   const r = await mcp.request("tools/call", { name: "browser_run_code_unsafe", arguments: { code: replayCode({ method, source, url: target.url, body: a.body, merge: a.merge && typeof a.merge === "object" ? a.merge : null }) } }, 120000);
   const raw = scrubFilled(threadId, (r.content || []).map((x: McpContent) => x.text || "").join("\n"));
-  let res: { status: number; type: string; text: string; found: boolean } | null = null;
-  try { res = JSON.parse((/### Result\n([\s\S]*?)(?:\n### |$)/.exec(raw)?.[1] ?? raw).trim()); } catch {}
+  const res = codeResult<{ status: number; type: string; text: string; found: boolean }>(raw);
   if (res) res.text = scrubFilled(threadId, String(res.text));
   addEvent(threadId, turnId, "tool", { type: "browser", title: `${title}${host ? ` on ${host}` : ""}`, ...viaScript(p), server: "browser", tool: p.tool, input: debugArgs(a), status: r.isError || !res ? "failed" : "completed", output: res ? `HTTP ${res.status} · ${res.text.length} chars` : raw.slice(0, 2000) });
   if (!res) return say(`The replay failed: ${raw.slice(0, 600)}`, false);
@@ -206,7 +207,7 @@ const asks = new Map<string, Promise<string>>(); // thread|secret → pending si
 const roleName = (el: string) => /^[a-z]+(\s+"(?:[^"\\]|\\.)*")?/.exec(el)?.[0] || "element"; // no value after the name
 
 export async function fillSecret(br: Brain, threadId: string, p: ToolCall, deps: { mcp?: Pick<Rpc, "request"> } = {}): Promise<ToolResult> {
-  const b = getBot(br.bot.id)!, turnId = active.get(threadId)?.turnId, a = p.arguments || {}, driver = getSetting("driver_name", "the driver");
+  const b = getBot(br.bot.id)!, turnId = active.get(threadId)?.turnId, a = p.arguments || {}, driver = driverName();
   if (!(await planLive(threadId))) return say("This plan runs on what the crew already knows: the driver turned live lookups off.", false);
   const sec = findSecret(String(a.secret || ""));
   const refuse = (why: string, event = true) => {
@@ -264,8 +265,7 @@ export async function fillSecret(br: Brain, threadId: string, p: ToolCall, deps:
     const r = await mcp.request("tools/call", { name: "browser_run_code_unsafe", arguments: { code: fillCode({ site: sec.site, card, fields: filling, submit, clear }) } }, 120000);
     const raw = scrubFilled(threadId, (r.content || []).map((x: McpContent) => x.text || "").join("\n"));
     scrubSnapshotFile(b.id, threadId, raw);
-    let res: FillResult | null = null;
-    try { res = JSON.parse((/### Result\n([\s\S]*?)(?:\n### |$)/.exec(raw)?.[1] ?? raw).trim()); } catch {}
+    const res = codeResult<FillResult>(raw);
     markUsed(sec.id, b.id);
     audit("crew", "vault.filled", { botId: b.id, threadId, id: sec.id, name: sec.name, host: s.host, fields: names, ok: !!res?.ok });
     if (!res || !res.ok) {

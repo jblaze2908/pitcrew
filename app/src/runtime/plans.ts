@@ -1,7 +1,7 @@
 // Plans (prototype, behind the "plans" setting). The Crew Chief edits a todo; Pitcrew starts every item whose `after`
 // items are done, hands it their results, records what comes back and wakes the Chief after each item. Starting,
 // waiting and passing results is code, not the model.
-import { one, run, now, uid, json, audit, getSetting } from "../db.js";
+import { one, run, now, uid, json, audit, driverName } from "../db.js";
 import { getBot } from "../crew.js";
 import type { ToolResult } from "../shots.js";
 import type { Bot, Handoff } from "../../shared/types.js";
@@ -30,7 +30,7 @@ function wakeChief(p: Plan, text: string, display: string, key: string | null = 
     askToContinue(p, "chief", `The Crew Chief has looked at this plan ${spend.chiefRuns} times. Let it keep going? (${short(p.goal, 70)})`).then((ok) => {
       const fresh = planRow(p.id); if (!fresh || fresh.status !== "running") return;
       setLimits(fresh, { ...fresh.limits, chiefRuns: fresh.limits.chiefRuns + (ok ? 6 : 1) });
-      wakeChief(planRow(p.id)!, ok ? text : `${text}\n\n${getSetting("driver_name", "The driver")} said to finish with what the crew has. Finish now.`, display, key);
+      wakeChief(planRow(p.id)!, ok ? text : `${text}\n\n${driverName("The driver")} said to finish with what the crew has. Finish now.`, display, key);
     });
     return;
   }
@@ -47,7 +47,7 @@ function dispatchPlan(planId: string) {
     if (planSpend(p).usd >= p.budget_usd) {
       askToContinue(p, "budget", `This plan has spent $${planSpend(p).usd.toFixed(2)} of $${p.budget_usd.toFixed(2)}. Allow another $1.00? (${short(p.goal, 70)})`).then((ok) => {
         if (ok) { run("UPDATE plans SET budget_usd=budget_usd+1 WHERE id=?", p.id); emitPlan(planRow(p.id)!); dispatchPlan(p.id); }
-        else wakeChief(planRow(p.id)!, `${getSetting("driver_name", "The driver")} didn't allow more spending on this plan. Finish with what the crew has.`, "Plan update: budget reached");
+        else wakeChief(planRow(p.id)!, `${driverName("The driver")} didn't allow more spending on this plan. Finish with what the crew has.`, "Plan update: budget reached");
       });
       return;
     }
@@ -55,7 +55,7 @@ function dispatchPlan(planId: string) {
   }
 }
 async function startItem(p: Plan, it: PlanItem) {
-  const chief = getBot(one<{ bot_id: string }>("SELECT bot_id FROM threads WHERE id=?", p.thread_id)!.bot_id)!, owner = getBot(it.owner_bot)!, driver = getSetting("driver_name", "the driver");
+  const chief = getBot(one<{ bot_id: string }>("SELECT bot_id FROM threads WHERE id=?", p.thread_id)!.bot_id)!, owner = getBot(it.owner_bot)!, driver = driverName();
   const end = (status: string, result: Partial<Handoff> | null, cost = 0) => {
     if (one<{ status: string }>("SELECT status FROM plan_items WHERE id=?", it.id)?.status === "cancelled") { run("UPDATE plan_items SET cost_usd=cost_usd+? WHERE id=?", cost, it.id); return; }
     run("UPDATE plan_items SET status=?, result=?, cost_usd=cost_usd+?, ended_at=? WHERE id=?", status, JSON.stringify(result), cost, now(), it.id);
@@ -170,9 +170,9 @@ export async function planTool(chief: Bot, threadId: string, a: Record<string, a
     const key = String(x.key || "").trim().slice(0, 40), owner = ownerOf(x.member, chief);
     if (!key || byKey.has(key)) { errs.push(`add ${key || "?"}: key missing or already used (reopen it instead)`); continue; }
     if (!owner) { errs.push(`add ${key}: no crew member called "${short(x.member, 40)}"`); continue; }
-    if (owner.private) { errs.push(`add ${key}: ${owner.name} is private; only ${getSetting("driver_name", "the driver")} talks to it`); continue; }
+    if (owner.private) { errs.push(`add ${key}: ${owner.name} is private; only ${driverName()} talks to it`); continue; }
     if (seq >= PLAN.items) { errs.push(`add ${key}: a plan holds at most ${PLAN.items} items`); continue; }
-    if (!(await roomFor(owner))) { errs.push(`add ${key}: ${getSetting("driver_name", "the driver")} said ${owner.name} shouldn't run again; finish with what the crew has`); continue; }
+    if (!(await roomFor(owner))) { errs.push(`add ${key}: ${driverName()} said ${owner.name} shouldn't run again; finish with what the crew has`); continue; }
     const after = (x.after || []).map(String).filter((k) => byKey.has(k) || (a.add || []).some((y) => y.key === k));
     const row = { id: uid("pi"), key }; byKey.set(key, row);
     run("INSERT INTO plan_items(id,plan_id,seq,key,owner_bot,task,after,status) VALUES(?,?,?,?,?,?,?,?)", row.id, p.id, seq++, key, owner.id, String(x.task || "").slice(0, 2000), JSON.stringify(after), "todo");
@@ -182,7 +182,7 @@ export async function planTool(chief: Bot, threadId: string, a: Record<string, a
     const it = byKey.get(String(x.key));
     if (!it?.status) { errs.push(`reopen ${x.key}: no such item`); continue; }
     if (it.status === "doing") { errs.push(`reopen ${x.key}: still running`); continue; }
-    if (!(await roomFor(getBot(it.owner_bot)!))) { errs.push(`reopen ${x.key}: ${getSetting("driver_name", "the driver")} said ${getBot(it.owner_bot)?.name} shouldn't run again; finish with what the crew has`); continue; }
+    if (!(await roomFor(getBot(it.owner_bot)!))) { errs.push(`reopen ${x.key}: ${driverName()} said ${getBot(it.owner_bot)?.name} shouldn't run again; finish with what the crew has`); continue; }
     run("UPDATE plan_items SET status='todo', task=?, why=?, reopened=reopened+1, history=?, result=NULL WHERE id=?", String(x.task).slice(0, 2000), String(x.why || "").slice(0, 300), JSON.stringify([...it.history!, { task: it.task, result: it.result }]), it.id);
     did.push(`sent ${x.key} back: ${x.why || "no reason given"}`);
   }

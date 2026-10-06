@@ -1,5 +1,5 @@
 // View models: what the web app's main reads (state, a thread, a member card) assemble from the store. Telemetry is in lists.ts.
-import { one, all, now, json, getSetting, marks } from "../db.js";
+import { one, all, now, json, getSetting, marks, driverName } from "../db.js";
 import { resolveSurface } from "../ledger.js";
 import { httpErr } from "../auth.js";
 import * as P from "../providers.js";
@@ -13,6 +13,7 @@ import type { PitstopRow, EventRow, LearnedRow, SurfaceRow } from "../models.js"
 import { liveCommands } from "../runtime/state.js";
 import { balanceAlerts } from "../runtime/balance.js";
 import { shownTitle } from "../runtime/threads.js";
+import { istDayAt } from "../runtime/util.js";
 
 // An Engram proposal waits on the driver, not on the member it's filed under, so it doesn't make that member "needs".
 function mood(b: Bot, threads: ThreadSummary[], pending: { bot_id: string; kind?: string }[], up: boolean, last: string | null): Mood {
@@ -46,10 +47,10 @@ export function liveLearned(rows: LearnedRow[]) {
 }
 export function state(): State {
   const pending = all<PitstopRow>("SELECT * FROM pitstops WHERE status='pending' ORDER BY created_at").map(pitRow) as PitStop[];
-  const dayStart = (() => { const d = new Date(now() + 330 * 60000); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - 330 * 60000; })();
+  const dayStart = istDayAt(now());
   const stats = new Map(all<CardStats & { id: string }>(`${STATS} WHERE b.archived=0`, R.weekStart()).map((s) => [s.id, s]));
   return {
-    driverName: getSetting("driver_name", "Driver"), paused: getSetting("paused") === "1", defaultProvider: getSetting("default_provider", "openrouter") as ProviderId, plainVoice: getSetting("plain_voice") === "1", newThreadMode: newThreadAutonomy(),
+    driverName: driverName("Driver"), paused: getSetting("paused") === "1", defaultProvider: getSetting("default_provider", "openrouter") as ProviderId, plainVoice: getSetting("plain_voice") === "1", newThreadMode: newThreadAutonomy(),
     bots: listBots().map((b) => botCard(b, pending, 12, stats.get(b.id))), pitstops: pending, providers: P.providerStatus(), plans: plansOn(),
     today: one<{ usd: number; runs: number }>("SELECT COALESCE(SUM(cost_usd),0) usd, COUNT(*) runs FROM turns WHERE started_at>=?", dayStart)!,
     week: one<{ usd: number; runs: number }>("SELECT COALESCE(SUM(cost_usd),0) usd, COUNT(*) runs FROM turns WHERE started_at>=?", R.weekStart())!,

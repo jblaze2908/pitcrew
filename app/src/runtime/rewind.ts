@@ -3,7 +3,7 @@
 // conversation continues on a Codex fork taken before that turn (thread/fork beforeTurnId), and the transcript keeps
 // what followed, marked "Rewound". Cost: nothing per turn beyond the snapshots; per rewind, one read per changed path
 // and, for the chat, one fork (or a recap when the fork isn't possible).
-import { one, all, run, now, json, audit, getSetting } from "../db.js";
+import { one, all, run, now, json, audit, driverName } from "../db.js";
 import { getBot } from "../crew.js";
 import { restoreTargets, planRestore, restoreFiles, type Change } from "../snapshot.js";
 import type { RewindPlan } from "../../shared/types.js";
@@ -11,12 +11,11 @@ import { active } from "./state.js";
 import { addEvent, getThread } from "./threads.js";
 import { brain } from "./machines.js";
 import { recap, forkThread, dropCodex } from "./turns.js";
-import { IST } from "./util.js";
+import { istClock } from "./util.js";
 
 export type RewindMode = "both" | "chat" | "files";
 type TurnLite = { id: string; thread_id: string; bot_id: string; status: string; codex_turn_id: string | null; started_at: number; rewound_at: number | null };
 const err = (status: number, m: string) => Object.assign(new Error(m), { status });
-const hhmm = (t: number) => new Date(t + IST).toISOString().slice(11, 16);
 export const REWOUND = "This thread continues an earlier conversation, rewound by the driver to before a run, so it was restarted from that point.";
 
 /** The first event a rewind of this turn takes out: the message that started it, unless that message belongs to an earlier
@@ -83,7 +82,7 @@ export async function rewind(turnId: string, mode: RewindMode) {
   if (mode !== "chat" && memberBusy(t.bot_id)) throw err(409, `${getBot(t.bot_id)?.name || "This member"} is running something; rewind when it's idle`);
   const files = mode === "chat" ? { done: [] as string[], failed: [] as { path: string; why: string }[] } : restoreFiles(t.bot_id, planRestore(t.bot_id, restoreTargets(
     all<{ changes: string }>("SELECT changes FROM turns WHERE bot_id=? AND started_at>=? AND changes IS NOT NULL ORDER BY started_at", t.bot_id, t.started_at).map((r) => json<Change[]>(r.changes, [])))));
-  const driver = getSetting("driver_name", "the driver"), when = hhmm(t.started_at), list = (xs: string[]) => `${xs.slice(0, 12).join(", ")}${xs.length > 12 ? ` and ${xs.length - 12} more` : ""}`;
+  const driver = driverName(), when = istClock(t.started_at), list = (xs: string[]) => `${xs.slice(0, 12).join(", ")}${xs.length > 12 ? ` and ${xs.length - 12} more` : ""}`;
   const how = mode === "files" ? null : await rewindChat(t, p.boundary);
   // The member hears what changed under it: the chat it no longer remembers, or files it remembers differently.
   if (mode === "files" && files.done.length) appendCarry(t.thread_id, `[Pitcrew] ${driver} rewound your workspace files to how they were before the run at ${when} IST. Changed back: ${list(files.done)}. Anything done to them since is gone; check before relying on it.`);

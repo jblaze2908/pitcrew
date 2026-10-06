@@ -4,7 +4,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, chownSync, chmodSync, unlinkSync, statSync } from "node:fs";
 import { getSecret, putSecret, deleteSecret, secretMeta } from "./auth.js";
 import { ROOT, IMAGE, chatgptAuthPath } from "./computer.js";
-import { audit, getSetting, setSetting } from "./db.js";
+import { audit, getSetting, setSetting, json } from "./db.js";
 import type { ProviderId, ProviderStatus } from "../shared/types.js";
 
 export const PROVIDERS: Record<ProviderId, { label: string; secret: string | null }> = {
@@ -117,7 +117,7 @@ export function recordChatgptLimits(s: any) {
   setSetting("chatgpt_limits", JSON.stringify({ at: Date.now(), plan: s.planType ?? prev.plan ?? null, primary: pickWindow(s.primary) ?? prev.primary ?? null, secondary: pickWindow(s.secondary) ?? prev.secondary ?? null,
     credits: s.credits ? { has: s.credits.hasCredits, unlimited: s.credits.unlimited, balance: s.credits.balance ?? null } : prev.credits ?? null, reached: s.rateLimitReachedType ?? null }));
 }
-export function chatgptLimits() { try { return JSON.parse(getSetting("chatgpt_limits") as string); } catch { return null; } }
+export function chatgptLimits() { return json(getSetting("chatgpt_limits")); }
 
 // Sign in with ChatGPT by device code: `codex login --device-auth` in a throwaway computer with only /auth mounted.
 const loginState = {

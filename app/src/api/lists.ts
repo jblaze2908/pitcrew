@@ -5,6 +5,7 @@ import { one, all, json, marks } from "../db.js";
 import * as R from "../runtime/index.js";
 import { listBots } from "../crew.js";
 import { shownTitle, shownLine } from "../runtime/threads.js";
+import { unmark } from "../runtime/util.js";
 import { signedIn, type Env } from "../http/guard.js";
 import type { PitHistoryPage, PitHistoryRow, RunPage, RunRow, TelemetrySummary, ThreadKid, ThreadListRow, ThreadPage } from "../../shared/types.js";
 import type { PitstopRow } from "../models.js";
@@ -59,7 +60,7 @@ export function pitHistory(q: Q, at = Date.now()): PitHistoryPage {
 const TOP = "(origin IS NULL OR json_extract(origin,'$.kind') IS NOT 'delegated')";
 // Pinned threads made before 5 Oct 2026 stored " · pinned" in the title itself.
 const COLS = "id,bot_id,replace(title,' · pinned','') AS title,status,pinned,archived,test,created_at,updated_at";
-const tidyText = (t: unknown) => String(t || "").replace(/[*_`#>]+|\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\s+/g, " ").trim().slice(0, 180);
+const tidyText = (t: unknown) => unmark(t).replace(/\s+/g, " ").trim().slice(0, 180);
 
 /** The last thing said in each thread, and whether it was the member: one statement, one backward events_thread probe
  *  per thread that stops at the first message (a grouped MAX(id) read every event of every thread instead). */

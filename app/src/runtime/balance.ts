@@ -1,6 +1,6 @@
 // The OpenRouter balance: one notice (in the app, and once on the phone) when 90% of it is used. Checked every 15 min
 // at most, off the request path; /api/state only reads the stored result.
-import { getSetting, setSetting } from "../db.js";
+import { getSetting, setSetting, json } from "../db.js";
 import { openrouterUsage } from "../providers.js";
 import { pushBalance } from "./push.js";
 
@@ -8,7 +8,7 @@ const WARN_AT = 0.9;
 export interface BalanceAlert { id: string; text: string }
 interface Reading { at: number; used: number; total: number; id: string }
 
-const read = (k: string): Reading | null => { try { return JSON.parse(getSetting(k) as string); } catch { return null; } };
+const read = (k: string): Reading | null => json(getSetting(k));
 const money = (n: number) => `$${n.toFixed(2)}`;
 
 /** Account credits when the key can see them (a management key), else the key's own limit. A top-up changes the total and so starts a new notice. */
