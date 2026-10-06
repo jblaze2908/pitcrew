@@ -12,7 +12,7 @@ const SurfaceCtx = createContext<Ctx>({ onAction: () => {}, locked: false });
 const HUES = ["c1", "c2", "c3", "c5", "c6"];
 const hueVar = (hue?: string | null, i = 0) => `var(--${hue && HUES.includes(hue) ? hue : HUES[i % HUES.length]})`;
 const inr = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
-export function fmt(v: unknown, f?: string): string {
+function fmt(v: unknown, f?: string): string {
   if (v == null || v === "") return "";
   if (typeof v === "number") {
     if (f === "money") return `₹${inr.format(v)}`;

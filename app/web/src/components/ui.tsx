@@ -4,7 +4,7 @@ import { errorDetail, errorLine } from "../../../shared/text";
 import { cap } from "../lib/format";
 import { mdToHtml } from "../lib/md";
 
-export type Size = "xs" | "sm" | "md" | "lg" | "xl";
+type Size = "xs" | "sm" | "md" | "lg" | "xl";
 interface Looks { hue?: string; shape?: string; mood?: string }
 
 /** The hue token as a --hue custom property, which the app's classes read. */
@@ -19,7 +19,7 @@ export function Face({ b, size = "sm", mood }: { b?: Looks | null; size?: Size; 
 export const Loader = () => <pc-loader />;
 
 /** The gate's effect classes (jev.ts) in plain words. */
-export const EFFECT_LABEL: Record<string, string> = { read: "Read", browse: "Browse", draft: "Draft", write_workspace: "Write files", write: "Write files", signin: "Sign in",
+const EFFECT_LABEL: Record<string, string> = { read: "Read", browse: "Browse", draft: "Draft", write_workspace: "Write files", write: "Write files", signin: "Sign in",
   install: "Install", send: "Send", pay: "Pay", delete: "Delete", share: "Share", exec_untrusted: "Run unknown code", hire: "Hire", member: "Member change",
   soul: "Instructions", retire: "Retire", plan_limit: "Plan", ask: "Ask", unknown: "Other" };
 export const effectLabel = (kind: string | null | undefined) => EFFECT_LABEL[kind || "ask"] || cap(String(kind).replace(/_/g, " "));
@@ -28,10 +28,6 @@ export function EffectChip({ kind }: { kind: string | null | undefined }) {
   return <span className="eff">{effectLabel(kind)}</span>;
 }
 
-export function Track({ pct, hue, shape, state = "working" }: { pct: number; hue: string; shape: string; state?: string }) {
-  const p = Math.min(100, Math.max(0, pct)).toFixed(0);
-  return <pc-track key={`${p}.${hue}.${shape}.${state}`} pct={p} hue={hue} shape={shape} state={state} />;
-}
 
 export const Chev = () => <span className="chev" />;
 
@@ -64,9 +60,6 @@ export function Seg<T extends string>({ options, value, onChange }: { options: r
   return <div className="seg">{options.map(([v, l]) => <button key={v} className={v === value ? "on" : ""} onClick={() => onChange(v)}>{l}</button>)}</div>;
 }
 
-export function Meter({ pct, tone = "" }: { pct: number; tone?: "" | "hot" | "bad" }) {
-  return <div className={`meter${tone ? ` ${tone}` : ""}`}><b style={{ width: `${Math.min(100, Math.max(0, pct)).toFixed(0)}%` }} /></div>;
-}
 
 /** A button that asks once ("Retire? Click again") before it acts. */
 export function ConfirmButton({ ask, onConfirm, className, armedClass, style, children }: { ask: string; onConfirm: () => void; className?: string; armedClass?: string; style?: CSSProperties; children: ReactNode }) {
@@ -85,4 +78,3 @@ export function BusyButton({ onClick, className, children, busyLabel }: { onClic
   return <button className={className} disabled={busy} onClick={async () => { setBusy(true); try { await onClick(); } finally { setBusy(false); } }}>{busy && busyLabel ? busyLabel : children}</button>;
 }
 
-export const Empty = ({ children }: { children: ReactNode }) => <p className="empty">{children}</p>;

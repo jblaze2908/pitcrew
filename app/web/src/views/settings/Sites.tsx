@@ -10,7 +10,7 @@ import { Menu, useSaved } from "./kit";
 
 const SITE_EFFECTS = ["read", "draft", "browse", "write_workspace", "signin", "install", "send", "delete", "share", "exec_untrusted"];
 type Kind = "read" | "allowed" | "full" | "blocked";
-export const SITE_LEVELS: readonly (readonly [Kind, string, string])[] = [
+const SITE_LEVELS: readonly (readonly [Kind, string, string])[] = [
   ["read", "Read only", "Reads pages, asks before anything else."],
   ["allowed", "Member's rules", "Follows that member's own permissions."],
   ["full", "Act freely", "Does anything there except pay."],

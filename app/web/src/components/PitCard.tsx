@@ -201,7 +201,7 @@ export interface HireSpec {
   personality?: Personality; schedule?: { spec?: string; prompt?: string } | null;
   engram_scope?: string; engram_connections?: string[]; engram_household?: boolean;
 }
-export function HireSummary({ s }: { s: HireSpec }) {
+function HireSummary({ s }: { s: HireSpec }) {
   return (
     <div className="row" style={{ gap: 16, alignItems: "flex-start" }}>
       <Face b={s} size="lg" mood="idle" />

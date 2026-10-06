@@ -1,7 +1,7 @@
 // Pit stops: what's waiting on you on top, then every decision by day (paged on the server), and the rules they left.
 import { useState, type ReactNode } from "react";
 import type { Learned, PitHistoryPage, PitHistoryRow, PitStop, Rule } from "../../../shared/types";
-import { RuleLabel } from "../components/Approvals";
+import { RuleLabel } from "../components/RuleLabel";
 import { ListFilters, ListGroups, ListHeading, ListPage, ListPager, ListSearch, ListSelect, ListTabs, MemberSelect, RangeSelect, pageNote, useCursorPages, type Range } from "../components/ListPage";
 import { PitCard } from "../components/PitCard";
 import { effectLabel, Face } from "../components/ui";
