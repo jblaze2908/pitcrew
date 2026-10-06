@@ -1,7 +1,7 @@
 // Images: generate_image (any OpenRouter image model, with edits from workspace images) and the store both it and
 // Codex's own image_gen write to: /bot/work/out/images, so every image lands in the Library and can be edited again.
 import { execFile } from "node:child_process";
-import { mkdirSync, chownSync, chmodSync, writeFileSync, existsSync, realpathSync, statSync, readFileSync, copyFileSync, rmSync } from "node:fs";
+import { mkdirSync, chownSync, chmodSync, writeFileSync, existsSync, realpathSync, statSync, readFileSync, copyFileSync, rmSync, lstatSync } from "node:fs";
 import { extname, posix } from "node:path";
 import { getSecret } from "./auth.js";
 import { botDir, ROOT, BRAIN } from "./computer.js";
@@ -45,7 +45,11 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().s
 /** Writes one image to out/images under a name that doesn't clobber another; returns its path under /bot/work. */
 export function saveImage(botId: string, buf: Buffer, ext: string, hint: string) {
   const work = `${botDir(botId)}/work`, dir = `${work}/out/images`, o = statSync(work); // owned like the workspace (the crew user)
-  for (const d of [`${work}/out`, dir]) if (!existsSync(d)) { mkdirSync(d); chownSync(d, o.uid, o.gid); }
+  // Not through a link the member planted: we run as root ("wx" already refuses a link at the file itself).
+  for (const d of [`${work}/out`, dir]) {
+    const st = lstatSync(d, { throwIfNoEntry: false });
+    if (!st) { mkdirSync(d); chownSync(d, o.uid, o.gid); } else if (st.isSymbolicLink() || !st.isDirectory()) throw new Error(`${d.slice(work.length + 1)} isn't a folder`);
+  }
   const base = slug(hint);
   let name = `${base}.${ext}`;
   for (let i = 2; existsSync(`${dir}/${name}`); i++) name = `${base}-${i}.${ext}`;
