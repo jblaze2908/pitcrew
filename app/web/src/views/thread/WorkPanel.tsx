@@ -187,7 +187,7 @@ function FilesTab({ b, runs }: { b: BotCard; runs: ChangeRun[] }) {
     <div className="col" style={{ gap: 14 }}>
       {runs.map((r) => (
         <section key={r.id} className="col" style={{ gap: 6 }}>
-          <p className="pc-lab">{`Run at ${hm(r.started_at)} ·${r.changes.length} file${r.changes.length === 1 ? "" : "s"} `}<Tally cs={r.changes} /></p>
+          <p className="pc-lab">{`Run at ${hm(r.started_at)} · ${r.changes.length} file${r.changes.length === 1 ? "" : "s"} `}<Tally cs={r.changes} /></p>
           {r.changes.map((c) => { const k = `${r.id}:${c.path}`; return <FileBlock key={k} b={b} turnId={r.id} c={c} open={open === k} focus={false} split={false} onToggle={() => setOpen(open === k ? null : k)} />; })}
         </section>))}
       <a className="small" href={`#/crew/${b.id}/files/workspace`}>{`All of ${b.name}'s files ›`}</a>
