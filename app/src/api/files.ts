@@ -26,8 +26,10 @@ export const fileRoutes = new Hono<Env>()
     const w = workPath(id, rel); if (!w) throw httpErr(404, "Not found");
     const st = statSync(w.full);
     if (st.isDirectory()) {
-      const entries = readdirSync(w.full, { withFileTypes: true }).filter((e) => e.isDirectory() || e.isFile()).map((e) => { let s: Stats | null = null; try { s = statSync(join(w.full, e.name)); } catch {} return { name: e.name, dir: e.isDirectory(), size: s?.size ?? 0, mtime: s?.mtimeMs ?? 0 }; })
-        .sort((a, b) => (+b.dir - +a.dir) || a.name.localeCompare(b.name)).slice(0, 1000);
+      // Sorted and cut by name first, so a huge folder costs 1,000 stats, not one per entry.
+      const entries = readdirSync(w.full, { withFileTypes: true }).filter((e) => e.isDirectory() || e.isFile())
+        .sort((a, b) => (+b.isDirectory() - +a.isDirectory()) || a.name.localeCompare(b.name)).slice(0, 1000)
+        .map((e) => { let s: Stats | null = null; try { s = statSync(join(w.full, e.name)); } catch {} return { name: e.name, dir: e.isDirectory(), size: s?.size ?? 0, mtime: s?.mtimeMs ?? 0 }; });
       return c.json({ type: "dir", path: w.full.slice(w.base.length + 1), entries });
     }
     const out: { type: "file"; path: string; size: number; mtime: number; image: boolean; text?: string } = { type: "file", path: w.full.slice(w.base.length + 1), size: st.size, mtime: st.mtimeMs, image: /\.(png|jpe?g|webp|gif)$/i.test(w.full) };
