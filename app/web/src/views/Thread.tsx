@@ -6,19 +6,21 @@ import { Viewer } from "./thread/Viewer";
 import { indexImages, imgName, imgSrc, type Img } from "../lib/images";
 import type { BotCard, Origin, PitStop, PlanSnapshot, Surface as SurfaceRow, ThreadEvent, ThreadView } from "../../../shared/types";
 import { Icon } from "../components/Icon";
-import { MemberMenu } from "../components/MemberMenu";
 import { Surface } from "../components/Surface";
-import { Chev, ConfirmButton, Face, hueStyle, Loader } from "../components/ui";
+import { Face, hueStyle, Loader } from "../components/ui";
 import { api } from "../lib/api";
 import { plural } from "../lib/format";
 import { useLive, useResync } from "../lib/live";
 import { go } from "../lib/router";
 import { useStore } from "../lib/store";
-import { toast } from "../lib/toast";
 import { useFetch } from "../lib/useFetch";
 import { Composer } from "./thread/Composer";
 import { SideAsk } from "./thread/SideAsk";
-import { noteFolds, renderEvent, Steps, type EventCtx } from "./thread/Events";
+import type { EventCtx } from "./thread/Events";
+import { noteFolds } from "./thread/Notes";
+import { Steps } from "./thread/Steps";
+import { OriginChip, TitleMenu } from "./thread/Header";
+import { endsWithAgent, layout } from "./thread/layout";
 import { isCommand, TAB_LABEL, tabFor, useThreadRuns, WorkPanel, type LiveCmd, type Tab } from "./thread/WorkPanel";
 
 export function Thread({ id }: { id?: string }) {
@@ -33,55 +35,10 @@ export function Thread({ id }: { id?: string }) {
 
 const parseOrigin = (s: string | null): Origin | null => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
 
-type Item = { key: string; el: ReactNode } | { key: string; steps: ThreadEvent[] } | { key: string; rewound: ThreadEvent[] };
-
-/** Lays events out in order. Consecutive tool calls of one run share a Steps group, and so do pit stops already decided
- * (a pending one is a card that breaks the group until it's answered). Events that draw nothing don't break a group, and
- * a plan or delegation card draws once, where it first appeared, with its newest snapshot. A run of rewound events
- * folds into one "Rewound" item (inner: laying out that fold's own contents). */
-function layout(events: ThreadEvent[], ctx: EventCtx, inner = false): Item[] {
-  const items: Item[] = [];
-  const drawn = new Set<string>();
-  let group: { turn: string | null; steps: ThreadEvent[] } | null = null;
-  let fold: ThreadEvent[] | null = null;
-  let lastAgent = false;  // the last drawn item, steps aside, was this member's message
-  let lastUser = -1;
-  events.forEach((e, i) => { if (e.kind === "user") lastUser = i; });
-  events.forEach((e, i) => {
-    if (!inner && e.rewound) {
-      if (!fold) { fold = []; items.push({ key: `r${e.id}`, rewound: fold }); }
-      fold.push(e); group = null; lastAgent = false;
-      return;
-    }
-    fold = null;
-    // A script's output is drawn inside its script step (Steps results), never as a row of its own.
-    if (e.kind === "tool" && e.data.type === "scriptResult") return;
-    const p = e.kind === "pitstop" ? ctx.pits[e.data.id] : undefined;
-    if (e.kind === "tool" || (p && p.status !== "pending")) {
-      const last = items[items.length - 1];
-      if (group && last && "steps" in last && last.steps === group.steps && group.turn === e.turn_id) group.steps.push(e);
-      else { group = { turn: e.turn_id, steps: [e] }; items.push({ key: `g${e.id}`, steps: group.steps }); }
-      return;
-    }
-    // A surface updated in place (render_surface with its id) draws where it first appeared, with its newest spec.
-    if ((e.kind === "plan" || e.kind === "delegation" || e.kind === "surface") && drawn.has(e.data.id)) return;
-    const c = e.kind === "agent" && lastAgent ? { ...ctx, cont: true } : i < lastUser ? { ...ctx, onContinue: undefined } : ctx;
-    const el = renderEvent(e, c);
-    if (el == null) return;
-    lastAgent = e.kind === "agent";
-    if (e.kind === "plan" || e.kind === "delegation" || e.kind === "surface") drawn.add(e.data.id);
-    group = null;
-    items.push({ key: `e${e.id}`, el });
-  });
-  return items;
-}
-/** Whether the newest drawn item (steps aside) is the member's own message, so a streaming reply continues it. */
-const endsWithAgent = (events: ThreadEvent[], pits: Record<string, PitStop>) => { for (let i = events.length - 1; i >= 0; i--) { const e = events[i]; if (e.kind === "tool" || (e.kind === "pitstop" && pits[e.data.id]?.status !== "pending")) continue; return e.kind === "agent"; } return false; };
-
 function LiveThread({ d }: { d: ThreadView }) {
   const { bot, refresh } = useStore();
   const id = d.thread.id;
-  const b = { ...d.bot, ...(bot(d.bot.id) || {}) };
+  const b = useMemo(() => ({ ...d.bot, ...(bot(d.bot.id) || {}) }), [d.bot, bot]);
   const origin = parseOrigin(d.thread.origin);
   const fromName = (origin?.kind === "delegated" && bot(origin.fromBot)?.name) || "Another member";
 
@@ -233,22 +190,33 @@ function LiveThread({ d }: { d: ThreadView }) {
     if (running) { const cur = [...events].reverse().find((e) => e.turn_id)?.turn_id; if (cur) lastOf.delete(cur); }
     return new Set(lastOf.values());
   }, [events, running]);
-  const onRewound = async () => { const fresh = await api.get<ThreadView>(`/api/threads/${id}`, { quiet: true }).catch(() => null); if (fresh) setEvents(fresh.events); };
   const folds = useMemo(() => noteFolds(events), [events]);
-  const setMode = async (a: string) => { await api.patch(`/api/threads/${id}`, { autonomy: a }); setAutonomy(a); };
-  const evCtx: EventCtx = {
-    b, fromName, pits, latest, images, rewind: { ids: rewindIds, onRewound }, hide: folds.hide, modeNote: folds.modeNote, autonomy, onAutonomy: setMode,
+  // Memoised so a streaming frame (a delta, a terminal chunk) redraws only the live parts, not every message's markdown.
+  const evCtx = useMemo<EventCtx>(() => ({
+    b, fromName, pits, latest, images, hide: folds.hide, modeNote: folds.modeNote, autonomy,
+    rewind: { ids: rewindIds, onRewound: async () => { const fresh = await api.get<ThreadView>(`/api/threads/${id}`, { quiet: true }).catch(() => null); if (fresh) setEvents(fresh.events); } },
+    onAutonomy: async (a) => { await api.patch(`/api/threads/${id}`, { autonomy: a }); setAutonomy(a); },
     onView: (im) => setViewing({ im }), onCompare: (im) => setViewing({ im, cmp: true }), onEdit: (im) => { setViewing(null); setEditing(im); },
     onMore: (im) => api.post(`/api/threads/${id}/messages`, { text: "Make 4 more variations of this image, same brief.", mode: "queue", edit: { image: im.path } }),
     onKeep: (imageId) => api.post(`/api/images/${imageId}/keep`),
     surface: (sid) => { const s = surfaces[sid]; return s ? <ThreadSurface s={s} /> : null; },
     onPlan: () => { setTab("plan"); setFollow(false); setOpen(true); },
     onContinue: running ? undefined : () => api.post(`/api/threads/${id}/messages`, { text: "continue", mode: "auto" }),
-  };
-  const items = layout(events, evCtx);
+  }), [b, fromName, pits, latest, images, folds, autonomy, rewindIds, id, surfaces, running]);
+  const items = useMemo(() => layout(events, evCtx), [events, evCtx]);
+  const afterAgent = useMemo(() => endsWithAgent(events, pits), [events, pits]);
   // The last group is open on load if the run is still going; groups that arrive live start open.
   const openOnLoad = useRef<string | null>(null);
   if (openOnLoad.current === null) { const last = items[items.length - 1]; openOnLoad.current = d.thread.running && last && "steps" in last ? last.key : ""; }
+  const drawn = useMemo(() => items.map(function draw(it): ReactNode {
+    if ("steps" in it) return <Steps key={it.key} events={it.steps} pits={pits} results={scriptResults} closeSignal={closeSteps} initialOpen={it.key === openOnLoad.current || liveIds.current.has(it.steps[0].id)} />;
+    if ("rewound" in it) {
+      const n = it.rewound.filter((e) => e.kind === "user" || e.kind === "agent").length;
+      return <details key={it.key} className="rewound"><summary>{`Rewound · ${plural(n, "message")}`}<Icon name="chev" size={12} /></summary>
+        <div className="rw-body">{layout(it.rewound, { ...evCtx, rewind: undefined, onContinue: undefined }, true).map(draw)}</div></details>;
+    }
+    return <Fragment key={it.key}>{it.el}</Fragment>;
+  }), [items, pits, scriptResults, closeSteps, evCtx]);
 
   const plan = useMemo(() => { let p: PlanSnapshot | null = null; for (const e of events) if (e.kind === "plan") p = e.data as PlanSnapshot; return p; }, [events]);
   const card = { ...b, threads: b.threads || [], computer: b.computer || { up: false, desktop: false, startedAt: null, lease: false } } as BotCard;
@@ -271,16 +239,8 @@ function LiveThread({ d }: { d: ThreadView }) {
           {!showPanel && !side && tabs.length > 0 && <button className="reo" title="Open the work panel" onClick={() => setOpen(true)}><Icon name="panel" size={14} />{TAB_LABEL[cur!]}</button>}
         </header>
         <div ref={stream} className="stream">
-          {items.map(function draw(it): ReactNode {
-            if ("steps" in it) return <Steps key={it.key} events={it.steps} pits={pits} results={scriptResults} closeSignal={closeSteps} initialOpen={it.key === openOnLoad.current || liveIds.current.has(it.steps[0].id)} />;
-            if ("rewound" in it) {
-              const n = it.rewound.filter((e) => e.kind === "user" || e.kind === "agent").length;
-              return <details key={it.key} className="rewound"><summary>{`Rewound · ${plural(n, "message")}`}<Icon name="chev" size={12} /></summary>
-                <div className="rw-body">{layout(it.rewound, { ...evCtx, rewind: undefined, onContinue: undefined }, true).map(draw)}</div></details>;
-            }
-            return <Fragment key={it.key}>{it.el}</Fragment>;
-          })}
-          {streaming && <div className={`msg bot${endsWithAgent(events, pits) ? " cont" : ""}`}>{endsWithAgent(events, pits) ? <span /> : <Face b={b} size="sm" mood="working" />}<div className="md">{streaming.text}</div></div>}
+          {drawn}
+          {streaming && <div className={`msg bot${afterAgent ? " cont" : ""}`}>{afterAgent ? <span /> : <Face b={b} size="sm" mood="working" />}<div className="md">{streaming.text}</div></div>}
           {painting.map((p) => <CatchThePaint key={p.id} p={p} b={b} />)}
           <div className={`live ${running ? "" : "hidden"}`}><Loader /><span>{activity}</span></div>
         </div>
@@ -294,63 +254,6 @@ function LiveThread({ d }: { d: ThreadView }) {
       {showPanel && <WorkPanel b={card} threadId={id} events={events} plan={plan} live={live} runs={runs} tab={cur!} tabs={tabs} follow={follow} running={running} lease={lease}
         onTab={(t) => { setTab(t); setFollow(false); }} onFollow={() => setFollow(true)} onClose={() => setOpen(false)} onHandBack={handBack} />}
     </div>
-  );
-}
-
-/** The thread title is its menu: rename, auto-name, context, pin, files, archive. */
-function TitleMenu({ id, title, onRenamed, b, pinned, onPinned }: { id: string; title: string; onRenamed: (t: string) => void; b: BotCard; pinned: boolean; onPinned: (p: boolean) => void }) {
-  const [menu, setMenu] = useState(false);
-  const [editing, setEditing] = useState<string | null>(null);
-  if (editing != null) {
-    const done = async () => { const t = editing || title; setEditing(null); await api.patch(`/api/threads/${id}`, { title: t }); onRenamed(t); };
-    return <input className="ttl-edit" autoFocus value={editing} onChange={(e) => setEditing(e.target.value)} onBlur={done} onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") setEditing(null); }} />;
-  }
-  const act = (fn: () => unknown) => async () => { setMenu(false); await fn(); };
-  return (
-    <span className="ttlwrap">
-      <button className="ttl" aria-expanded={menu} onClick={() => setMenu(!menu)}><span className="t">{title}</span><Icon name="chev" size={14} /></button>
-      {menu && <>
-        <div className="scrim" onClick={() => setMenu(false)} />
-        <div className="menu tmenu" role="menu">
-          <button className="op" onClick={act(() => setEditing(title))}><Icon name="pen" />Rename</button>
-          <button className="op" onClick={act(async () => { const r = await api.post<{ title: string }>(`/api/threads/${id}/retitle`); onRenamed(r.title); })}><Icon name="spark" />Auto-name from the chat</button>
-          <hr />
-          <button className="op" onClick={act(async () => { await api.post(`/api/threads/${id}/compact`); toast("Compacting the thread"); })}><Icon name="compact" />Compact the context</button>
-          <button className="op" onClick={act(async () => { const r = await api.post<{ id: string }>(`/api/threads/${id}/fresh`); go(`#/t/${r.id}`); })}><Icon name="fresh" />Fresh thread from here</button>
-          <button className="op" onClick={act(async () => { await api.patch(`/api/threads/${id}`, { pinned: !pinned }); onPinned(!pinned); })}><Icon name="pin" />{pinned ? "Unpin" : "Pin to the sidebar"}</button>
-          <hr />
-          <a className="op" href={`#/crew/${b.id}/files`} onClick={() => setMenu(false)}><Icon name="folder" />Files and changes</a>
-          <a className="op" href={`#/crew/${b.id}/profile`} onClick={() => setMenu(false)}><Icon name="person" />{`${b.name}'s profile`}</a>
-          <ConfirmButton className="op dim" ask="Archive this thread?" onConfirm={async () => { setMenu(false); await api.patch(`/api/threads/${id}`, { archived: true }); go(`#/crew/${b.id}`); }}><Icon name="archive" />Archive</ConfirmButton>
-        </div>
-      </>}
-    </span>);
-}
-
-// Where a thread came from: routed by the front door (its pill changes who takes it) or asked by another member.
-function OriginChip({ origin: o, threadId, b }: { origin: Origin; threadId: string; b: { id: string; name: string; hue: string; shape: string } }) {
-  const { bot } = useStore();
-  const pill = useRef<HTMLButtonElement>(null);
-  const [menu, setMenu] = useState(false);
-  if (o.kind === "email") return <span className="pc-chip" title={o.subject}>{`Woken by an email from ${o.from}`}</span>;
-  if (o.kind === "schedule") return <a className="pc-chip" href="#/schedules" title="This run's schedule">{`Scheduled run${o.spec ? ` · ${o.spec}` : ""}`}</a>;
-  if (o.kind === "delegated") {
-    const f = bot(o.fromBot);
-    return <a className="pc-chip blue" href={`#/t/${o.fromThread}`} title="Open the thread that asked">{o.planId ? `Plan step for ${f?.name || "another member"}` : `Asked by ${f?.name || "another member"}`}</a>;
-  }
-  const reroute = async (to: string | null) => {
-    if (!to) return;
-    const r = await api.post<{ threadId: string; botId: string }>(`/api/threads/${threadId}/reroute`, { botId: to });
-    toast(`Moved to ${bot(r.botId)?.name}`);
-    go(`#/t/${r.threadId}`);
-  };
-  const tip = o.confidence != null ? `Routed with ${(o.confidence * 100).toFixed(0)}% confidence. Pick someone else to move this message.` : "Pick someone else to move this message";
-  return (
-    <span className="row" style={{ gap: 6, flex: "none" }}>
-      {o.by !== "driver" && <span className="small faint">{o.by === "names" ? "You named several" : "Picked for you"}</span>}
-      <button ref={pill} className="to alt" style={hueStyle(b.hue)} title={tip} onClick={() => setMenu(true)}><Face b={b} size="xs" mood="idle" />{b.name}<Chev /></button>
-      {menu && pill.current && <MemberMenu anchor={pill.current} auto={false} exclude={b.id} onClose={() => setMenu(false)} onPick={reroute} />}
-    </span>
   );
 }
 
