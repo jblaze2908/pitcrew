@@ -10,7 +10,7 @@ import { MemberMenu } from "../components/MemberMenu";
 import { Surface } from "../components/Surface";
 import { Chev, ConfirmButton, Face, hueStyle, Loader } from "../components/ui";
 import { api } from "../lib/api";
-import { useLive } from "../lib/live";
+import { useLive, useResync } from "../lib/live";
 import { go } from "../lib/router";
 import { useStore } from "../lib/store";
 import { toast } from "../lib/toast";
@@ -94,6 +94,14 @@ function LiveThread({ d }: { d: ThreadView }) {
   const [pits, setPits] = useState<Record<string, PitStop>>(() => Object.fromEntries(d.pitstops.map((p) => [p.id, p])));
   const [surfaces, setSurfaces] = useState<Record<string, SurfaceRow>>(() => Object.fromEntries(d.surfaces.map((s) => [s.id, s])));
   const [running, setRunning] = useState(d.thread.running);
+  // After a dropped stream, take the server's word for the transcript and whether it's still running.
+  useResync(async () => {
+    const f = await api.get<ThreadView>(`/api/threads/${d.thread.id}`, { quiet: true }).catch(() => null);
+    if (!f) return;
+    setEvents(f.events); setQueued(f.queued); setRunning(f.thread.running);
+    setPits(Object.fromEntries(f.pitstops.map((p) => [p.id, p]))); setLive(f.commands || []);
+    if (!f.thread.running) { buffer.current = null; setStreaming(null); }
+  });
   const [title, setTitle] = useState(d.thread.title);
   const [autonomy, setAutonomy] = useState(d.thread.autonomy || "ask");
   const [pinned, setPinned] = useState(!!d.thread.pinned);
