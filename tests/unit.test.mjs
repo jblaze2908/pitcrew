@@ -2191,3 +2191,8 @@ test("lists show titles and previews tidied; a done-check never says Couldn't co
   const p = R.pitRow({ id: "x", title: "Couldn't confirm Couldn't confirm the order is in the CSV", detail: "{}", jev: "{}", status: "approved", kind: "check" });
   assert.equal(p.title, "Couldn't confirm the order is in the CSV");
 });
+
+test("done-check never auto-runs an environment dump as a check", async () => {
+  run("INSERT INTO bots(id,name,created_at) VALUES('b_envchk','Envy',0)");
+  for (const cmd of ["printenv", "env", "cat /proc/1/environ", "ls && printenv OPENROUTER"]) assert.notEqual((await R.classifyCheck("b_envchk", "th_none", cmd)).decision, "allow", cmd);
+});
