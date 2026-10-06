@@ -7,6 +7,7 @@ import { openPlanSide } from "../computer.js";
 import { activityNow } from "./bus.js";
 import { getThread } from "./threads.js";
 import { isRunning, recentLines } from "./turns.js";
+import { httpErr } from "../auth.js";
 
 export const NOT_CONNECTED = "Side questions run on the ChatGPT plan, which isn't connected. Sign in with ChatGPT in Settings → Models.";
 export interface SideTurn { q: string; a: string }
@@ -16,7 +17,7 @@ const inFlight = new Set<string>();
 /** The side model's instructions and input. Pure reads: one events query for messages (recap's), one for the newest steps. */
 export function sidePrompt(threadId: string, question: string, history: SideTurn[] = []) {
   const t = getThread(threadId);
-  if (!t) throw Object.assign(new Error("No such thread"), { status: 404 });
+  if (!t) throw httpErr(404, "No such thread");
   const b = getBot(t.bot_id), name = b?.name || "the member", running = isRunning(threadId);
   const steps = all<{ data: string }>("SELECT data FROM events WHERE thread_id=? AND kind='tool' ORDER BY id DESC LIMIT ?", threadId, STEPS).reverse()
     .map((e) => json<{ title?: string; status?: string }>(e.data, {})).filter((d) => d.title).map((d) => `- ${String(d.title).slice(0, 200)}${d.status && d.status !== "completed" ? ` (${d.status})` : ""}`);
@@ -37,15 +38,15 @@ export function sidePrompt(threadId: string, question: string, history: SideTurn
 /** Asks and returns the answer, or throws NOT_CONNECTED (503). One at a time per thread. open is injectable for tests. */
 export async function sideAsk(threadId: string, question: string, history: SideTurn[] = [], open = openPlanSide) {
   const q = question.trim().slice(0, 2000);
-  if (!q) throw Object.assign(new Error("Ask something"), { status: 400 });
+  if (!q) throw httpErr(400, "Ask something");
   const { instructions, text } = sidePrompt(threadId, q, history);
-  if (inFlight.has(threadId)) throw Object.assign(new Error("One side question at a time"), { status: 429 });
+  if (inFlight.has(threadId)) throw httpErr(429, "One side question at a time");
   inFlight.add(threadId);
   try {
     const side = await open().catch(() => null);
-    if (!side) throw Object.assign(new Error(NOT_CONNECTED), { status: 503 });
+    if (!side) throw httpErr(503, NOT_CONNECTED);
     try { return { answer: (await side.ask(instructions, text, { timeoutMs: 45000 })).trim() || "(no answer)" }; }
-    catch (e: any) { throw Object.assign(new Error(`No answer from the ChatGPT plan: ${String(e?.message || e).slice(0, 200)}`), { status: 502 }); }
+    catch (e: any) { throw httpErr(502, `No answer from the ChatGPT plan: ${String(e?.message || e).slice(0, 200)}`); }
     finally { side.close(); }
   } finally { inFlight.delete(threadId); }
 }

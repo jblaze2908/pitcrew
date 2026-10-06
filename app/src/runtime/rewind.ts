@@ -12,10 +12,10 @@ import { addEvent, getThread } from "./threads.js";
 import { brain } from "./machines.js";
 import { recap, forkThread, dropCodex } from "./turns.js";
 import { istClock } from "./util.js";
+import { httpErr } from "../auth.js";
 
 export type RewindMode = "both" | "chat" | "files";
 type TurnLite = { id: string; thread_id: string; bot_id: string; status: string; codex_turn_id: string | null; started_at: number; rewound_at: number | null };
-const err = (status: number, m: string) => Object.assign(new Error(m), { status });
 export const REWOUND = "This thread continues an earlier conversation, rewound by the driver to before a run, so it was restarted from that point.";
 
 /** The first event a rewind of this turn takes out: the message that started it, unless that message belongs to an earlier
@@ -34,8 +34,8 @@ const memberBusy = (botId: string) => [...active.keys()].some((th) => getThread(
  * member touched (any thread), back to how it was when this run started. */
 export function rewindPlan(turnId: string, mode: RewindMode): RewindPlan & { boundary: number | null } {
   const t = one<TurnLite>("SELECT id, thread_id, bot_id, status, codex_turn_id, started_at, rewound_at FROM turns WHERE id=?", turnId);
-  if (!t) throw err(404, "No such run");
-  if (active.has(t.thread_id) || t.status === "running" || t.status === "starting") throw err(409, "Wait for the run to finish");
+  if (!t) throw httpErr(404, "No such run");
+  if (active.has(t.thread_id) || t.status === "running" || t.status === "starting") throw httpErr(409, "Wait for the run to finish");
   const later = mode === "chat" ? [] : all<{ thread_id: string; changes: string }>("SELECT thread_id, changes FROM turns WHERE bot_id=? AND started_at>=? AND changes IS NOT NULL ORDER BY started_at", t.bot_id, t.started_at).map((r) => ({ thread: r.thread_id, list: json<Change[]>(r.changes, []) }));
   const files = mode === "chat" ? [] : planRestore(t.bot_id, restoreTargets(later.map((r) => r.list))).map(({ path, kind, ok, why }) => ({ path, kind, ok, ...(why ? { why } : {}) }));
   const boundary = boundaryOf(t);
@@ -78,8 +78,8 @@ async function rewindChat(t: TurnLite, boundary: number | null) {
 export async function rewind(turnId: string, mode: RewindMode) {
   const p = rewindPlan(turnId, mode);
   const t = one<TurnLite>("SELECT id, thread_id, bot_id, status, codex_turn_id, started_at, rewound_at FROM turns WHERE id=?", turnId)!;
-  if (mode !== "files" && p.rewound) throw err(409, "This run was already rewound");
-  if (mode !== "chat" && memberBusy(t.bot_id)) throw err(409, `${getBot(t.bot_id)?.name || "This member"} is running something; rewind when it's idle`);
+  if (mode !== "files" && p.rewound) throw httpErr(409, "This run was already rewound");
+  if (mode !== "chat" && memberBusy(t.bot_id)) throw httpErr(409, `${getBot(t.bot_id)?.name || "This member"} is running something; rewind when it's idle`);
   const files = mode === "chat" ? { done: [] as string[], failed: [] as { path: string; why: string }[] } : restoreFiles(t.bot_id, planRestore(t.bot_id, restoreTargets(
     all<{ changes: string }>("SELECT changes FROM turns WHERE bot_id=? AND started_at>=? AND changes IS NOT NULL ORDER BY started_at", t.bot_id, t.started_at).map((r) => json<Change[]>(r.changes, [])))));
   const driver = driverName(), when = istClock(t.started_at), list = (xs: string[]) => `${xs.slice(0, 12).join(", ")}${xs.length > 12 ? ` and ${xs.length - 12} more` : ""}`;

@@ -5,6 +5,8 @@ import { DEFAULT_POLICY } from "./jev.js";
 import { DEFAULT_MODEL } from "./providers.js";
 import type { Bot, EngramScope, Hue, Shape, Personality, ProviderId } from "../shared/types.js";
 import type { BotRow } from "./models.js";
+import { FILES_URL, TOPICS } from "./manual.js";
+import { httpErr } from "./auth.js";
 
 export const HUES: Hue[] = ["c1", "c2", "c3", "c5", "c6"];
 /** A colour no active member wears yet, else the least worn; ties go to palette order. One query per hire. */
@@ -15,7 +17,6 @@ export function freeHue(prefer?: string | null): Hue {
 }
 // The computer's loopback-only, read-only view of /bot/work (computer/files.mjs, started by desktop.sh).
 export { FILES_URL } from "./manual.js";
-import { FILES_URL, TOPICS } from "./manual.js";
 export const SHAPES: Shape[] = ["square", "round", "blob"];
 export const ENGRAM_SCOPES: EngramScope[] = ["personal", "finance", "health"];
 const CONN_ID = /^[a-z0-9][a-z0-9-]{0,11}$/;
@@ -93,7 +94,7 @@ export function retireBot(id: string, by: string) {
 }
 export function updateBot(id: string, patch: HireSpec) {
   const b = getBot(id);
-  if (!b) throw Object.assign(new Error("No such crew member"), { status: 404 });
+  if (!b) throw httpErr(404, "No such crew member");
   const n = normaliseSpec({ ...b, ...patch, personality: { ...b.personality, ...(patch.personality || {}) } });
   const policy = { ...b.policy };
   // Policy edits may only use known effect classes and allow/ask; "always" for delete/share is refused.

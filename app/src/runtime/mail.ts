@@ -3,7 +3,7 @@
 // listed sender wakes the member in a thread of its own, as untrusted data with the thread tainted; anyone else is held
 // in a pit stop until the driver lets it through. Per email: one indexed read and at most one turn.
 import { all, one, run, now, uid, audit, getSetting, setSetting } from "../db.js";
-import { getSecret, putSecret } from "../auth.js";
+import { getSecret, putSecret, httpErr } from "../auth.js";
 import { getBot } from "../crew.js";
 import { newHookSecret } from "./hooks.js";
 import { taint } from "./taint.js";
@@ -25,9 +25,9 @@ export const setDriverEmails = (list: string) => setSetting("driver_emails", lis
 export function setMailbox(botId: string, patch: { handle?: string; senders?: string[]; others?: string; off?: boolean }) {
   if (patch.off) { run("DELETE FROM mailboxes WHERE bot_id=?", botId); audit("driver", "mail.off", { botId }); return null; }
   const cur = mailbox(botId), handle = (patch.handle ?? cur?.handle ?? "").trim().toLowerCase();
-  if (!/^[a-z0-9][a-z0-9.]{1,30}$/.test(handle)) throw Object.assign(new Error("An address is 2–31 letters, digits or dots"), { status: 400 });
+  if (!/^[a-z0-9][a-z0-9.]{1,30}$/.test(handle)) throw httpErr(400, "An address is 2–31 letters, digits or dots");
   const taken = one<{ bot_id: string }>("SELECT bot_id FROM mailboxes WHERE handle=? AND bot_id!=?", handle, botId);
-  if (taken) throw Object.assign(new Error(`${handle}@ is taken`), { status: 409 });
+  if (taken) throw httpErr(409, `${handle}@ is taken`);
   const senders = (patch.senders ?? cur?.senders ?? []).map((s) => String(s).trim().toLowerCase()).filter(Boolean).slice(0, 50);
   run("INSERT INTO mailboxes(bot_id,handle,senders,others,created_at) VALUES(?,?,?,?,?) ON CONFLICT(bot_id) DO UPDATE SET handle=excluded.handle, senders=excluded.senders, others=excluded.others",
     botId, handle, JSON.stringify(senders), patch.others === "drop" ? "drop" : patch.others === "hold" ? "hold" : cur?.others || "hold", now());

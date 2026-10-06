@@ -8,6 +8,7 @@ import { siteOf, registrable, domainChain, normHost, checkoutWhy, lookalike, hom
 import type { Bot, Decision } from "../shared/types.js";
 import type { SiteRow, PitstopRow } from "./models.js";
 import type { Policy } from "./jev.js";
+import { httpErr } from "./auth.js";
 
 export type SiteMode = SiteRow["mode"];
 export type SiteEntry = Omit<SiteRow, "overrides"> & { overrides: Policy };
@@ -133,7 +134,7 @@ export function recordVisit(botId: string, domain: string) {
 export function listSites(scope: string) { return [...rows().values()].filter((r) => r.scope === scope).sort((a, b) => a.domain.localeCompare(b.domain)); }
 export function setSite(scope: string, domain: unknown, mode: unknown, overrides: unknown = {}, by = "driver") {
   const d = cleanDomain(domain);
-  if (!d || !MODES.includes(mode as string)) throw Object.assign(new Error("Give a domain like example.com and a mode (allowed, read or blocked)"), { status: 400 });
+  if (!d || !MODES.includes(mode as string)) throw httpErr(400, "Give a domain like example.com and a mode (allowed, read or blocked)");
   const o = mode === "allowed" ? cleanOverrides(overrides) : {};
   run(`INSERT INTO sites(scope,domain,mode,overrides,by,created_at,updated_at) VALUES(?,?,?,?,?,?,?)
     ON CONFLICT(scope,domain) DO UPDATE SET mode=excluded.mode, overrides=excluded.overrides, by=excluded.by, updated_at=excluded.updated_at`, scope, d, mode as string, JSON.stringify(o), by, now(), now());

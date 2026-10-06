@@ -2,7 +2,7 @@
 // Keys are write-only: stored encrypted, tested, never returned to the browser.
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, chownSync, chmodSync, unlinkSync, statSync } from "node:fs";
-import { getSecret, putSecret, deleteSecret, secretMeta } from "./auth.js";
+import { getSecret, putSecret, deleteSecret, secretMeta, httpErr } from "./auth.js";
 import { ROOT, IMAGE, chatgptAuthPath } from "./computer.js";
 import { audit, getSetting, setSetting, json } from "./db.js";
 import type { ProviderId, ProviderStatus } from "../shared/types.js";
@@ -55,8 +55,8 @@ export async function testKey(provider: string, key: string) {
 
 export async function setKey(provider: string, key: unknown) {
   const p = known(provider);
-  if (!p?.secret) throw Object.assign(new Error("Unknown provider"), { status: 400 });
-  if (typeof key !== "string" || key.trim().length < 10 || key.length > 400) throw Object.assign(new Error("That doesn't look like a key"), { status: 400 });
+  if (!p?.secret) throw httpErr(400, "Unknown provider");
+  if (typeof key !== "string" || key.trim().length < 10 || key.length > 400) throw httpErr(400, "That doesn't look like a key");
   const r = await testKey(provider, key.trim());
   // A key that fails its test is still saved when the failure is billing-side (AI Gateway 403), so the driver can fix billing later.
   if (r.ok || provider === "aigateway") { putSecret(p.secret, key.trim()); forgetOpenrouterUsage(); }
