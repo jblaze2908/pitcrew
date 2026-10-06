@@ -13,7 +13,7 @@ import { botDir, docker } from "./computer.js";
 
 export interface Project { path: string; name: string; git: boolean; markers: string[] }
 interface Session { token: string; botId: string; path: string; lastUsed: number; open: number; host?: string; port?: number; stop?: () => Promise<unknown> }
-export interface CodeBackend { start(s: Session): Promise<{ host: string; port: number; stop: () => Promise<unknown> }> }
+interface CodeBackend { start(s: Session): Promise<{ host: string; port: number; stop: () => Promise<unknown> }> }
 
 const IMAGE = process.env.PITCREW_CODE_IMAGE || "pitcrew-px0:1";
 const NET = "pc-code";
@@ -56,8 +56,6 @@ const dockerBackend: CodeBackend = {
     return { host: name, port: 7777, stop: () => docker(["rm", "-f", name]) };
   },
 };
-let backend = dockerBackend;
-export const setCodeBackend = (b: CodeBackend) => { backend = b; }; // tests run px0 directly
 
 export async function openProject(botId: string, path: string) {
   const project = listProjects(botId).find((p) => p.path === path);
@@ -68,7 +66,7 @@ export async function openProject(botId: string, path: string) {
     closeSession(s);
   }
   const s: Session = { token: randomBytes(24).toString("base64url"), botId, path, lastUsed: Date.now(), open: 0 };
-  Object.assign(s, await backend.start(s));
+  Object.assign(s, await dockerBackend.start(s));
   sessions.set(s.token, s);
   for (let i = 0; i < 40; i++) { if (await probe(s)) return { url: `/code/${s.token}/`, project }; await new Promise((r) => setTimeout(r, 150)); }
   closeSession(s);

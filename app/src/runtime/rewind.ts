@@ -7,11 +7,10 @@ import { one, all, run, now, json, audit, getSetting } from "../db.js";
 import { getBot } from "../crew.js";
 import { restoreTargets, planRestore, restoreFiles, type Change } from "../snapshot.js";
 import type { RewindPlan } from "../../shared/types.js";
-import { active, byCodex } from "./state.js";
+import { active } from "./state.js";
 import { addEvent, getThread } from "./threads.js";
 import { brain } from "./machines.js";
-import { setRollout } from "./scripts.js";
-import { recap } from "./turns.js";
+import { recap, forkThread, dropCodex } from "./turns.js";
 import { IST } from "./util.js";
 
 export type RewindMode = "both" | "chat" | "files";
@@ -63,17 +62,15 @@ async function rewindChat(t: TurnLite, boundary: number | null) {
   if (old && t.codex_turn_id) try {
     const c = brain(b);
     await c.ensure();
-    const f = await c.request("thread/fork", { threadId: old, beforeTurnId: t.codex_turn_id, model: b.model, modelProvider: b.provider, cwd: "/bot/work", sandbox: "danger-full-access", approvalPolicy: "untrusted", excludeTurns: true }, 120000);
-    const id = f.thread.id as string;
-    setRollout(b.id, id, f.thread.path);
+    const id = await forkThread(c, b, old, { beforeTurnId: t.codex_turn_id });
     run("UPDATE threads SET codex_id=? WHERE id=?", id, t.thread_id);
-    await c.unload(old).catch(() => {}); byCodex.delete(old);
+    await dropCodex(c, old).catch(() => {});
     // The fork forgot memories told after that point: an empty map sends the whole list once, as turn context.
     c.loaded.add(id); c.mems.set(id, new Map());
     await c.mcpReady(id);
     return "fork";
   } catch {}
-  if (old) { await brain(b).unload(old).catch(() => {}); byCodex.delete(old); }
+  if (old) await dropCodex(brain(b), old).catch(() => {});
   run("UPDATE threads SET codex_id=NULL, carry=? WHERE id=?", recap(t.thread_id, null, "", 8000, REWOUND), t.thread_id);
   return "recap";
 }

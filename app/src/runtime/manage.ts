@@ -3,7 +3,7 @@
 // setup only: their memory, runs and threads stay with the driver. Per call: a few indexed reads per member.
 import { readdirSync, lstatSync, statSync, realpathSync, rmSync } from "node:fs";
 import { join, normalize, dirname, basename } from "node:path";
-import { one, all, run, now, json, audit } from "../db.js";
+import { one, all, run, now, audit } from "../db.js";
 import { getBot, listBots, soulOf, SOUL_MAX, updateBot, retireBot, normaliseSpec, STARTING_POLICY } from "../crew.js";
 import { DEFAULT_MODEL } from "../providers.js";
 import { botDir } from "../computer.js";

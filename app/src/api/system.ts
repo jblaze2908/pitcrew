@@ -1,5 +1,5 @@
 // The pit wall's own settings and feeds: state, the live stream, settings, providers and models, the kill switch,
-// telemetry, export and the audit log.
+// telemetry and export.
 import { Hono } from "hono";
 import { z } from "zod";
 import { RESPONSE_ALREADY_SENT } from "@hono/node-server/utils/response";
@@ -90,5 +90,4 @@ export const systemRoutes = new Hono<Env>()
       schedules: all("SELECT * FROM schedules"), surfaces: all("SELECT * FROM surfaces"), audit: all("SELECT * FROM audit") };
     audit("driver", "export");
     return c.body(JSON.stringify(dump), 200, { "Content-Type": "application/json", "Content-Disposition": `attachment; filename="pitcrew-export-${new Date().toISOString().slice(0, 10)}.json"` });
-  })
-  .get("/api/audit", signedIn, (c) => c.json(all("SELECT * FROM audit ORDER BY id DESC LIMIT 300")));
+  });

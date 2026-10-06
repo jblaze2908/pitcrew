@@ -5,7 +5,6 @@
 // read, one HMAC, at most one count over the last hour of this schedule's runs.
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { one, now } from "../db.js";
-import type { ScheduleRow } from "../models.js";
 
 export const EVENT_SPEC = "on event";
 export const isEventSpec = (spec: string) => spec.trim().toLowerCase() === EVENT_SPEC;
@@ -36,4 +35,3 @@ export function payloadText(body: Buffer) {
   const t = body.toString("utf8");
   try { return JSON.stringify(JSON.parse(t), null, 1).slice(0, 4000); } catch { return t.slice(0, 4000); }
 }
-export type HookSchedule = ScheduleRow & { hook_secret: string | null };

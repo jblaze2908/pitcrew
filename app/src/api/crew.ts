@@ -1,7 +1,7 @@
 // Crew members: their card and settings, hiring and retiring, memory, schedules, projects and computers.
 import { Hono } from "hono";
 import { z } from "zod";
-import { all, one, run, now, uid, audit } from "../db.js";
+import { all, one, run, now, uid, audit, json } from "../db.js";
 import { httpErr } from "../auth.js";
 import * as R from "../runtime/index.js";
 import { getBot, updateBot, normaliseSpec, createBot, retireBot } from "../crew.js";
@@ -10,17 +10,14 @@ import { memberChanged, listMemories, remember, forget } from "../engram.js";
 import { memberLinked } from "../engramStore.js";
 import { learnedFor, undoLearned } from "../runtime/learned.js";
 import { signedIn, type Env } from "../http/guard.js";
-import { readBody, readJson, jsonBody, raw, text, trimmed, flag, field, pick, given } from "../http/body.js";
+import { readBody, readJson, jsonBody, text, trimmed, field, pick, given } from "../http/body.js";
 import { verifyHook, overHookLimit } from "../runtime/hooks.js";
 import { botCard, LEARNED, liveLearned } from "./views.js";
 import { ledgerOverview, tablePreview } from "../ledger.js";
 import { listSkills } from "../runtime/skills.js";
-import { json } from "../db.js";
 import type { LearnedRow, PitstopRow, ScheduleRow } from "../models.js";
 
 const Memory = z.object({ text: trimmed(500), scope: pick(["agent", "global"] as const, "agent") });
-const MemoryEdit = z.object({ text: text(500) });
-const ForgetSource = z.object({ source: raw });
 const optText = (max: number) => given((v) => (v == null ? null : String(v).slice(0, max)));
 const Schedule = z.object({ threadId: field((v) => v || null), spec: text(100), prompt: text(), title: optText(80), check: optText(500), grade: z.boolean().optional() });
 const ScheduleEdit = z.object({ enabled: z.boolean().optional(), spec: z.string().max(100).optional(), prompt: z.string().max(2000).optional(), check: z.string().max(500).nullable().optional(), title: optText(80), grade: z.boolean().optional() });
@@ -61,15 +58,12 @@ export const crewRoutes = new Hono<Env>()
     return c.json({ ledgers: await ledgerOverview(id), dashboards, skills: listSkills(id) });
   })
   .get("/api/bots/:id/data/table", signedIn, async (c) => { const id = c.req.param("id"); member(id); return c.json(await tablePreview(id, c.req.query("source") || "", c.req.query("table") || "")); })
-  .get("/api/bots/:id/threads", signedIn, (c) => { const id = c.req.param("id"); member(id); return c.json(R.findThreads(id, c.req.query("q") || "", { limit: 30 })); })
 
   // Memory and schedules
   .post("/api/bots/:id/memory", signedIn, async (c) => {
     const id = c.req.param("id"), b = await jsonBody(c, Memory), bot = member(id); if (!b.text) throw httpErr(400, "Empty");
     if (b.scope === "global" && memberLinked(bot)) { const r = await remember(bot, b.text, { by: "driver" }); return c.json({ id: r.id, status: r.status }); }
     const mid = uid("me"); run("INSERT INTO memory(id,bot_id,text,source,created_at,updated_at) VALUES(?,?,?,?,?,?)", mid, id, b.text, "driver", now(), now()); return c.json({ id: mid }); })
-  .patch("/api/memory/:id", signedIn, async (c) => { const b = await jsonBody(c, MemoryEdit); run("UPDATE memory SET text=?, updated_at=? WHERE id=?", b.text, now(), c.req.param("id")); return c.json({ ok: true }); })
-  .post("/api/memory/:id/forget", signedIn, (c) => { const id = c.req.param("id"); run("UPDATE memory SET forgotten_at=? WHERE id=?", now(), id); audit("driver", "memory.forgotten", { id }); return c.json({ ok: true }); })
   .post("/api/bots/:id/memory/:mid/forget", signedIn, async (c) => {
     const id = c.req.param("id"), mid = c.req.param("mid"), b = member(id);
     if (!mid.startsWith("me_") && memberLinked(b)) { await forget(b, mid, "driver"); return c.json({ ok: true }); }
@@ -80,7 +74,6 @@ export const crewRoutes = new Hono<Env>()
   .post("/api/turns/:id/learned/:mid/undo", signedIn, async (c) => c.json({ items: await undoLearned(c.req.param("id"), c.req.param("mid")) }))
   // A "Not confirmed" note's Send back (runtime/donecheck.ts).
   .post("/api/turns/:id/check/retry", signedIn, (c) => { const r = R.sendBack(c.req.param("id")); if (!r.ok) throw httpErr(409, r.text); return c.json(r); })
-  .post("/api/bots/:id/memory/forget-source", signedIn, async (c) => { const id = c.req.param("id"), b = await jsonBody(c, ForgetSource); const r = run("UPDATE memory SET forgotten_at=? WHERE bot_id=? AND source=? AND forgotten_at IS NULL", now(), id, String(b.source)); audit("driver", "memory.forgot_source", { id, source: b.source }); return c.json({ forgotten: Number(r.changes) }); })
   // The Schedules page's "New schedule" and a member's own page; the check is the driver's alone, like on PATCH.
   .post("/api/bots/:id/schedules", signedIn, async (c) => {
     const id = c.req.param("id"), b = await jsonBody(c, Schedule), bot = member(id);

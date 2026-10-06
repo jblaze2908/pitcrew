@@ -14,7 +14,6 @@ export const autonomyOf = (threadId: string | null | undefined): Autonomy => {
 };
 // Whether this thread's autonomy stands in for the driver on an effect jev would have asked about.
 export const waived = (a: Autonomy, effect: string) => a === "yolo" || (a === "handsfree" && !HANDSFREE_ASKS.has(effect));
-export const AUTONOMY_LABEL: Record<Autonomy, string> = { ask: "Ask first", handsfree: "Hands-free", yolo: "YOLO" };
 // The mode a thread the driver starts gets (Settings → Permissions). Schedule, email and delegated threads keep "ask".
 export const newThreadAutonomy = (): Autonomy => {
   const a = getSetting("new_thread_mode");
