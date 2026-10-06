@@ -38,7 +38,8 @@ export const PW_CAPS = "storage";
 export const brainDir = (id: string) => `${ROOT}/brains/${id}`;
 export const usageLog = (id: string) => `${ROOT}/brains/_usage/${id}.jsonl`;
 export const chatgptAuthPath = () => `${ROOT}/chatgpt/auth.json`;
-const docker = (args: string[], opts: { timeout?: number } = {}) => new Promise<{ ok: boolean; out: string; err: string }>((res) => execFile("docker", args, { timeout: 120000, ...opts }, (err, out, errOut) => res({ ok: !err, out: String(out || ""), err: String(errOut || "") })));
+// code: the exit status, or null when docker itself failed (not found, killed, output over maxBuffer).
+const docker = (args: string[], opts: { timeout?: number; maxBuffer?: number } = {}) => new Promise<{ ok: boolean; out: string; err: string; code: number | null }>((res) => execFile("docker", args, { timeout: 120000, ...opts }, (err, out, errOut) => res({ ok: !err, out: String(out || ""), err: String(errOut || ""), code: !err ? 0 : typeof err.code === "number" && !err.killed ? err.code : null })));
 // Each crew member's Codex runs as its own uid, so a stray local shell couldn't read another member's threads.
 export const brainUid = (id: string) => 20000 + (parseInt(createHash("sha1").update(id).digest("hex").slice(0, 6), 16) % 30000);
 
@@ -299,6 +300,8 @@ export class Computer {
   get name() { return `pc-bot-${this.bot.id}`; }
   /** A schedule's "only wake when" check: a driver-written shell command in /bot/work, no model. Starts the computer if asleep. */
   async check(cmd: string, timeout = 60000) { await this.ensure(); this.touch(); return docker(["exec", "-w", "/bot/work", this.name, "sh", "-lc", cmd], { timeout }); }
+  /** A done-check command (runtime/donecheck.ts). timeout runs inside too: killing docker exec leaves its process running. */
+  async probe(cmd: string, ms: number) { await this.ensure(); this.touch(); return docker(["exec", "-w", "/bot/work", this.name, "timeout", "-k", "2", String(Math.ceil(ms / 1000)), "sh", "-lc", cmd], { timeout: ms + 5000, maxBuffer: 256 << 10 }); }
   touch() { this.lastActive = Date.now(); }
   ensure() {
     this.touch();

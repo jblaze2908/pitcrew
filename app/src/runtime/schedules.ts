@@ -77,7 +77,7 @@ export function addSchedule(botId: string, threadId: string | null, spec: string
   return one<ScheduleRow>("SELECT * FROM schedules WHERE id=?", id)!;
 }
 // The webhook secret stays out of every list; the driver reads it with scheduleHook.
-const COLS = "id,bot_id,thread_id,spec,prompt,next_run,last_run,enabled,created_at,check_cmd,title";
+const COLS = "id,bot_id,thread_id,spec,prompt,next_run,last_run,enabled,created_at,check_cmd,title,grade";
 export const listSchedules = (botId: string) => all<ScheduleRow>(`SELECT ${COLS} FROM schedules WHERE bot_id=? ORDER BY created_at`, botId);
 /** An event schedule's address and secret, for the driver to give the sender. */
 export function scheduleHook(id: string) {
@@ -91,8 +91,8 @@ function own(id: string, botId: string | null) {
   if (!s || (botId && s.bot_id !== botId)) throw new Error(`No schedule ${id}. list_schedules shows yours.`);
   return s;
 }
-/** Change the time, prompt, title or paused state. A new time, or resuming, recomputes the next run so a stale one doesn't fire at once. */
-export function updateSchedule(id: string, botId: string | null, ch: { spec?: string; prompt?: string; enabled?: boolean; check?: string | null; title?: string | null }, who: "crew" | "driver") {
+/** Change the time, prompt, title, check, done-check flag or paused state. A new time, or resuming, recomputes the next run so a stale one doesn't fire at once. */
+export function updateSchedule(id: string, botId: string | null, ch: { spec?: string; prompt?: string; enabled?: boolean; check?: string | null; title?: string | null; grade?: boolean }, who: "crew" | "driver") {
   const s = own(id, botId);
   // An emptied title falls back to the prompt's first line, so a row is never nameless.
   if (ch.title !== undefined) run("UPDATE schedules SET title=? WHERE id=?", cleanTitle(ch.title) || scheduleTitle(ch.prompt ?? s.prompt), id);
@@ -101,6 +101,7 @@ export function updateSchedule(id: string, botId: string | null, ch: { spec?: st
     if (who !== "driver") throw new Error("Only the driver sets a schedule's check");
     run("UPDATE schedules SET check_cmd=?, check_last=NULL WHERE id=?", ch.check?.trim().slice(0, 500) || null, id);
   }
+  if (ch.grade !== undefined) run("UPDATE schedules SET grade=? WHERE id=?", ch.grade ? 1 : 0, id);
   const spec = ch.spec !== undefined ? ch.spec.trim().toLowerCase() : s.spec, prompt = ch.prompt !== undefined ? ch.prompt.trim().slice(0, 2000) : s.prompt;
   if (!prompt) throw new Error("A schedule needs a prompt");
   const enabled = ch.enabled ?? !!s.enabled, next = spec !== s.spec || (enabled && !s.enabled) ? nextRun(spec) : s.next_run;

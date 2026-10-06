@@ -14,7 +14,7 @@ interface Run {
   status: "queued" | "running" | "quiet" | "reported" | "failed" | "interrupted" | "cancelled" | "skipped"; note: string | null; summary: string | null; input_tokens: number | null; cost_usd: number | null;
 }
 interface Sched {
-  id: string; bot_id: string; bot_name: string; title: string | null; spec: string; prompt: string; next_run: number | null; enabled: number; check_cmd: string | null;
+  id: string; bot_id: string; bot_name: string; title: string | null; spec: string; prompt: string; next_run: number | null; enabled: number; check_cmd: string | null; grade: number;
   runs: Run[]; week: { runs: number; ok: number; tokens: number; cost: number };
 }
 
@@ -149,6 +149,7 @@ function Editor({ s, onDone, onCancel, reload }: { s?: Sched; onDone: (id: strin
   const [mode, setMode] = useState<"time" | "event">(s && isEvent(s.spec) ? "event" : "time");
   const [w, setW] = useState<When>(() => parseSpec(s?.spec || "daily 09:00"));
   const [check, setCheck] = useState(s?.check_cmd || ""), [quiet, setQuiet] = useState(!!s?.check_cmd), [adv, setAdv] = useState(false);
+  const [grade, setGrade] = useState(!!s?.grade);
   const [hook, setHook] = useState<{ path: string; secret: string } | null>(null);
   const set = (p: Partial<When>) => setW((o) => ({ ...o, ...p }));
   const spec = mode === "event" ? "on event" : buildSpec(w);
@@ -159,7 +160,7 @@ function Editor({ s, onDone, onCancel, reload }: { s?: Sched; onDone: (id: strin
     if (!s && !botId) return toast("Pick a member", true);
     if (!prompt.trim()) return toast("Say what to do", true);
     if (mode === "time" && quiet && !check.trim()) { setAdv(true); return toast("Skip quiet days needs a check command", true); }
-    const body = { title: title.trim() || null, spec, prompt, check: mode === "time" && quiet ? check.trim() : null };
+    const body = { title: title.trim() || null, spec, prompt, check: mode === "time" && quiet ? check.trim() : null, grade };
     if (s) { await api.patch(`/api/schedules/${s.id}`, body); toast("Saved"); onDone(s.id); }
     else { const r = await api.post<{ id: string }>(`/api/bots/${botId}/schedules`, body); toast("Schedule added"); onDone(r.id); }
   };
@@ -208,6 +209,10 @@ function Editor({ s, onDone, onCancel, reload }: { s?: Sched; onDone: (id: strin
               : <BusyButton className="pc-pill o s" onClick={async () => setHook(await api.get(`/api/schedules/${s!.id}/hook`))}>Show address and secret</BusyButton>)
               : <p className="small faint">Save to get its address and secret.</p>}
           </div>}
+          <div className="sch2-quiet">
+            <label className="row chk"><input type="checkbox" checked={grade} onChange={(e) => setGrade(e.target.checked)} />
+              <span className="col" style={{ gap: 2 }}><b className="small">Check the result</b><span className="small faint">When the member says what done looks like, Pitcrew checks it after each run. If it doesn't hold, the member tries once more, then you get a note in the thread.</span></span></label>
+          </div>
           <p className="small faint">Each run gets its own short thread, so it starts fresh. If a run fails, it shows up in Needs you and on your phone.</p>
         </div>
       </div>

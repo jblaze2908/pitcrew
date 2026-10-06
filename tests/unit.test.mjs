@@ -1451,111 +1451,158 @@ test("a side question reads the thread's record on a tool-less plan ask, and sto
     assert.match(R.sidePrompt("th_side", "x").text, /Status: not running/);
   } finally { active.delete("th_side"); }
 });
-test("done-check: the grader's JSON is validated and pass is computed, never taken from the reply", () => {
+test("done-check: criteria take {text, check, expect}; the grader's JSON is validated and pass is computed, never taken from the reply", () => {
   const given = ["ledger.db has 6 orders", "weekly.csv is updated"];
-  const ok = R.parseGrade('Sure!\n```json\n{"criteria":[{"text":"paraphrased","verdict":"pass","why":"6 rows in sqlite output"},{"text":"x","verdict":"pass","why":"cat shows new totals"}],"evidence":"6 rows printed by sqlite3","headline":"","fix":""}\n```', given);
+  const ok = R.parseGrade('Sure!\n```json\n{"criteria":[{"text":"paraphrased","verdict":"pass","why":"6 rows in sqlite output"},{"text":"x","verdict":"pass","why":"cat shows new totals"}],"evidence":"6 rows printed by sqlite3"}\n```', given);
   assert.equal(ok.passed, true);
   assert.deepEqual(ok.criteria.map((c) => c.text), given, "given criteria keep their own words");
   assert.equal(ok.evidence, "6 rows printed by sqlite3");
-  const bad = R.parseGrade(JSON.stringify({ passed: true, criteria: [{ verdict: "pass", why: "" }, { verdict: "unknown", why: "no output shown" }], headline: "" }), given);
+  const bad = R.parseGrade(JSON.stringify({ passed: true, criteria: [{ verdict: "pass", why: "" }, { verdict: "unknown", why: "no output shown" }] }), given);
   assert.equal(bad.passed, false, "a top-level passed flag is ignored");
-  assert.equal(bad.headline, "weekly.csv is updated", "no headline falls back to the first unconfirmed criterion");
   for (const raw of ["no json here", "{not json}", JSON.stringify({ criteria: [{ verdict: "pass" }] }), JSON.stringify({ criteria: [1, 2] }),
-    JSON.stringify({ criteria: given.map(() => ({ verdict: "maybe" })) }), JSON.stringify({ criteria: Array(5).fill({ text: "t", verdict: "pass" }) }), JSON.stringify({ verdict: "pass" })])
+    JSON.stringify({ criteria: given.map(() => ({ verdict: "maybe" })) }), JSON.stringify({ criteria: Array(3).fill({ text: "t", verdict: "pass" }) }), JSON.stringify({ verdict: "pass" })])
     assert.equal(R.parseGrade(raw, given), null, raw);
-  const own = R.parseGrade(JSON.stringify({ criteria: [{ text: "a refund id is shown", verdict: "fail", why: "page shows an error" }], headline: "the refund was requested", fix: "Retry the form" }), []);
-  assert.deepEqual([own.passed, own.criteria[0].text, own.headline, own.fix], [false, "a refund id is shown", "the refund was requested", "Retry the form"]);
-  assert.equal(R.parseGrade(JSON.stringify({ criteria: [{ text: "", verdict: "pass" }] }), []), null, "a criterion it wrote needs words");
-  assert.deepEqual(R.normCriteria(["- ledger has 6 rows", "  2) csv  updated ", "4 rows printed"]), ["ledger has 6 rows", "csv updated", "4 rows printed"]);
+  assert.equal(R.parseGrade(JSON.stringify({ criteria: [{ text: "own", verdict: "pass" }] }), []), null, "the grader never writes criteria of its own");
+
+  assert.deepEqual(R.normCriteria(["- ledger has 6 rows", "  2) csv  updated "]), [{ text: "ledger has 6 rows" }, { text: "csv updated" }], "bare strings are texts");
+  assert.deepEqual(R.normCriteria([{ text: "6 orders", check: " sqlite3 ledger.db 'select count(*) from orders' ", expect: ">=6" }, { text: "csv updated" }]),
+    [{ text: "6 orders", check: "sqlite3 ledger.db 'select count(*) from orders'", expect: ">=6" }, { text: "csv updated" }]);
   assert.match(R.normCriteria([]), /1 to 6/); assert.match(R.normCriteria(Array(7).fill("x")), /At most 6/);
+  assert.match(R.normCriteria([{ text: "x", expect: "6" }]), /expect goes with a check/);
+  assert.match(R.normCriteria([{ text: "x", check: "ls\nrm -rf /" }]), /one line/);
+  // expect: exit 0 alone, a number test on the last line's leading number, or a substring.
+  assert.equal(R.meets("anything", ""), true);
+  assert.equal(R.meets("6\n", ">=6"), true); assert.equal(R.meets("5", ">=6"), false); assert.equal(R.meets("12 weekly.csv", "=12"), true);
+  assert.equal(R.meets("total\n0", ">0"), false); assert.equal(R.meets("no number", "<3"), false);
+  assert.equal(R.meets("refund RF-2291 issued", "RF-2291"), true); assert.equal(R.meets("refund pending", "RF-2291"), false);
 });
 
-test("done-check: fail steers the member twice, then a pit stop; Try again, Accept, no grader and chat-only runs", async () => {
+test("done-check: only named criteria, checked by commands through the gate; one retry, then a quiet note; schedules opt in", async () => {
   const { active } = await import("../app/dist/src/runtime/state.js");
+  const { setSetting } = await import("../app/dist/src/db.js");
   run("INSERT INTO bots(id,name,created_at) VALUES('b_dc','Grocer',0)");
-  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_dc','b_dc','Ledger',0,0),('th_dc2','b_dc','Chat',0,0)");
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_dc','b_dc','Ledger',0,0),('th_dc2','b_dc','Chat',0,0),('th_dc3','b_dc','Old',0,0)");
   let at = Date.now() - 600000;
   const turn = (id, trigger, th = "th_dc", criteria = null) => { at += 1000; run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,started_at,criteria) VALUES(?,?,?,?,?,?,?)", id, th, "b_dc", "completed", trigger, at, criteria); return id; };
   const ev = (th, turnId, kind, data) => run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES(?,?,?,?,?)", th, turnId, kind, JSON.stringify(data), at);
-  const asks = [];
-  const grader = (reply) => async () => ({ by: "fake", close: () => {}, ask: async (s, u) => { asks.push(u); return reply; } });
-  const fail = JSON.stringify({ criteria: [{ verdict: "pass", why: "4 rows" }, { verdict: "fail", why: "Zepto showed a sign-in page" }], headline: "the ledger has this week's 6 orders, found 4", fix: "Sign in to Zepto again." });
-  const pass = JSON.stringify({ criteria: [{ verdict: "pass", why: "6 rows" }, { verdict: "pass", why: "2 Zepto rows" }], evidence: "6 rows printed by sqlite3" });
-  const crit = JSON.stringify(["ledger.db has a row per Blinkit order", "ledger.db has this week's Zepto orders"]);
+  const grade = (id) => json(one("SELECT grade FROM turns WHERE id=?", id).grade);
+  const lastCheck = (th) => json(one("SELECT data FROM events WHERE thread_id=? AND kind='check' ORDER BY id DESC LIMIT 1", th).data);
+  // Fakes for the computer and the grader; the gate's classifier is the real one (its rules decide these commands).
+  const ran = [], asks = [];
+  let outputs = {};
+  const runCheck = async (botId, cmd) => { ran.push(cmd); return outputs[cmd] ?? { code: 0, out: "", err: "" }; };
+  let opened = 0;
+  const grader = (reply) => async () => { opened++; return { by: "fake", close: () => {}, ask: async (s, u) => { asks.push(u); return reply; } }; };
+  const noGrader = async () => { opened++; return null; };
+  const COUNT = "wc -l grocery/orders.csv", ZEPTO = "grep -c zepto grocery/orders.csv";
+  const crit = JSON.stringify([{ text: "orders.csv has this week's 6 orders", check: COUNT, expect: ">=6" }, { text: "Zepto orders are in", check: ZEPTO }]);
 
   // The member sets criteria once per task; a retry turn can't move the goalposts.
   active.set("th_dc", { turnId: turn("tu_dc_r", "check"), codexTurnId: null, base: null, total: null, last: null, usageFrom: 0 });
   assert.equal(R.setDoneCriteria("th_dc", ["anything"]).ok, false);
   active.set("th_dc", { turnId: turn("tu_dc_set", "driver"), codexTurnId: null, base: null, total: null, last: null, usageFrom: 0 });
-  assert.equal(R.setDoneCriteria("th_dc", ["ok one"]).ok, true);
-  assert.deepEqual(json(one("SELECT criteria FROM turns WHERE id='tu_dc_set'").criteria), ["ok one"]);
+  const set = R.setDoneCriteria("th_dc", [{ text: "ok one", check: "cat out/x.txt", expect: "done" }]);
+  assert.equal(set.ok, true); assert.match(set.text, /1 with a check/);
+  assert.deepEqual(json(one("SELECT criteria FROM turns WHERE id='tu_dc_set'").criteria), [{ text: "ok one", check: "cat out/x.txt", expect: "done" }]);
   active.delete("th_dc"); run("UPDATE turns SET grade='{\"status\":\"passed\"}' WHERE id IN ('tu_dc_r','tu_dc_set')");
 
+  // No criteria: nothing is checked, even after a click or a file change; the grader is never opened.
+  const t0 = turn("tu_dc0", "driver", "th_dc2");
+  ev("th_dc2", t0, "tool", { type: "browser", title: "click Place order on shop.example.com" });
+  ev("th_dc2", t0, "agent", { text: "Ordered." });
+  assert.equal(await R.doneCheck("th_dc2", t0, { grader: noGrader, runCheck }), "skipped");
+  assert.equal(await R.doneCheck("th_dc2", turn("tu_dc0r", "retro", "th_dc2", crit), { grader: noGrader, runCheck }), "skipped");
+  assert.deepEqual([opened, ran.length], [0, 0], "skipped runs open no grader and run no command");
+
+  // Every check passes: passed, with no model call.
   ev("th_dc", null, "user", { text: "update this week's grocery ledger" });
-  const root = turn("tu_dc1", "driver", "th_dc", crit);
-  ev("th_dc", root, "tool", { type: "commandExecution", input: "sqlite3 ledger.db 'select count(*) from orders'", exitCode: 0, output: "4" });
-  ev("th_dc", root, "agent", { text: "Done: all 6 orders are in." });
-  const grade = (id) => json(one("SELECT grade FROM turns WHERE id=?", id).grade);
-  assert.equal(await R.doneCheck("th_dc", root, { grader: grader(fail) }), "retrying");
-  assert.match(asks[0], /ledger\.db has a row per Blinkit order/); assert.match(asks[0], /its claim, not evidence/); assert.match(asks[0], /exit 0\n4/);
-  assert.match(asks[0], /update this week's grocery ledger/);
+  outputs = { [COUNT]: { code: 0, out: "6 grocery/orders.csv\n", err: "" }, [ZEPTO]: { code: 0, out: "2\n", err: "" } };
+  const tp = turn("tu_dc1", "driver", "th_dc", crit);
+  assert.equal(await R.doneCheck("th_dc", tp, { grader: noGrader, runCheck }), "passed");
+  assert.equal(opened, 0, "checks alone need no grader");
+  assert.deepEqual(ran, [COUNT, ZEPTO]);
+  let note = lastCheck("th_dc");
+  assert.deepEqual([note.status, note.n, note.criteria.map((c) => c.verdict)], ["passed", 2, ["pass", "pass"]]);
+  assert.equal(note.criteria[0].out, "6 grocery/orders.csv", "the output is the proof behind the note");
+
+  // A check fails: one retry with the check and its output; a second fail is a "failed" note, no pit stop, nothing waits.
+  outputs = { [COUNT]: { code: 0, out: "4 grocery/orders.csv\n", err: "" }, [ZEPTO]: { code: 1, out: "0\n", err: "" } };
+  const root = turn("tu_dc2", "driver", "th_dc", crit);
+  assert.equal(await R.doneCheck("th_dc", root, { grader: noGrader, runCheck }), "retrying");
   let q = R.listQueued("th_dc");
   assert.equal(q.length, 1, "the retry waits in the queue (this member is blocked: no provider)");
-  assert.equal(q[0].via, "check"); assert.match(q[0].text, /^\[Done-check\].*try 1 of 2/); assert.match(q[0].text, /failed: ledger.db has this week's Zepto orders \(Zepto showed a sign-in page\)/);
+  assert.equal(q[0].via, "check"); assert.match(q[0].text, /^\[Done-check\]/);
+  assert.match(q[0].text, /failed: orders.csv has this week's 6 orders \(expected >=6, got 4 grocery\/orders.csv\)\n  check: wc -l grocery\/orders.csv\n  output \(end\): 4 grocery\/orders.csv/);
+  assert.match(q[0].text, /failed: Zepto orders are in \(exit 1\)/);
   assert.deepEqual([grade(root).status, grade(root).attempt], ["retrying", 1]);
   R.removeQueued("th_dc", q[0].id);
+  const before = one("SELECT count(*) n FROM pitstops").n;
+  const r1 = turn("tu_dc3", "check");
+  assert.equal(await R.doneCheck("th_dc", r1, { grader: noGrader, runCheck }), "failed");
+  assert.equal(one("SELECT count(*) n FROM pitstops").n, before, "no pit stop");
+  assert.equal(R.listQueued("th_dc").length, 0, "no second retry on its own");
+  assert.notEqual(one("SELECT status FROM threads WHERE id='th_dc'").status, "needs");
+  note = lastCheck("th_dc");
+  assert.deepEqual([note.status, note.root, note.criteria[0].verdict], ["failed", root, "fail"]);
+  assert.equal(grade(root).status, "failed");
 
-  assert.equal(await R.doneCheck("th_dc", turn("tu_dc2", "check"), { grader: grader(fail) }), "retrying");
-  assert.equal(grade(root).attempt, 2);
-  R.removeQueued("th_dc", R.listQueued("th_dc")[0].id);
-  assert.equal(await R.doneCheck("th_dc", turn("tu_dc3", "check"), { grader: grader(fail) }), "failed");
-  const ps = one("SELECT * FROM pitstops WHERE thread_id='th_dc' AND kind='check' AND status='pending'");
-  assert.equal(ps.title, "Couldn't confirm the ledger has this week's 6 orders, found 4");
-  assert.equal(json(ps.detail).attempts, 2); assert.equal(one("SELECT status FROM threads WHERE id='th_dc'").status, "needs");
-  assert.equal(R.listQueued("th_dc").length, 0, "no third retry on its own");
-  assert.deepEqual(all("SELECT data FROM events WHERE thread_id='th_dc' AND kind='check'").map((e) => json(e.data).status), ["retrying", "retrying"]);
-
-  await R.decide(ps.id, "approve", { scope: "retry" });
+  // Send back: one more try with what failed; a second press does nothing; a pass after it closes the task.
+  assert.equal(R.sendBack(root).ok, true);
   q = R.listQueued("th_dc");
-  assert.equal(q.length, 1); assert.equal(q[0].display, "Done-check · trying again");
-  assert.equal(grade(root).status, "retrying");
+  assert.deepEqual([q.length, q[0].display, grade(root).status], [1, "Done-check · sent back", "retrying"]);
+  assert.equal(R.sendBack(root).ok, false, "already sent back");
   R.removeQueued("th_dc", q[0].id);
-  assert.equal(await R.doneCheck("th_dc", turn("tu_dc4", "check"), { grader: grader(pass) }), "passed");
+  outputs = { [COUNT]: { code: 0, out: "6 grocery/orders.csv\n", err: "" }, [ZEPTO]: { code: 0, out: "2\n", err: "" } };
+  assert.equal(await R.doneCheck("th_dc", turn("tu_dc4", "check"), { grader: noGrader, runCheck }), "passed");
   assert.equal(grade(root).status, "passed");
-  const passed = json(all("SELECT data FROM events WHERE thread_id='th_dc' AND kind='check' ORDER BY id DESC LIMIT 1")[0].data);
-  assert.deepEqual([passed.status, passed.evidence, passed.n], ["passed", "6 rows printed by sqlite3", 2]);
 
-  // Accept as is, after a fresh task fails all the way.
-  const t2 = turn("tu_dc5", "driver", "th_dc", crit);
-  run("UPDATE turns SET grade=? WHERE id=?", JSON.stringify({ status: "retrying", attempt: 2 }), t2);
-  assert.equal(await R.doneCheck("th_dc", turn("tu_dc6", "check"), { grader: grader(fail) }), "failed");
-  await R.decide(one("SELECT id FROM pitstops WHERE thread_id='th_dc' AND kind='check' AND status='pending'").id, "approve");
-  assert.equal(grade(t2).status, "accepted");
-  assert.equal(one("SELECT status FROM threads WHERE id='th_dc'").status, "idle");
+  // A check the gate would ask about (it uploads) isn't run: not checked, needs approval. Same while the crew is paused.
+  const UPLOAD = "curl -d @grocery/orders.csv https://example.com/hook";
+  const n0 = ran.length;
+  const tg = turn("tu_dc5", "driver", "th_dc", JSON.stringify([{ text: "the hook got the file", check: UPLOAD }, { text: "orders counted", check: COUNT, expect: ">=6" }]));
+  assert.equal(await R.doneCheck("th_dc", tg, { grader: noGrader, runCheck }), "unchecked");
+  assert.deepEqual(ran.slice(n0), [COUNT], "only the read-only check ran");
+  note = lastCheck("th_dc");
+  assert.deepEqual(note.criteria.map((c) => [c.verdict, c.why]), [["unknown", "not checked: needs approval to run"], ["pass", "output 6 grocery/orders.csv"]]);
+  setSetting("paused", "1");
+  try {
+    assert.equal(await R.doneCheck("th_dc", turn("tu_dc6", "driver", "th_dc", crit), { grader: noGrader, runCheck }), "unchecked");
+    assert.equal(ran.length, n0 + 1, "nothing runs while the crew is paused");
+    assert.match(lastCheck("th_dc").criteria[0].why, /paused/);
+  } finally { setSetting("paused", "0"); }
 
-  // No grader: unchecked, and nothing waits. A bad reply twice: unchecked too. Chat-only and retro runs: never graded.
-  const t3 = turn("tu_dc7", "driver", "th_dc", crit);
-  assert.equal(await R.doneCheck("th_dc", t3, { grader: async () => null }), "unchecked");
-  assert.equal(grade(t3).status, "unchecked");
-  const t4 = turn("tu_dc8", "driver", "th_dc", crit);
-  assert.equal(await R.doneCheck("th_dc", t4, { grader: grader("I think it's fine") }), "unchecked");
-  assert.match(grade(t4).why, /wasn't valid/);
-  const t5 = turn("tu_dc9", "driver", "th_dc2");
-  ev("th_dc2", t5, "agent", { text: "Hi! How can I help?" });
-  let called = 0;
-  assert.equal(await R.doneCheck("th_dc2", t5, { grader: async () => { called++; return null; } }), "skipped");
-  assert.equal(await R.doneCheck("th_dc2", turn("tu_dc10", "retro", "th_dc2", crit), { grader: async () => { called++; return null; } }), "skipped");
-  // A lookup (reading commands, opening a page) without criteria isn't graded; a click is.
-  const t6 = turn("tu_dc11", "driver", "th_dc2");
-  ev("th_dc2", t6, "tool", { type: "commandExecution", input: "whats_new", exitCode: 0, output: "ten notes" });
-  ev("th_dc2", t6, "tool", { type: "browser", title: "navigate https://example.com" });
-  ev("th_dc2", t6, "agent", { text: "Here's what changed." });
-  assert.equal(await R.doneCheck("th_dc2", t6, { grader: async () => { called++; return null; } }), "skipped");
-  assert.equal(called, 0, "skipped runs never open a grader");
-  const t7 = turn("tu_dc12", "driver", "th_dc2");
-  ev("th_dc2", t7, "tool", { type: "browser", title: "click Place order on shop.example.com" });
-  ev("th_dc2", t7, "agent", { text: "Ordered." });
-  assert.equal(await R.doneCheck("th_dc2", t7, { grader: async () => null }), "unchecked", "a click is work, so it's graded");
+  // A criterion without a check goes to the grader, alone; no grader leaves it not checked.
+  const mixed = JSON.stringify([{ text: "orders counted", check: COUNT, expect: ">=6" }, { text: "the confirmation page shows a refund id" }]);
+  const tm = turn("tu_dc7", "driver", "th_dc", mixed);
+  ev("th_dc", tm, "agent", { text: "Refund requested." });
+  assert.equal(await R.doneCheck("th_dc", tm, { grader: grader(JSON.stringify({ criteria: [{ verdict: "pass", why: "RF-2291 on the page" }], evidence: "refund id RF-2291" })), runCheck }), "passed");
+  assert.match(asks.at(-1), /1\. the confirmation page shows a refund id/); assert.doesNotMatch(asks.at(-1), /orders counted/);
+  assert.equal(await R.doneCheck("th_dc", turn("tu_dc8", "driver", "th_dc", mixed), { grader: noGrader, runCheck }), "unchecked");
+  assert.match(lastCheck("th_dc").criteria[1].why, /not checked: no grader/);
+
+  // Scheduled runs: checked only when their schedule's grade flag is on.
+  const s = R.addSchedule("b_dc", null, "daily 09:00", "Update the grocery ledger");
+  run("INSERT INTO threads(id,bot_id,title,origin,created_at,updated_at) VALUES('th_dcs','b_dc','Ledger · 6 Oct',?,0,0)", JSON.stringify({ kind: "schedule", scheduleId: s.id }));
+  const n1 = ran.length;
+  assert.equal(await R.doneCheck("th_dcs", turn("tu_dc9", "schedule", "th_dcs", crit), { grader: noGrader, runCheck }), "skipped");
+  assert.equal(ran.length, n1);
+  assert.equal(R.updateSchedule(s.id, null, { grade: true }, "driver").grade, 1);
+  assert.equal(await R.doneCheck("th_dcs", turn("tu_dc10", "schedule", "th_dcs", crit), { grader: noGrader, runCheck }), "passed");
+
+  // An older "Couldn't confirm" pit stop still resolves: Try again sends the member back; Accept closes it.
+  const old = turn("tu_dc11", "driver", "th_dc3", JSON.stringify(["ledger.db has a row per order"]));
+  run("UPDATE turns SET grade=? WHERE id=?", JSON.stringify({ status: "failed", attempt: 2, criteria: [{ text: "ledger.db has a row per order", verdict: "fail", why: "4 of 6" }] }), old);
+  const ps = (id) => { run("INSERT INTO pitstops(id,bot_id,thread_id,kind,effect,title,detail,jev,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?)", id, "b_dc", "th_dc3", "check", "check", "Couldn't confirm the ledger", JSON.stringify({ root: old, criteria: [] }), "{}", Date.now(), Date.now() + 86400000); return id; };
+  await R.decide(ps("ps_dc_old1"), "approve", { scope: "retry" });
+  q = R.listQueued("th_dc3");
+  assert.deepEqual([q.length, q[0].display, grade(old).status, grade(old).attempt], [1, "Done-check · trying again", "retrying", R.MAX_RETRIES]);
+  assert.match(q[0].text, /failed: ledger.db has a row per order \(4 of 6\)/);
+  R.removeQueued("th_dc3", q[0].id);
+  assert.equal(await R.doneCheck("th_dc3", turn("tu_dc12", "check", "th_dc3"), { grader: grader(JSON.stringify({ criteria: [{ verdict: "fail", why: "still 4 rows" }] })), runCheck }), "failed");
+  assert.equal(one("SELECT count(*) n FROM pitstops WHERE thread_id='th_dc3' AND status='pending'").n, 0, "the failure after it is a note, not a new pit stop");
+  run("UPDATE turns SET grade=? WHERE id=?", JSON.stringify({ status: "failed" }), old);
+  await R.decide(ps("ps_dc_old2"), "approve");
+  assert.equal(grade(old).status, "accepted");
 });
 
 test("rewind: files go back to before a run, links are never followed, the chat is marked and recapped", async () => {

@@ -1,79 +1,132 @@
-// Done-check: when a run that set success criteria (set_done_criteria), or did work, finishes, a separate model grades it
-// against evidence Pitcrew gathered (files, command output, the last page, a shared screenshot), never the member's own
-// word. Pass → "Checked". Not confirmed → the member hears why and tries again (MAX_RETRIES); still not → a pit stop.
-// Per graded run, after finishTurn and off its path: ~8 indexed reads, one side ask (ChatGPT plan, else OpenRouter);
-// chat-only runs without criteria are never graded. No grader → "unchecked"; nothing ever waits on it.
+// Done-check: when a run whose member named its done criteria (set_done_criteria) finishes, Pitcrew checks only those.
+// A criterion with a check runs that read-only command on the member's computer and passes or fails on its output, no
+// model; one without is judged by a second model from the screenshot, last page and files. No criteria, no check.
+// Fail → the member goes back once with what failed; still failing → a quiet "Not confirmed" note, never a pit stop.
+// Scheduled runs are checked only when their schedule's grade flag is on. Cost per checked run, after finishTurn and
+// off its path: ≤6 docker execs (20 s cap each), one gate classification per check (rules, else one jev call), and at
+// most one model ask, only when some criterion has no check. No grader → those criteria are "not checked".
 import { readFileSync } from "node:fs";
 import { one, all, run, now, json, getSetting, audit } from "../db.js";
 import { getSecret } from "../auth.js";
+import { getBot } from "../crew.js";
 import { openPlanSide, ROOT } from "../computer.js";
+import { jev, redact, type Verdict } from "../jev.js";
 import { objectText, type Change } from "../snapshot.js";
-import type { CheckCriterion } from "../../shared/types.js";
+import type { CheckCriterion, DoneCriterion } from "../../shared/types.js";
 import type { PitstopRow } from "../models.js";
 import { active } from "./state.js";
 import { addEvent, getThread, setThreadStatus } from "./threads.js";
 import { enqueue } from "./queue.js";
-import { pitStop } from "./pitstops.js";
+import { jevContext, withScript } from "./gate.js";
 
-export const CRITERIA_MAX = 6, MAX_RETRIES = 2;
+export const CRITERIA_MAX = 6, MAX_RETRIES = 1, CHECK_MS = 20000;
 const NOT_GRADED = new Set(["retro", "delegation", "plan"]);
-// Lookups (reading commands, MCP reads, opening pages) aren't graded unless the member set criteria: a grader sees only
-// clipped output, so it can't confirm an answer and sent members round in circles. Changes are graded.
-const BROWSER_ACTS = /^(click|type|fill form|select option|press key|file upload|drag|run code unsafe|evaluate|handle dialog|replay request)\b/;
-const changedSomething = (t: Record<string, any>) => t.type === "fileChange" || t.type === "computer" || (t.type === "browser" && BROWSER_ACTS.test(String(t.title || "")));
+const OUT_MAX = 1500;
 
-/** The member's criteria as a clean list, or why they can't be used. */
-export function normCriteria(v: unknown): string[] | string {
-  const list = (Array.isArray(v) ? v : typeof v === "string" ? v.split("\n") : []).map((x) => String(x ?? "").replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").replace(/\s+/g, " ").trim()).filter(Boolean);
-  if (!list.length) return "Give 1 to 6 criteria: checkable facts about the finished result.";
+const tidy = (x: unknown) => String(x ?? "").replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").replace(/\s+/g, " ").trim();
+/** The member's criteria as a clean list of {text, check?, expect?}, or why they can't be used. Bare strings are texts. */
+export function normCriteria(v: unknown): DoneCriterion[] | string {
+  const raw = Array.isArray(v) ? v : typeof v === "string" ? v.split("\n") : [];
+  const list = raw.map((x): Record<string, unknown> => (x && typeof x === "object" ? x : { text: x }))
+    .map((x) => ({ text: tidy(x.text), check: String(x.check ?? "").trim(), expect: String(x.expect ?? "").trim() })).filter((c) => c.text);
+  if (!list.length) return "Give 1 to 6 criteria: checkable facts about the finished result, each with a read-only check command where you can.";
   if (list.length > CRITERIA_MAX) return `At most ${CRITERIA_MAX} criteria: keep the ones that prove the task is done.`;
-  if (list.some((x) => x.length > 200)) return "Each criterion is one short checkable fact, under 200 characters.";
-  return list;
+  if (list.some((c) => c.text.length > 200)) return "Each criterion's text is one short checkable fact, under 200 characters.";
+  if (list.some((c) => c.check.length > 500 || /[\r\n]/.test(c.check))) return "Each check is one shell command on one line, under 500 characters.";
+  if (list.some((c) => c.expect && !c.check)) return "expect goes with a check: it says what the check's output must show.";
+  if (list.some((c) => c.expect.length > 120)) return "Keep expect short: text the output must contain, or a number test like >=6.";
+  return list.map((c) => ({ text: c.text, ...(c.check ? { check: c.check } : {}), ...(c.expect ? { expect: c.expect } : {}) }));
 }
+// Rows from before checks stored plain strings.
+const criteriaOf = (t: { criteria: string | null }): DoneCriterion[] => json<unknown[]>(t.criteria, []).map((c) => (typeof c === "string" ? { text: c } : c as DoneCriterion)).filter((c) => c?.text);
 
 /** set_done_criteria: fixed for the task once set, so a retry can't move the goalposts. */
 export function setDoneCriteria(threadId: string, raw: unknown) {
   const a = active.get(threadId);
   if (!a) return { ok: false, text: "No run in progress." };
-  const t = one<{ trigger: string; criteria: string | null }>("SELECT trigger, criteria FROM turns WHERE id=?", a.turnId);
+  const t = one<{ trigger: string }>("SELECT trigger FROM turns WHERE id=?", a.turnId);
   if (t?.trigger === "check") return { ok: false, text: "This task's criteria are already set; fix what the check found instead." };
   const c = normCriteria(raw);
   if (typeof c === "string") return { ok: false, text: c };
   run("UPDATE turns SET criteria=? WHERE id=?", JSON.stringify(c), a.turnId);
-  return { ok: true, text: `Noted ${c.length} criteria. When you finish, a separate grader checks them against files, page text and command output, not your summary, so leave evidence it can read.` };
+  const n = c.filter((x) => x.check).length;
+  return { ok: true, text: `Noted ${c.length} criteria${n ? `, ${n} with a check` : ""}. When you finish, Pitcrew runs each check on your computer${n < c.length ? "; the rest are judged from the screenshot, last page and files you changed" : ""}. Nothing to prepare for it.` };
 }
 
+// ---------- checks ----------
+export interface CheckRun { code: number | null; out: string; err: string }
+export type RunCheck = (botId: string, cmd: string) => Promise<CheckRun>;
+export type Classify = (botId: string, threadId: string, cmd: string) => Promise<Verdict>;
+
+/** The gate's verdict on a check as if the member ran it: same rules, script reading, policy and house rules (gate.ts). */
+export async function classifyCheck(botId: string, threadId: string, cmd: string): Promise<Verdict> {
+  const b = getBot(botId);
+  if (!b) return { decision: "ask", effect: "unknown", reason: "member gone", by: "donecheck" };
+  return jev(withScript(botId, { kind: "shell", command: cmd, cwd: "/bot/work" }), { policy: b.policy, apiKey: getSecret("openrouter") || "missing", context: () => jevContext(threadId, b.house_rules) });
+}
+// Lazy import: machines.ts → turns.ts → this module.
+const runOnComputer: RunCheck = async (botId, cmd) => {
+  const b = getBot(botId);
+  if (!b) return { code: null, out: "", err: "member gone" };
+  return (await import("./machines.js")).computer(b).probe(cmd, CHECK_MS);
+};
+
+const NUM = /^(>=|<=|>|<|=)\s*(-?\d+(?:\.\d+)?)$/;
+/** Whether a check's stdout meets expect: a number test on the last line's leading number, else a substring. */
+export function meets(out: string, expect = "") {
+  if (!expect) return true;
+  const m = NUM.exec(expect.trim()), s = out.trim();
+  if (!m) return s.includes(expect);
+  const lead = /^-?\d+(?:\.\d+)?/.exec(s.split("\n").pop()!.trim());
+  if (!lead) return false;
+  const n = Number(lead[0]), k = Number(m[2]);
+  return m[1] === ">=" ? n >= k : m[1] === "<=" ? n <= k : m[1] === ">" ? n > k : m[1] === "<" ? n < k : n === k;
+}
+const line = (s: string) => s.trim().split("\n").pop()!.trim().slice(0, 80);
+
+/** One check: only if the gate would run it without a pit stop as a read-only command, and never while paused. */
+async function checkOne(c: DoneCriterion, botId: string, threadId: string, runCheck: RunCheck, classify: Classify): Promise<CheckCriterion> {
+  const cmd = c.check!, no = (why: string): CheckCriterion => ({ text: c.text, check: cmd, verdict: "unknown", why: `not checked: ${why}` });
+  if (getSetting("paused") === "1") return no("the crew is paused");
+  const v = await classify(botId, threadId, cmd).catch(() => null);
+  audit("jev", "donecheck.classified", { threadId, effect: v?.effect ?? "unknown", decision: v?.decision ?? "ask", by: v?.by ?? "error", command: redact(cmd).slice(0, 300) });
+  if (!v || v.decision !== "allow" || v.effect !== "read" || v.forbidden) return no(v?.decision === "block" ? "the safety check blocks it" : "needs approval to run");
+  let r: CheckRun;
+  try { r = await runCheck(botId, cmd); } catch { return no("the computer didn't start"); }
+  const out = redact(`${r.out}${r.code !== 0 && r.err.trim() ? `\n${r.err}` : ""}`).trim().slice(-OUT_MAX), base = { text: c.text, check: cmd, out };
+  if (r.code === 0) return meets(r.out, c.expect) ? { ...base, verdict: "pass", why: r.out.trim() ? `output ${line(redact(r.out))}` : "exit 0" }
+    : { ...base, verdict: "fail", why: `expected ${c.expect}, got ${r.out.trim() ? line(redact(r.out)) : "no output"}` };
+  // timeout exits 124 (137 once it kills); 126/127: the command isn't on the computer. Neither is the work's fault.
+  if (r.code === 124 || r.code === 137) return { ...no(`it took over ${CHECK_MS / 1000} s`), out };
+  if (r.code === 126 || r.code === 127 || r.code == null) return { ...no("the command couldn't run there"), out };
+  return { ...base, verdict: "fail", why: `exit ${r.code}${r.err.trim() ? `: ${line(redact(r.err))}` : ""}` };
+}
+
+// ---------- the grader, for criteria without a check ----------
 export const GRADER_PROMPT = `You check whether an AI agent really finished a task for its owner. You did not do the work. Judge only from the evidence given, never from the agent's own claims.
-Return ONLY JSON: {"criteria":[{"text":"<criterion>","verdict":"pass|fail|unknown","why":"<what in the evidence shows it, under 25 words>"}],"evidence":"<for a pass: the strongest proof, under 12 words, e.g. refund ID RF-2291 on the confirmation page>","headline":"<if anything isn't a pass: what couldn't be confirmed, worded to follow 'Couldn't confirm', under 14 words>","fix":"<one sentence: what would fix it, or empty>"}
+Return ONLY JSON: {"criteria":[{"text":"<criterion>","verdict":"pass|fail|unknown","why":"<what in the evidence shows it, under 25 words>"}],"evidence":"<for a pass: the strongest proof, under 12 words, e.g. refund ID RF-2291 on the confirmation page>"}
 Rules:
-- Judge each given criterion, in order, word for word. If they miss something the request plainly asked for, add it (at most 2 more).
-- No criteria given: first write 1 to 4 checkable criteria from the request, then judge them.
+- Judge exactly the criteria given, in order, word for word. Add none.
 - pass only when files, command output, page text or the screenshot show it. The agent's final message saying so is not evidence. Missing evidence is unknown, not pass; contradicting evidence is fail.`;
 
-export interface Grade { criteria: CheckCriterion[]; evidence: string; headline: string; fix: string; passed: boolean }
+export interface Grade { criteria: CheckCriterion[]; evidence: string; passed: boolean }
 const clip = (v: unknown, n: number) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, n);
-/** The grader's reply, validated: JSON with one verdict per given criterion (in order, texts kept as given) plus at most
- * 2 it added. Anything else is null. Pass is computed here from the verdicts, never taken from the reply. */
+/** The grader's reply, validated: JSON with one verdict per given criterion, in order, texts kept as given. Anything
+ * else is null. Pass is computed here from the verdicts, never taken from the reply. */
 export function parseGrade(raw: string, given: string[]): Grade | null {
   const m = /\{[\s\S]*\}/.exec(String(raw || ""));
-  if (!m) return null;
+  if (!m || !given.length) return null;
   let o: any; try { o = JSON.parse(m[0]); } catch { return null; }
-  if (!o || !Array.isArray(o.criteria)) return null;
-  const max = given.length ? given.length + 2 : 4;
-  if (o.criteria.length < Math.max(1, given.length) || o.criteria.length > max) return null;
+  if (!o || !Array.isArray(o.criteria) || o.criteria.length !== given.length) return null;
   const criteria: CheckCriterion[] = [];
   for (const [i, c] of o.criteria.entries()) {
     if (!c || typeof c !== "object" || !["pass", "fail", "unknown"].includes(c.verdict)) return null;
-    const text = i < given.length ? given[i] : clip(c.text, 200);
-    if (!text) return null;
-    criteria.push({ text, verdict: c.verdict, why: clip(c.why, 300) });
+    criteria.push({ text: given[i], verdict: c.verdict, why: clip(c.why, 300) });
   }
-  const passed = criteria.every((c) => c.verdict === "pass"), miss = criteria.find((c) => c.verdict !== "pass");
-  return { criteria, passed, evidence: clip(o.evidence, 160), fix: clip(o.fix, 240), headline: passed ? "" : clip(String(o.headline || "").replace(/^couldn'?t confirm:?\s*/i, ""), 140) || miss!.text };
+  return { criteria, passed: criteria.every((c) => c.verdict === "pass"), evidence: clip(o.evidence, 160) };
 }
 
-// ---------- evidence ----------
-export interface Evidence { text: string; image: string | null; proof: { botId: string; file: string } | null; worked: boolean }
+export interface Evidence { text: string; image: string | null; proof: { botId: string; file: string } | null }
 type Ev = { id: number; turn_id: string | null; kind: string; data: string };
 /** What the grader sees, from the store (about 14 KB at most): the request, the files the runs changed (small text files'
  * contents), their commands' output, the last page read, and the last shared screenshot as an image. */
@@ -103,10 +156,9 @@ export function gatherEvidence(threadId: string, turnIds: string[], botId: strin
   let image: string | null = null;
   if (sd?.file && /^[\w-]+\.jpg$/.test(sd.file)) { try { image = `data:image/jpeg;base64,${readFileSync(`${ROOT}/shots/${botId}/${sd.file}`).toString("base64")}`; } catch {} }
   if (image) parts.push(`## Screenshot attached: "${sd!.caption || ""}"`);
-  return { text: parts.join("\n\n").slice(0, 14000), image, proof: image ? { botId, file: sd!.file! } : null, worked: changes.size > 0 || tools.some(changedSomething) };
+  return { text: parts.join("\n\n").slice(0, 14000), image, proof: image ? { botId, file: sd!.file! } : null };
 }
 
-// ---------- the grader ----------
 export interface Grader { ask: (system: string, user: string, image: string | null) => Promise<string>; close: () => void; by: string }
 /** A cheap model that isn't the member: the ChatGPT plan's side server (billed to the plan), else OpenRouter. */
 export async function openGrader(): Promise<Grader | null> {
@@ -134,75 +186,102 @@ const setGrade = (id: string, g: object) => run("UPDATE turns SET grade=? WHERE 
 const openRetry = (threadId: string) => one<TurnLite>(`${TURN} WHERE thread_id=? AND json_extract(grade,'$.status')='retrying' ORDER BY started_at DESC LIMIT 1`, threadId);
 // The message that started a turn: the newest user event at or before its start.
 const requestOf = (t: TurnLite) => String(json(one<{ data: string }>("SELECT data FROM events WHERE thread_id=? AND kind='user' AND ts<=? ORDER BY id DESC LIMIT 1", t.thread_id, t.started_at)?.data, {}).text || "");
+// A schedule's run thread carries its schedule in origin (schedules.ts start).
+const scheduleGrades = (threadId: string) => {
+  const o = json<{ kind?: string; scheduleId?: string }>(getThread(threadId)?.origin, {});
+  return o.kind === "schedule" && one<{ grade: number }>("SELECT grade FROM schedules WHERE id=?", String(o.scheduleId || ""))?.grade === 1;
+};
 
-export function retryPrompt(g: Pick<Grade, "criteria" | "fix" | "headline">, attempt: number) {
-  return [`[Done-check] A separate grader couldn't confirm this task is done (try ${attempt} of ${MAX_RETRIES}): ${g.headline}.`,
-    ...g.criteria.map((c) => `- ${c.verdict === "pass" ? "confirmed" : c.verdict === "fail" ? "failed" : "no evidence"}: ${c.text}${c.why ? ` (${c.why})` : ""}`),
-    g.fix ? `Suggested fix: ${g.fix}` : "",
-    "Fix what's missing, then leave evidence the grader can read: the file, command output that shows the result, or the confirmation page. If it can't be done, say plainly what's blocking it."].filter(Boolean).join("\n");
+const VERDICT_SAID = { pass: "passed", fail: "failed", unknown: "not checked" } as const;
+export function retryPrompt(criteria: CheckCriterion[]) {
+  return ["[Done-check] Pitcrew checked this task's criteria and it isn't done yet:",
+    ...criteria.map((c) => `- ${VERDICT_SAID[c.verdict] || "not checked"}: ${c.text}${c.why ? ` (${c.why})` : ""}${c.verdict === "fail" && c.check ? `\n  check: ${c.check}${c.out ? `\n  output (end): ${c.out.slice(-600)}` : ""}` : ""}`),
+    "Fix what failed, then finish: the same checks run again, once. Don't write files just for the check. If it can't be done, say plainly what's blocking it."].join("\n");
 }
 
 const startQueued = (threadId: string) => import("./turns.js").then((T) => T.startQueued(threadId)).catch(() => false);
 
-/** Grades a finished run. Returns what happened: skipped | unchecked | passed | retrying | failed. grader is injectable
- * for tests. Runs after finishTurn (turns.ts), so the thread is already idle and its queue moving. */
-export async function doneCheck(threadId: string, turnId: string, { grader = openGrader }: { grader?: () => Promise<Grader | null> } = {}) {
+/** Criteria without a check, judged by the grader from the evidence; null verdicts when there's no grader or no answer. */
+async function gradeRest(threadId: string, root: TurnLite, t: TurnLite, texts: string[], grader: () => Promise<Grader | null>) {
+  const g = await grader().catch(() => null);
+  if (!g) return { verdicts: null, why: "no grader (the ChatGPT plan or an OpenRouter key)", by: "", evidence: "", proof: null };
+  const chain = root.id === t.id ? [t.id] : [root.id, ...all<{ id: string }>("SELECT id FROM turns WHERE thread_id=? AND trigger='check' AND started_at>? ORDER BY started_at", threadId, root.started_at).map((r) => r.id)];
+  const ev = gatherEvidence(threadId, chain, t.bot_id, requestOf(root));
+  let grade: Grade | null = null, err = "";
+  try { for (let i = 0; i < 2 && !grade; i++) grade = parseGrade(await g.ask(GRADER_PROMPT, `## Criteria\n${texts.map((c, i) => `${i + 1}. ${c}`).join("\n")}\n\n${ev.text}`, ev.image), texts); }
+  catch (e: any) { err = String(e.message || e).slice(0, 120); } finally { g.close(); }
+  if (!grade) return { verdicts: null, why: err ? `the grader failed (${err})` : "the grader's answer wasn't usable", by: g.by, evidence: "", proof: null };
+  return { verdicts: grade.criteria, why: "", by: g.by, evidence: grade.evidence, proof: ev.proof };
+}
+
+/** Checks a finished run. Returns what happened: skipped | unchecked | passed | retrying | failed. The grader, the command
+ * runner and the gate's classifier are injectable for tests. Runs after finishTurn, so the thread is idle by now. */
+export async function doneCheck(threadId: string, turnId: string, { grader = openGrader, runCheck = runOnComputer, classify = classifyCheck }: { grader?: () => Promise<Grader | null>; runCheck?: RunCheck; classify?: Classify } = {}) {
   const t = one<TurnLite>(`${TURN} WHERE id=?`, turnId);
   // Work asked by another member is judged by the one that asked: its answer has already gone back when this runs.
   if (!t || t.status !== "completed" || NOT_GRADED.has(t.trigger) || getSetting("donecheck", "1") !== "1") return "skipped";
   const root = t.trigger === "check" ? openRetry(threadId) : t;
   if (!root) return "skipped";
-  const rg = gradeOf(root), given = json<string[]>(root.criteria, []);
-  const chain = root.id === t.id ? [t.id] : [root.id, ...all<{ id: string }>("SELECT id FROM turns WHERE thread_id=? AND trigger='check' AND started_at>? ORDER BY started_at", threadId, root.started_at).map((r) => r.id)];
-  const ev = gatherEvidence(threadId, chain, t.bot_id, requestOf(root));
-  // A scheduled run that found nothing, or a chat-only run without criteria, has nothing to check.
-  const said = String(json(one<{ data: string }>("SELECT data FROM events WHERE thread_id=? AND turn_id=? AND kind='agent' ORDER BY id DESC LIMIT 1", threadId, t.id)?.data, {}).text || "");
-  if (!given.length && (!ev.worked || /^\s*QUIET\b/.test(said))) return "skipped";
-  const unchecked = (why: string) => {
-    setGrade(t.id, { status: "unchecked", why, at: now() });
-    if (given.length) addEvent(threadId, t.id, "check", { status: "unchecked", why });
-    return "unchecked";
-  };
-  const g = await grader().catch(() => null);
-  if (!g) return unchecked("no grader: the ChatGPT plan or an OpenRouter key is needed");
-  let grade: Grade | null = null, err = "";
-  try { for (let i = 0; i < 2 && !grade; i++) grade = parseGrade(await g.ask(GRADER_PROMPT, `## Criteria\n${given.length ? given.map((c, i) => `${i + 1}. ${c}`).join("\n") : "(none given: write them from the request)"}\n\n${ev.text}`, ev.image), given); }
-  catch (e: any) { err = String(e.message || e).slice(0, 120); } finally { g.close(); }
-  if (!grade) return unchecked(err ? `the grader failed: ${err}` : "the grader's reply wasn't valid");
-  // Criteria the grader wrote stay the task's criteria, so every retry is judged against the same list.
-  if (!given.length) run("UPDATE turns SET criteria=? WHERE id=?", JSON.stringify(grade.criteria.map((c) => c.text)), root.id);
-  const attempt = root.id === t.id ? 0 : Number(rg.attempt) || 0, base = { criteria: grade.criteria, by: g.by, at: now(), proof: ev.proof, attempt };
-  if (grade.passed) {
-    setGrade(t.id, { ...base, status: "passed", evidence: grade.evidence });
-    if (root.id !== t.id) setGrade(root.id, { ...rg, status: "passed", passedIn: t.id });
-    addEvent(threadId, t.id, "check", { status: "passed", evidence: grade.evidence, n: grade.criteria.length, proof: ev.proof, attempt, by: g.by });
-    return "passed";
+  const given = criteriaOf(root);
+  if (!given.length || (root.trigger === "schedule" && !scheduleGrades(threadId))) return "skipped";
+  const rg = gradeOf(root), attempt = root.id === t.id ? 0 : Number(rg.attempt) || 0;
+  const results: CheckCriterion[] = [];
+  // One at a time: they share the member's computer, and the kill switch is read before each.
+  for (const c of given) results.push(c.check ? await checkOne(c, t.bot_id, threadId, runCheck, classify) : { text: c.text, verdict: "unknown", why: "" });
+  const open = given.flatMap((c, i) => (c.check ? [] : [i]));
+  let by = given.length > open.length ? "checks" : "", evidence = "", proof: Evidence["proof"] = null;
+  if (open.length) {
+    const r = getSetting("paused") === "1" ? { verdicts: null, why: "the crew is paused", by: "", evidence: "", proof: null } : await gradeRest(threadId, root, t, open.map((i) => given[i].text), grader);
+    open.forEach((i, k) => { results[i] = r.verdicts?.[k] ?? { text: given[i].text, verdict: "unknown", why: `not checked: ${r.why}` }; });
+    if (r.by) by = by ? `${by} + ${r.by}` : r.by;
+    ({ evidence, proof } = r);
   }
-  if (root.id !== t.id) setGrade(t.id, { ...base, status: "failed", headline: grade.headline });
+  const fails = results.filter((c) => c.verdict === "fail"), base = { criteria: results, by, at: now(), proof, attempt };
+  const close = (status: string, extra: object = {}) => {
+    setGrade(t.id, { ...base, status, ...extra });
+    if (root.id !== t.id) setGrade(root.id, { ...rg, status, criteria: results, in: t.id });
+  };
+  if (!fails.length) {
+    const status = results.every((c) => c.verdict === "pass") ? "passed" : "unchecked";
+    close(status, { evidence });
+    addEvent(threadId, t.id, "check", { status, criteria: results, evidence, n: results.length, proof, attempt, by });
+    return status;
+  }
+  const headline = `${fails[0].text}${fails[0].why ? ` · ${fails[0].why}` : ""}`;
+  if (root.id !== t.id) setGrade(t.id, { ...base, status: "failed" });
   if (attempt < MAX_RETRIES) {
-    const next = attempt + 1;
-    setGrade(root.id, { ...(root.id === t.id ? base : rg), status: "retrying", attempt: next, headline: grade.headline, criteria: grade.criteria, fix: grade.fix });
-    addEvent(threadId, t.id, "check", { status: "retrying", attempt: next, of: MAX_RETRIES, headline: grade.headline, criteria: grade.criteria });
-    enqueue(threadId, { text: retryPrompt(grade, next), attachments: [], trigger: "check", display: `Done-check · couldn't confirm ${grade.headline}` });
+    setGrade(root.id, { ...(root.id === t.id ? base : rg), status: "retrying", attempt: attempt + 1, criteria: results });
+    addEvent(threadId, t.id, "check", { status: "retrying", attempt: attempt + 1, of: MAX_RETRIES, headline, criteria: results });
+    enqueue(threadId, { text: retryPrompt(results), attachments: [], trigger: "check", display: `Done-check · not confirmed: ${fails[0].text}` });
     await startQueued(threadId);
     return "retrying";
   }
-  setGrade(root.id, { ...(root.id === t.id ? base : rg), status: "failed", headline: grade.headline, criteria: grade.criteria, fix: grade.fix });
+  // Not a pit stop: nothing waits on the driver. The note offers Send back (sendBack) and the outputs.
+  setGrade(root.id, { ...(root.id === t.id ? base : rg), status: "failed", criteria: results, headline });
   audit("system", "donecheck.failed", { threadId, turnId: t.id, root: root.id, attempts: attempt });
-  // Not awaited: the driver may take days. Its decision lands in applyCheckDecision (pitstops.ts decide).
-  void pitStop({ botId: t.bot_id, threadId, kind: "check", effect: "check", title: `Couldn't confirm ${String(grade.headline || "").replace(/^couldn'?t confirm:?\s*/i, "")}`,
-    detail: { criteria: grade.criteria, fix: grade.fix, attempts: attempt, turnId: t.id, root: root.id, proof: ev.proof }, expiresMin: 7 * 24 * 60 });
+  addEvent(threadId, t.id, "check", { status: "failed", root: root.id, headline, criteria: results, attempt, by, proof });
   return "failed";
 }
 
-/** The driver's answer to a "Couldn't confirm" pit stop: Accept as is (approve once) or Try again (approve, scope retry). */
+/** The driver's "Send back" on a "Not confirmed" note: one more try with what failed; a fail after it is a note again. */
+export function sendBack(turnId: string) {
+  const root = one<TurnLite>(`${TURN} WHERE id=?`, turnId), g = gradeOf(root);
+  if (!root || g.status !== "failed") return { ok: false, text: root ? "Already sent back, or it passed since." : "No such run." };
+  setGrade(root.id, { ...g, status: "retrying", attempt: MAX_RETRIES, sentBackAt: now() });
+  enqueue(root.thread_id, { text: retryPrompt(g.criteria || []), attachments: [], trigger: "check", display: "Done-check · sent back" });
+  audit("driver", "donecheck.sent_back", { threadId: root.thread_id, turnId });
+  void startQueued(root.thread_id);
+  return { ok: true, text: "Sent back" };
+}
+
+/** The driver's answer to an older "Couldn't confirm" pit stop (they're no longer opened): Accept as is (approve once)
+ * or Try again (approve, scope retry). */
 export function applyCheckDecision(ps: PitstopRow, status: string, scope: string) {
   const d = json<Record<string, any>>(ps.detail, {}), root = one<TurnLite>(`${TURN} WHERE id=?`, String(d.root || ""));
   if (root && status === "approved" && scope === "retry" && ps.thread_id) {
-    // One more try: a failure after it comes straight back here.
     const g = gradeOf(root);
     setGrade(root.id, { ...g, status: "retrying", attempt: MAX_RETRIES });
-    enqueue(ps.thread_id, { text: retryPrompt({ criteria: g.criteria || d.criteria || [], fix: g.fix || d.fix || "", headline: g.headline || ps.title.replace(/^Couldn't confirm /, "") }, MAX_RETRIES), attachments: [], trigger: "check", display: "Done-check · trying again" });
+    enqueue(ps.thread_id, { text: retryPrompt(g.criteria || d.criteria || []), attachments: [], trigger: "check", display: "Done-check · trying again" });
     startQueued(ps.thread_id);
   } else if (root && status === "approved") {
     setGrade(root.id, { ...gradeOf(root), status: "accepted", acceptedAt: now() });

@@ -7,6 +7,12 @@
 .tnote.bad{color:var(--soft-bad)}
 .tnote.sub{padding-left:22px;margin-top:-8px}
 .tnote code.ic{font:12px var(--font-data)}
+/* A done-check's proof under its note, aligned with the note's text: each criterion, its command, that command's output. */
+.chk-d{margin:-8px 0 0 62px;max-width:698px;display:flex;flex-direction:column;gap:8px;font:400 12.5px/1.45 var(--font-body);color:var(--ink-3)}
+.chk-c{display:flex;flex-direction:column;gap:3px;min-width:0}
+.chk-c.fail>span:first-child{color:var(--soft-bad)}
+.chk-c code{font:12px var(--font-data);color:var(--ink-2);overflow-wrap:anywhere}
+.chk-c pre{margin:0;padding:6px 8px;max-height:160px;overflow:auto;border-radius:8px;background:var(--surface);border:1px solid var(--line);font:11.5px/1.4 var(--font-data);color:var(--ink-2);white-space:pre-wrap;overflow-wrap:anywhere}
 .threadpage .lnk{display:inline;padding:0;border:0;background:none;font:inherit;color:var(--ink-2);text-decoration:underline;text-decoration-color:var(--line-2);text-underline-offset:3px;cursor:pointer}
 .threadpage .lnk:hover{color:var(--ink);text-decoration-color:var(--ink-3)}
 .threadpage .lnk:disabled{color:var(--ink-3);cursor:default}
@@ -52,4 +58,4 @@
 .cmdout pre{margin:0;font:inherit;white-space:pre-wrap;overflow-wrap:anywhere;max-height:420px;overflow:auto}
 .cmdout pre.bad{color:var(--soft-bad)}
 
-@media (max-width:640px){.tnote{margin-left:0}.tnote.sub{padding-left:22px}.cmdfind{width:auto}}
+@media (max-width:640px){.tnote{margin-left:0}.tnote.sub{padding-left:22px}.chk-d{margin-left:22px}.cmdfind{width:auto}}

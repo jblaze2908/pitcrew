@@ -29,7 +29,7 @@ export interface LearnedRow { bot_id: string; pattern: string; effect: string; l
 export interface MemoryRow { id: string; bot_id: string; text: string; source: string; created_at: number; updated_at: number; forgotten_at: number | null }
 export interface ScheduleRow {
   id: string; bot_id: string; thread_id: string | null; spec: string; prompt: string;
-  next_run: number | null; last_run: number | null; enabled: number; created_at: number; hook_secret?: string | null; check_cmd?: string | null; check_last?: string | null;
+  next_run: number | null; last_run: number | null; enabled: number; created_at: number; hook_secret?: string | null; check_cmd?: string | null; check_last?: string | null; grade?: number;
   /** A short name for the Schedules page; backfilled from the prompt for older rows (runtime/schedules.ts). */
   title?: string | null;
 }

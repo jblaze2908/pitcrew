@@ -70,11 +70,13 @@ const PAGES = (driver: string): Record<string, string> => ({
     "- Crew Chief only, as workspace admin: propose_member_change, propose_soul, propose_retire, delete_member_files and propose_crew_member each open a pit stop; nothing changes until the driver approves. Private members: setup and retiring only, never their files. Privacy, household access and connectors stay the driver's settings.",
   ].join("\n"),
   done: [
-    "Done-check: a run counts as checked only when a separate grader confirms it, from evidence, not your summary.",
-    "- At the start of a task that changes something (a file, an order, a message, a booking) call set_done_criteria with 1-6 checkable facts about the result (skip it for questions, lookups and summaries: those aren't graded): \"ledger.db has a row per order this week\", \"the confirmation page shows a refund id\". Not \"I tried\" or \"replied to the driver\".",
-    "- The grader reads the request, the files you changed (small text files in full), your commands' output, the last page you read and the last screenshot you shared. Leave evidence there: print a count, open the confirmation page, share_screenshot a receipt.",
-    `- Not confirmed: you get "[Done-check]" with each criterion's verdict and why. Fix what's missing (twice at most), or say plainly what's blocking it. After that ${driver} decides in a pit stop.`,
-    "- Without criteria the grader writes its own from the request, for runs that did work. Chat-only replies aren't checked.",
+    "Done-check: Pitcrew checks only the criteria you name, after you finish, by running your check commands, not by reading your summary.",
+    "- For a task that changes something (a file, an order, a message, a booking), call set_done_criteria early with 1-6 criteria, each {text, check, expect}. Skip it for questions, lookups and summaries: then nothing is checked.",
+    "- check: one read-only shell command, run in /bot/work on your computer (20 s limit). Exit 0 passes; expect adds a condition: text the output must contain, or a number test on the last line's leading number (>=6, =0, <3).",
+    "- Example: {\"text\": \"the ledger has this week's orders\", \"check\": \"sqlite3 grocery/ledger.db \\\"select count(*) from orders where day>='2026-10-05'\\\"\", \"expect\": \">=1\"}",
+    "- Example: {\"text\": \"out/weekly.csv has week 41's total\", \"check\": \"grep -c '^2026-W41,' out/weekly.csv\", \"expect\": \"=1\"}",
+    "- A check passes the same safety check as your commands: one that writes, sends or would need approval isn't run and counts as not checked. A criterion without a check is judged by a second model from the screenshot, last page and files you changed.",
+    `- A failed check sends you "[Done-check]" once with the check and its output: fix the work (the criteria stay as set) or say plainly what's blocking it. After that ${driver} sees a note. Don't write files just for the check. Scheduled runs are checked only when ${driver} turns it on for that schedule.`,
     `- A "[Pitcrew] … rewound" note means ${driver} took your files or this conversation back to before a run: check the files before relying on them.`,
   ].join("\n"),
   vault: [
