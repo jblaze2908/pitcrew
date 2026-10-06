@@ -4,6 +4,7 @@
 // schedule runs are listed but never unread: nothing happened worth a look.
 import { all, run, now, json, marks } from "../db.js";
 import type { Inbox, InboxItem } from "../../shared/types.js";
+import { unmark } from "./util.js";
 
 export const INBOX_DAYS = 7, INBOX_SCAN = 80, READ_KEEP = 8;
 type Row = { turn_id: string; thread_id: string; bot_id: string; status: string; trigger: string; error: string | null; ended_at: number; title: string; origin: string | null;
@@ -14,7 +15,7 @@ export const markSeen = (threadId: string, at = now()) => run("UPDATE threads SE
 /** Mark all read: every thread seen now. One UPDATE over the threads table (hundreds of rows). */
 export const markAllSeen = (at = now()) => Number(run("UPDATE threads SET seen_at=? WHERE seen_at IS NULL OR seen_at<?", at, at).changes);
 
-const firstLine = (s: unknown) => String(s || "").replace(/[*_`#>]+|\[([^\]]*)\]\([^)]*\)/g, "$1").split("\n").map((l) => l.trim()).find(Boolean)?.slice(0, 240) || "";
+const firstLine = (s: unknown) => unmark(s).split("\n").map((l) => l.trim()).find(Boolean)?.slice(0, 240) || "";
 
 /** Unread runs (all of them, up to INBOX_SCAN) plus the READ_KEEP newest read ones, newest first. Retros are Pitcrew's
  *  housekeeping and interrupted runs were stopped by the driver, so neither is listed. Per call (each Home render and

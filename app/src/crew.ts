@@ -1,6 +1,6 @@
 // Crew members: the Crew Chief is built in; everyone else is hired through a HIRE pit stop.
 // Personality is voice only: it never touches permissions, caps or jev.
-import { one, all, run, now, uid, json, getSetting, setSetting, audit } from "./db.js";
+import { one, all, run, now, uid, json, getSetting, setSetting, audit, driverName } from "./db.js";
 import { DEFAULT_POLICY } from "./jev.js";
 import { DEFAULT_MODEL } from "./providers.js";
 import { DEFAULT_IMAGE_MODEL } from "./images.js";
@@ -153,7 +153,7 @@ export const soulOf = (b: Pick<Bot, "personality"> & Partial<Bot>) => (b.soul?.t
 // skills: the member's own skill index (runtime/skills.ts skillIndex); unseen: changelog lines it hasn't read. Both are
 // built at thread start, the only time instructions reach Codex.
 export function instructions(b: Pick<Bot, "name" | "personality"> & Partial<Bot>, memories: { id: string; text: string }[], engram: EngramContext | null = null, skills = "", unseen = 0) {
-  const driver = getSetting("driver_name", "the driver");
+  const driver = driverName();
   const rules = String(b.house_rules || "").split("\n").map((l) => l.trim()).filter(Boolean);
   return [
     harnessCore(driver),

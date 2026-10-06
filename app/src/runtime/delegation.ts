@@ -1,7 +1,7 @@
 // Delegation: the Crew Chief asks another member and waits for the answer. The member works in its own thread under
 // its own policy, cap and computer; none of the Chief's authority travels with the question. One level deep: only the
 // Chief has the tool.
-import { run, now, uid, audit, getSetting } from "../db.js";
+import { run, now, uid, audit, driverName } from "../db.js";
 import { listBots } from "../crew.js";
 import type { ToolResult } from "../shots.js";
 import type { Bot } from "../../shared/types.js";
@@ -17,7 +17,7 @@ export function findMember(q: unknown, exceptId: string) {
   return crew.find((x) => x.id === q) || crew.find((x) => x.name.toLowerCase() === s) || crew.find((x) => s && x.name.toLowerCase().startsWith(s)) || null;
 }
 export async function askCrew(from: Bot, threadId: string, a: Record<string, any>): Promise<ToolResult> {
-  const driver = getSetting("driver_name", "the driver");
+  const driver = driverName();
   if (from.kind !== "chief") return say("Only the Crew Chief can ask other crew members.", false);
   const to = findMember(a.member, from.id);
   if (!to) return say(`No crew member called "${short(a.member, 60)}". Your crew: ${listBots().filter((x) => x.id !== from.id).map((x) => x.name).join(", ")}.`, false);

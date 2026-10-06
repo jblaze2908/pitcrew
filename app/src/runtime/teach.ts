@@ -7,7 +7,7 @@
 // line per driver action.
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { one, run, getSetting } from "../db.js";
+import { one, run, driverName } from "../db.js";
 import { getBot } from "../crew.js";
 import { active } from "./state.js";
 import { getThread, setThreadStatus } from "./threads.js";
@@ -232,7 +232,7 @@ const appendCarry = (threadId: string, note: string) => { const c = getThread(th
  * driver gets "Save as skill?" in that thread. A yes sends the member the steps to write up; either way they're dropped. */
 export function deliverRecording(botId: string, r: Recording | null) {
   if (!r?.steps.length) return null;
-  const driver = getSetting("driver_name", "the driver"), note = teachNote(driver, r);
+  const driver = driverName(), note = teachNote(driver, r);
   // A retro's fork is no place for it: the thread would never hear it.
   const running = [...active.entries()].filter(([tid, a]) => getThread(tid)?.bot_id === botId && !a.fork).map(([tid]) => tid);
   for (const tid of running) steerNote(tid, note).catch(() => appendCarry(tid, `[Pitcrew] ${note}`));

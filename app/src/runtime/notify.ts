@@ -7,7 +7,7 @@ import { active, byCodex, items, liveCommands, OUT_CAP, shellVerdicts, usage } f
 import { addEvent } from "./threads.js";
 import { finishTurn } from "./turns.js";
 import { subtract } from "./spend.js";
-import { short, summariseArgs, debugArgs } from "./util.js";
+import { short, summariseArgs, debugArgs, bareCommand } from "./util.js";
 import { connName } from "../engram.js";
 import { scanScripts } from "./scripts.js";
 import { engramUntrusted, taint } from "./taint.js";
@@ -18,7 +18,7 @@ import { startPainting, endPainting } from "./painting.js";
 type Item = Record<string, any>;
 function toolTitle(it: Item) {
   switch (it.type) {
-    case "commandExecution": return `$ ${short(String(it.command || "").replace(/^\/bin\/(ba)?sh -l?c /, ""), 200)}`;
+    case "commandExecution": return `$ ${short(bareCommand(it.command), 200)}`;
     case "mcpToolCall": return `${it.server === "browser" ? it.tool.replace(/^browser_/, "") : `${it.server}.${it.tool}`} ${short(summariseArgs(it.arguments), 140)}`;
     case "dynamicToolCall": return `${it.tool}`;
     case "fileChange": return `Edited ${(it.changes || []).map((c) => c.path).join(", ").slice(0, 200)}`;
@@ -54,7 +54,7 @@ export function onNotify(c: Brain, method: string, p: Record<string, any>) {
     case "item/started": {
       const it = p.item; items.set(it.id, it);
       if (it.type === "commandExecution" && !fork) {
-        const command = String(it.command || "").replace(/^\/bin\/(ba)?sh -l?c /, "").slice(0, 8000), cwd = it.cwd ?? null;
+        const command = bareCommand(it.command).slice(0, 8000), cwd = it.cwd ?? null;
         const gate = shellVerdicts.get(`${threadId}\n${it.command}`) || null;
         liveCommands.set(it.id, { itemId: it.id, threadId, command, cwd, startedAt: Date.now(), output: "", gate });
         bus.emit("output", { threadId, itemId: it.id, command, cwd, gate });

@@ -67,3 +67,14 @@ test("/api/threads: each row's snippet is its last message, past later tool even
   const page = await get(`/api/threads?bot=${m.id}`), row = [...page.pinned, ...page.rows].find((r) => r.id === "th_ls");
   assert.equal(row.snippet, "done it");
 });
+
+test("India-time day and week starts the totals use, and the clock notes show", async () => {
+  const U = await import("../app/dist/src/runtime/util.js"), Sp = await import("../app/dist/src/runtime/spend.js");
+  const t = Date.parse("2026-10-07T20:00:00Z"); // Thu 8 Oct, 01:30 IST
+  assert.equal(U.istDayAt(t), Date.parse("2026-10-07T18:30:00Z"));
+  assert.equal(U.istDayAt(t, 9, 15), Date.parse("2026-10-08T03:45:00Z"));
+  assert.equal(Sp.weekStart(t), Date.parse("2026-10-04T18:30:00Z"), "Monday 5 Oct, 00:00 IST");
+  assert.equal(Sp.weekStart(Date.parse("2026-10-04T18:30:00Z")), Date.parse("2026-10-04T18:30:00Z"), "Monday midnight starts its own week");
+  assert.equal(U.istClock(t), "01:30");
+  assert.equal(U.istStamp(t), "2026-10-08 01:30");
+});

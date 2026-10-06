@@ -1,6 +1,6 @@
 // Pitcrew's own dynamic tools: surfaces, shared screenshots, memory, schedules, finding threads, hiring, and the
 // Chief's delegation and plans. Browser and pixel tools go on to runtimeTool.
-import { one, run, now, uid, audit, getSetting } from "../db.js";
+import { one, run, now, uid, audit, driverName } from "../db.js";
 import { freeHue, getBot, listBots, normaliseSpec } from "../crew.js";
 import { validateSurface } from "../surfaces.js";
 import { resolveSurface, ledgerPath, listLedgers, mayRead, runQueries } from "../ledger.js";
@@ -20,7 +20,7 @@ import { isEventSpec } from "./hooks.js";
 import { askCrew } from "./delegation.js";
 import { planTool } from "./plans.js";
 import { runtimeTool, type ToolCall } from "./browser.js";
-import { IST, say } from "./util.js";
+import { istStamp, say } from "./util.js";
 import { remember, forget, publishFile } from "../engram.js";
 import { noteLearned } from "./learned.js";
 import { memberLinked } from "../engramStore.js";
@@ -29,7 +29,7 @@ import { startPainting, endPainting } from "./painting.js";
 import { weekSpend } from "./spend.js";
 import { setDoneCriteria } from "./donecheck.js";
 
-const ist = (t: number | null) => (t ? new Date(t + IST).toISOString().slice(0, 16).replace("T", " ") : "—");
+const ist = (t: number | null) => (t ? istStamp(t) : "—");
 
 // Agent memory's cap (chars across a member's memories): small enough to sit in every thread's instructions (~750
 // tokens, estimate), so it gets rewritten instead of growing.
@@ -97,8 +97,8 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
           const r = await remember(b, text, { id: a.id ? String(a.id) : null, threadId, validUntil: until, review: true });
           noteLearned(turnId, threadId, b.id, r.id, text, r.status !== "accepted" ? "held" : r.known ? "known" : r.replaced ? "replaced" : "saved");
           if (r.status === "accepted") return say(r.known ? `Engram already knows this [${r.id}].` : `Saved in Engram as [${r.id}].`);
-          addEvent(threadId, turnId, "system", { text: `Sent to Engram for ${getSetting("driver_name", "the driver")}'s review: ${text}` });
-          return say(`Sent to Engram for ${getSetting("driver_name", "the driver")}'s review${r.reasons.length ? ` (${r.reasons.join("; ")})` : ""}. It isn't shared until they accept it.`);
+          addEvent(threadId, turnId, "system", { text: `Sent to Engram for ${driverName()}'s review: ${text}` });
+          return say(`Sent to Engram for ${driverName()}'s review${r.reasons.length ? ` (${r.reasons.join("; ")})` : ""}. It isn't shared until they accept it.`);
         } catch (e: any) { return say(`Couldn't send it to Engram: ${e.message}`, false); }
       }
       // Agent memory: the member's own, in Pitcrew, written freely. The cap makes it consolidate instead of growing.
@@ -159,7 +159,7 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
         const title = String(a.title || String(a.path || "").split("/").pop());
         addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Published “${title}”${r.version > 1 ? ` (version ${r.version})` : ""}: ${r.url}`, artifact: { id: r.id, title, url: r.url, public_url: r.public_url, version: r.version } });
         // One link per artifact (Engram): sharing changes who may open it, never the URL.
-        const driver = getSetting("driver_name", "the driver");
+        const driver = driverName();
         const who = r.public_url ? "anyone with the link can open it" : r.status === "share_pending" ? `only ${driver} until they approve sharing it in Pit stops` : `only ${driver} can open it`;
         return say(`Published as ${r.id}, version ${r.version}. Link (${who}): ${r.url} To update it, publish again with id ${r.id}.`);
       } catch (e: any) { return say(`Couldn't publish: ${e.message}`, false); }
@@ -178,7 +178,7 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
         addEvent(threadId, turn?.turnId, "image", { botId: b.id, paths: r.paths, ids, parentId, caption, model: r.model, cost: r.cost, paintingId: pid, ...(r.pasted ? { pasted: r.pasted } : {}), ...(edit ? { from: a.images.map(String).slice(0, 16) } : {}) });
         audit("crew", "image.generated", { botId: b.id, threadId, model: r.model, n: r.paths.length, cost: r.cost, edit });
         const kept = !r.pasted ? "" : r.pasted.ok ? " Everything outside the mask is unchanged." : ` The rest of the image could not be kept as it was (${r.pasted.why}); this is the model's whole version, so check it.`;
-        return say(`${kept.trim() ? `${kept.trim()} ` : ""}Saved ${r.paths.map((p) => `/bot/work/${p}`).join(", ")} (${r.model}${r.cost != null ? `, $${r.cost.toFixed(3)}` : ""}); ${getSetting("driver_name", "the driver")} sees ${r.paths.length > 1 ? "them" : "it"} in this chat. Check with view_image before calling it done.`);
+        return say(`${kept.trim() ? `${kept.trim()} ` : ""}Saved ${r.paths.map((p) => `/bot/work/${p}`).join(", ")} (${r.model}${r.cost != null ? `, $${r.cost.toFixed(3)}` : ""}); ${driverName()} sees ${r.paths.length > 1 ? "them" : "it"} in this chat. Check with view_image before calling it done.`);
       } catch (e: any) { endPainting(threadId, pid); return say(e.message, false); }
     }
     case "query_ledger": {
@@ -205,14 +205,14 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
       const pr = soulProposal(String(a.member || ""), String(a.soul || ""), String(a.why || ""));
       if ("error" in pr) return say(pr.error!, false);
       const decision = await pitStop({ botId: b.id, threadId, kind: "soul", effect: "soul", title: `New SOUL for ${pr.bot!.name}`, detail: pr.detail! });
-      return say(decision === "approved" ? `${pr.bot!.name}'s SOUL is updated; its new threads use it.` : decision === "expired" ? `${getSetting("driver_name", "the driver")} didn't answer; the SOUL is unchanged and the proposal expired.` : `${getSetting("driver_name", "the driver")} kept the current SOUL.`, decision === "approved");
+      return say(decision === "approved" ? `${pr.bot!.name}'s SOUL is updated; its new threads use it.` : decision === "expired" ? `${driverName()} didn't answer; the SOUL is unchanged and the proposal expired.` : `${driverName()} kept the current SOUL.`, decision === "approved");
     }
     case "propose_retire": {
       if (b.kind !== "chief") return say("Only the Crew Chief manages the crew.", false);
       const pr = retireProposal(String(a.member || ""), String(a.why || ""));
       if ("error" in pr) return say(pr.error!, false);
       const decision = await pitStop({ botId: b.id, threadId, kind: "retire", effect: "retire", title: `Retire ${pr.bot!.name}`, detail: pr.detail! });
-      const driver = getSetting("driver_name", "the driver");
+      const driver = driverName();
       return say(decision === "approved" ? `${pr.bot!.name} is retired; its schedules are off. Your crew list updates in your next thread.` : decision === "expired" ? `${driver} didn't answer; ${pr.bot!.name} stays and the proposal expired.` : `${driver} kept ${pr.bot!.name}.`, decision === "approved");
     }
     case "propose_member_change": {
@@ -221,7 +221,7 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
       if ("error" in pr) return say(pr.error!, false);
       const fields = pr.detail!.diff.map((d) => d.field);
       const decision = await pitStop({ botId: b.id, threadId, kind: "member", effect: "member", title: `Change ${pr.bot!.name}: ${fields.join(", ")}`, detail: pr.detail! });
-      const driver = getSetting("driver_name", "the driver");
+      const driver = driverName();
       return say(decision === "approved" ? `${pr.bot!.name} is updated (${fields.join(", ")}); its next run uses it.` : decision === "expired" ? `${driver} didn't answer; nothing changed and the proposal expired.` : `${driver} kept ${pr.bot!.name} as it was.`, decision === "approved");
     }
     case "member_files": {
@@ -235,7 +235,7 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
       if ("error" in pr) return say(pr.error!, false);
       const n = pr.detail!.paths.length;
       const decision = await pitStop({ botId: b.id, threadId, kind: "files", effect: "delete", title: `Delete ${n} item${n === 1 ? "" : "s"} from ${pr.bot!.name}'s files`, detail: pr.detail! });
-      const driver = getSetting("driver_name", "the driver");
+      const driver = driverName();
       return say(decision === "approved" ? `Deleted from ${pr.bot!.name}'s workspace: ${pr.detail!.paths.map((p) => p.path).join(", ")}.` : decision === "expired" ? `${driver} didn't answer; nothing was deleted and the proposal expired.` : `${driver} kept the files.`, decision === "approved");
     }
     case "triage_suggestion": {
@@ -248,21 +248,21 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
       const pr = memberChange(b.name, { house_rules: [String(getBot(b.id)?.house_rules || "").trim(), `- ${rule.replace(/^[-*•]\s*/, "")}`].filter(Boolean).join("\n") }, String(a.why || ""));
       if ("error" in pr) return say(pr.error!, false);
       const decision = await pitStop({ botId: b.id, threadId, kind: "member", effect: "member", title: `House rule for ${b.name}: ${rule}`, detail: pr.detail! });
-      const driver = getSetting("driver_name", "the driver");
+      const driver = driverName();
       return say(decision === "approved" ? `Saved. The gate holds you to it from your next action: ${rule}` : decision === "expired" ? `${driver} didn't answer; the rule wasn't saved. Follow it anyway in this thread.` : `${driver} didn't keep it as a rule.`, decision === "approved");
     }
     case "suggest_improvement": {
       const s = { area: String(a.area || "other"), title: String(a.title || "").trim(), evidence: String(a.evidence || "").trim(), proposal: String(a.proposal || "").trim() };
       if (!s.title || !s.evidence) return say("A suggestion needs a title and the evidence (runs, numbers, what happened).", false);
       const r = suggest(b.id, threadId, s);
-      return say(r.repeat ? "Already suggested; your evidence was added to it." : `Filed as ${r.id} for ${getSetting("driver_name", "the driver")} to review.`);
+      return say(r.repeat ? "Already suggested; your evidence was added to it." : `Filed as ${r.id} for ${driverName()} to review.`);
     }
     case "set_done_criteria": {
       const r = setDoneCriteria(threadId, a.criteria);
       return say(r.text, r.ok);
     }
     case "harness_help": {
-      const page = harnessHelp(String(a.topic || ""), getSetting("driver_name", "the driver"));
+      const page = harnessHelp(String(a.topic || ""), driverName());
       return page ? say(page) : say(`Topics: ${HELP_TOPICS.join(", ")}.`, false);
     }
     case "whats_new": {
@@ -289,8 +289,7 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
     case "find_threads": {
       const found = findThreads(b.id, a.query, { exclude: threadId, limit: Math.min(Number(a.limit) || 8, 20) });
       if (!found.length) return say(`No other threads match "${String(a.query || "").slice(0, 80)}".`);
-      const day = (t: number) => new Date(t + IST).toISOString().slice(0, 16).replace("T", " ");
-      return say(found.map((t) => `- [${t.title}](${threadLink(t.id)}) · last active ${day(t.updated_at)} IST${t.archived ? " · archived" : ""}${t.of ? ` · matched ${t.matched}/${t.of} terms` : ""}${t.snippet ? `\n  ${t.snippet}` : ""}`).join("\n")
+      return say(found.map((t) => `- [${t.title}](${threadLink(t.id)}) · last active ${istStamp(t.updated_at)} IST${t.archived ? " · archived" : ""}${t.of ? ` · matched ${t.matched}/${t.of} terms` : ""}${t.snippet ? `\n  ${t.snippet}` : ""}`).join("\n")
         + "\n\nGive the driver the matching thread as a markdown link exactly as written above.");
     }
     case "ask_crew_member": return askCrew(b, threadId, a);
@@ -300,7 +299,7 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
       // The Chief's colour pick stands only if nobody wears it yet: a crew of one colour can't be told apart.
       const spec = { ...normaliseSpec(a), hue: freeHue(a?.hue) };
       pitStop({ botId: b.id, threadId, kind: "hire", effect: "hire", title: `Hire ${spec.name}: ${spec.job.slice(0, 120)}`, detail: { spec }, expiresMin: 7 * 24 * 60 });
-      return say(`Proposal sent. ${getSetting("driver_name", "The driver")} reviews it as a HIRE pit stop; don't create anything else for it.`);
+      return say(`Proposal sent. ${driverName("The driver")} reviews it as a HIRE pit stop; don't create anything else for it.`);
     }
     default:
       if (/^(browser|computer)_/.test(p.tool)) return runtimeTool(c, threadId, p);

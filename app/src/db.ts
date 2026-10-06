@@ -189,6 +189,8 @@ export const json = <T = any>(s: unknown, d: any = null): T => { if (s == null |
 export function getSetting(k: string, d: string): string;
 export function getSetting(k: string): string | null;
 export function getSetting(k: string, d: string | null = null) { return one<{ value: string }>("SELECT value FROM settings WHERE key=?", k)?.value ?? d; }
+/** The driver's name as the crew says it; d stands in until they set one. */
+export const driverName = (d = "the driver") => getSetting("driver_name", d);
 export const setSetting = (k: string, v: unknown) => run("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", k, String(v));
 
 export const LABEL_DAYS = 120;

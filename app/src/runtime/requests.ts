@@ -5,7 +5,7 @@ import { gate } from "./gate.js";
 import { pitStop } from "./pitstops.js";
 import { dynamicTool } from "./tools.js";
 import type { ToolCall } from "./browser.js";
-import { short, summariseArgs } from "./util.js";
+import { short, summariseArgs, bareCommand } from "./util.js";
 import { audit } from "../db.js";
 
 export async function onRequest(c: Brain, method: string, p: Record<string, any>) {
@@ -14,7 +14,7 @@ export async function onRequest(c: Brain, method: string, p: Record<string, any>
   switch (method) {
     case "item/commandExecution/requestApproval": {
       const call = { kind: "shell", command: p.command, cwd: p.cwd };
-      const ok = await gate(c, threadId, call, { kind: "command", title: `Run: ${short(String(p.command).replace(/^\/bin\/(ba)?sh -l?c /, ""), 180)}`, detail: { command: p.command, cwd: p.cwd, reason: p.reason || null } });
+      const ok = await gate(c, threadId, call, { kind: "command", title: `Run: ${short(bareCommand(p.command), 180)}`, detail: { command: p.command, cwd: p.cwd, reason: p.reason || null } });
       return { decision: ok ? "accept" : "decline" };
     }
     case "item/fileChange/requestApproval": {

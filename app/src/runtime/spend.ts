@@ -3,13 +3,12 @@ import { statSync, openSync, fstatSync, readSync, closeSync } from "node:fs";
 import { one, now } from "../db.js";
 import { usageLog, readPlanLimits } from "../computer.js";
 import { providerReady, recordChatgptLimits, chatgptLimits } from "../providers.js";
-import { IST } from "./util.js";
+import { IST, istDayAt } from "./util.js";
 import type { TokenUsage } from "./state.js";
 
 // Monday 00:00 in Asia/Kolkata.
 export function weekStart(t = now()) {
-  const d = new Date(t + IST); const dow = (d.getUTCDay() + 6) % 7;
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - dow) - IST;
+  return istDayAt(t) - ((new Date(t + IST).getUTCDay() + 6) % 7) * 86400000;
 }
 export const weekSpend = (botId: string) => one<{ s: number }>("SELECT COALESCE(SUM(cost_usd),0) s FROM turns WHERE bot_id=? AND started_at>=?", botId, weekStart())!.s;
 
