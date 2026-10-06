@@ -1,14 +1,13 @@
-// The transcript's layout: which events draw, which fold into a Steps group or a "Rewound" fold. Pure; runs per render.
+// The transcript's layout: which events draw and which fold into a Steps group or a "Rewound" fold. Pure; Thread
+// memoises it per events/context change.
 import type { ReactNode } from "react";
 import type { PitStop, ThreadEvent } from "../../../../shared/types";
 import { renderEvent, type EventCtx } from "./Events";
 
 export type Item = { key: string; el: ReactNode } | { key: string; steps: ThreadEvent[] } | { key: string; rewound: ThreadEvent[] };
 
-/** Lays events out in order. Consecutive tool calls of one run share a Steps group, and so do pit stops already decided
- * (a pending one is a card that breaks the group until it's answered). Events that draw nothing don't break a group, and
- * a plan or delegation card draws once, where it first appeared, with its newest snapshot. A run of rewound events
- * folds into one "Rewound" item (inner: laying out that fold's own contents). */
+/** One run's tool calls and decided pit stops share a Steps group (a pending pit stop breaks it); a plan, delegation or
+ *  surface draws once where it first appeared; rewound events fold into one item (inner: that fold's own contents). */
 export function layout(events: ThreadEvent[], ctx: EventCtx, inner = false): Item[] {
   const items: Item[] = [];
   const drawn = new Set<string>();

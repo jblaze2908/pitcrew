@@ -1,6 +1,5 @@
-// The front door: one box for everything. Who takes the message shows in the box before sending: a member you picked
-// (pill or @), the members you named (two or more → a plan for the Crew Chief), or the router's guess. The guess asks
-// the server 600 ms after typing stops: one jev call per pause, none when a member is picked or named.
+// The front door: who takes the message shows before sending (picked, named, or the router's guess; two or more named → a plan).
+// The guess costs one jev call per 600 ms typing pause, none when a member is picked or named.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AskResult, BotCard, RoutePick } from "../../../shared/types";
 import { api } from "../lib/api";
