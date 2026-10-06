@@ -4,6 +4,8 @@
 export type Hue = "c1" | "c2" | "c3" | "c5" | "c6";
 export type Shape = "square" | "round" | "blob";
 export type Mood = "idle" | "working" | "needs" | "done" | "failed" | "sleep";
+/** The kind of tool a running member has in flight; null while it thinks or isn't running. Faces read it (browser → browse). */
+export type ToolKind = "browser" | "computer" | "shell" | "file" | "web" | "image" | "other";
 export type ProviderId = "openrouter" | "aigateway" | "openai";
 export type Effect = "read" | "draft" | "browse" | "write_workspace" | "signin" | "install" | "send" | "pay" | "delete" | "share" | "exec_untrusted" | "hire" | "plan_limit" | "engram" | "unknown";
 export type Decision = "allow" | "ask" | "block";
@@ -34,7 +36,7 @@ export type EngramScope = "personal" | "finance" | "health";
 export interface ThreadSummary { id: string; title: string; status: ThreadStatus; created_at: number; updated_at: number; pinned: number }
 /** A crew member as /api/state shows it: the row plus live view-model fields. */
 export interface BotCard extends Bot {
-  threads: ThreadSummary[]; mood: Mood; spend: number;
+  threads: ThreadSummary[]; mood: Mood; spend: number; toolKind: ToolKind | null;
   computer: { up: boolean; desktop: boolean; startedAt: number | null; lease: boolean };
 }
 
@@ -249,7 +251,9 @@ export interface StreamEvents {
   lease: { botId: string; held: boolean };
   event: { id: number; threadId: string; turnId: string | null; kind: EventKind; data: Record<string, any>; ts: number; pitstop?: PitStop; surface?: Surface };
   delta: { threadId: string; itemId: string; text: string };
-  activity: { threadId: string; botId?: string; text: string };
+  activity: { threadId: string; botId?: string; text: string; toolKind?: ToolKind | null };
+  /** A member's in-flight tool kind changed (runtime/bus.ts setToolKind): sent to every client, only on change. */
+  tool: { threadId: string; botId: string; toolKind: ToolKind | null };
   context: { threadId: string; tokens: number; window: number };
   queue: { threadId: string; queued: QueuedItem[] };
   painting: { threadId: string; id: string; painting?: Painting; done?: boolean };

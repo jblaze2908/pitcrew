@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { BotCard, State } from "../../../shared/types";
 import { api } from "./api";
 import { GLOBAL, useLive, useResync } from "./live";
+import { expectMoment, forgetMoments, landMoments } from "./moments";
 
 interface Store {
   S: State;
@@ -24,11 +25,20 @@ export function StoreProvider({ initial, children }: { initial: State; children:
 
   const refresh = useCallback(async () => {
     const next = await api.get<State>("/api/state", { quiet: true }).catch(() => null);
-    if (next) setS(next);
+    if (next) { setS(next); landMoments(next.bots); }
   }, []);
+  const latest = useRef(S);
+  latest.current = S;
 
-  useResync(() => { refresh(); });
+  useResync(() => { forgetMoments(); refresh(); });
   useLive((e) => {
+    // A changed tool kind patches the card in place: it can change every few seconds, too often for a full /api/state.
+    if (e.type === "tool") return setS((s) => ({ ...s, bots: s.bots.map((b) => (b.id === e.data.botId ? { ...b, toolKind: e.data.toolKind } : b)) }));
+    if (e.type === "turn" && (e.data.status === "completed" || e.data.status === "failed")) expectMoment(e.data.botId, e.data.status === "completed" ? "finish" : "stumble");
+    if (e.type === "computer") {
+      const was = latest.current.bots.find((b) => b.id === e.data.botId)?.computer.up;
+      if (was !== undefined && was !== e.data.up) expectMoment(e.data.botId, e.data.up ? "wake" : "doze");
+    }
     if (!GLOBAL.has(e.type)) return;
     clearTimeout(timer.current);
     timer.current = setTimeout(refresh, 250);

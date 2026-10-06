@@ -47,7 +47,7 @@ export async function runtimeTool(br: Brain, threadId: string, p: ToolCall): Pro
   const g = kind === "browser" ? ground(snapshots.get(p.threadId), tool, args) : { grounded: pixelContext(args, snapshots.get(p.threadId)), effect: null, label: "" };
   const host = hostOf(g.grounded.page_url);
   const title = `${reading ? "read" : tool.replace(/^browser_/, "").replace(/_/g, " ")} ${short(g.label || summariseArgs(args), 140)}${host ? ` on ${host}` : ""}`.trim();
-  bus.emit("activity", { threadId, botId: b.id, text: title });
+  bus.emit("activity", { threadId, botId: b.id, text: title, toolKind: kind });
   const ok = await gate(br, threadId, { kind: "mcp", server: kind, tool, arguments: g.grounded, ...(g.effect ? { effect: g.effect } : {}) }, { kind: "mcp", title, detail: { server: kind, tool, args: g.grounded } });
   const timing: Record<string, number> = { gate: Date.now() - t0 }; // includes a lease wait and jev's remote check (p50 336 ms for browser, measured)
   if (!ok) { addEvent(threadId, turnId, "tool", { type: kind, title, ...viaScript(p), server: kind, tool, input: debugArgs(args), status: "declined", timing }); return say(takeRefusal(threadId) || "Not done: this action was declined at a pit stop. Don't retry it another way; tell the driver what didn't happen.", false); }

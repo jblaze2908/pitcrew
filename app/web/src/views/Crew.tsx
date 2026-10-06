@@ -40,7 +40,7 @@ export function Crew({ id, tab: asked, rest: given }: { id: string; tab: string;
   return (
     <div className="page mp">
       <header className="mh">
-        <Face b={b} size="lg" />
+        <Face b={b} size="lg" live />
         <div className="mh-t">
           <h1>{b.name}</h1>
           {b.personality?.role && <p className="role">{b.personality.role}</p>}

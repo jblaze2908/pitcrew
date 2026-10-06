@@ -4,20 +4,26 @@ import { errorDetail, errorLine } from "../../../shared/text";
 import type { Hue, Shape } from "../../../shared/types";
 import { cap } from "../lib/format";
 import { mdToHtml } from "../lib/md";
+import { useMoment } from "../lib/moments";
 
 type Size = "xs" | "sm" | "md" | "lg" | "xl";
 /** The colours and shapes a member's face can take (c4 is kept for signal orange). */
 export const HUES: readonly Hue[] = ["c1", "c2", "c3", "c5", "c6"];
 export const SHAPES: readonly Shape[] = ["square", "round", "blob"];
-interface Looks { hue?: string; shape?: string; mood?: string }
+interface Looks { id?: string; hue?: string; shape?: string; mood?: string; toolKind?: string | null }
 
 /** The hue token as a --hue custom property, which the app's classes read. */
 export const hueStyle = (hue: string | null | undefined, extra?: CSSProperties) => ({ "--hue": `var(--${hue || "c1"})`, ...extra }) as CSSProperties;
 
 // components.js draws a component only when it connects, so changed attributes need a fresh element: hence the keys.
-export function Face({ b, size = "sm", mood }: { b?: Looks | null; size?: Size; mood?: string }) {
-  const hue = b?.hue || "c1", shape = b?.shape || "square", m = mood || b?.mood || "idle";
-  return <pc-bot key={`${size}.${hue}.${shape}.${m}`} size={size} hue={hue} shape={shape} mood={m} />;
+/** live: a face for the member as it is now; it drives the browser (browse) and plays moments (lib/moments.ts).
+ *  History rows and lists leave it off and stay still. */
+export function Face({ b, size = "sm", mood, live }: { b?: Looks | null; size?: Size; mood?: string; live?: boolean }) {
+  const hue = b?.hue || "c1", shape = b?.shape || "square";
+  let m = mood || b?.mood || "idle";
+  if (live && m === "working" && (b?.toolKind === "browser" || b?.toolKind === "computer")) m = "browse";
+  const moment = useMoment(live ? b?.id : undefined, m);
+  return <pc-bot key={`${size}.${hue}.${shape}.${m}.${moment || ""}`} size={size} hue={hue} shape={shape} mood={m} moment={moment} />;
 }
 
 export const Loader = () => <pc-loader />;

@@ -34,7 +34,7 @@ export function botCard(b: Bot, pending: { bot_id: string; kind?: string }[], li
   const threads = all<ThreadSummary>(`SELECT id,replace(title,' · pinned','') AS title,status,created_at,updated_at,pinned FROM threads WHERE bot_id=? AND archived=0 AND test=0 AND (origin IS NULL OR json_extract(origin,'$.kind') IS NOT 'schedule'
     OR status IN ('running','needs') OR EXISTS (SELECT 1 FROM schedule_runs r WHERE r.thread_id=threads.id AND r.status IN ('reported','failed') AND r.fired_at>?)) ORDER BY pinned DESC, updated_at DESC LIMIT ?`, b.id, Date.now() - 48 * 3600000, limit);
   const c = allComputers().find((x) => x.bot.id === b.id), br = allBrains().find((x) => x.bot.id === b.id);
-  return { ...b, threads: threads.map((t) => ({ ...t, title: shownTitle(t.title) })), mood: mood(b, threads, pending, !!c?.up || !!br?.up, stats.last), spend: stats.spend, computer: { up: !!c?.up, desktop: !!c?.desktopUp, startedAt: c?.startedAt ?? null, lease: R.leaseHeld(b.id) } };
+  return { ...b, threads: threads.map((t) => ({ ...t, title: shownTitle(t.title) })), mood: mood(b, threads, pending, !!c?.up || !!br?.up, stats.last), spend: stats.spend, toolKind: R.toolKindOf(b.id), computer: { up: !!c?.up, desktop: !!c?.desktopUp, startedAt: c?.startedAt ?? null, lease: R.leaseHeld(b.id) } };
 }
 export const pitRow = R.pitRow;
 export const LEARNED = `SELECT l.rowid id, l.*, ${R.LEARN_AFTER} need, b.name bot_name FROM learned l JOIN bots b ON b.id=l.bot_id`;

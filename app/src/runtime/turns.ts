@@ -8,7 +8,7 @@ import { botDir, toolManifest } from "../computer.js";
 import { providerReady, estimateCost } from "../providers.js";
 import { snapshot, changes, pruneShadow } from "../snapshot.js";
 import { doneCheck } from "./donecheck.js";
-import { bus, activityNow } from "./bus.js";
+import { bus, activityNow, setToolKind } from "./bus.js";
 import { active, byCodex, folded, turnWaiters, usage, wakeFor, type TurnEnd } from "./state.js";
 import { enqueue, peekQueued, takeQueued, requeue, queuedThreads } from "./queue.js";
 import { getThread, addEvent, setThreadStatus, nameThread } from "./threads.js";
@@ -267,6 +267,7 @@ export async function finishTurn(threadId: string, status: string, error?: strin
   if (!a) return;
   active.delete(threadId); endPaintings(threadId); activityNow.delete(threadId);
   const t = getThread(threadId)!, b = getBot(t.bot_id)!;
+  setToolKind(threadId, b.id, null);
   const u = a.total && a.base ? { input: a.total.inputTokens - a.base.inputTokens, cached: a.total.cachedInputTokens - a.base.cachedInputTokens, output: a.total.outputTokens - a.base.outputTokens } : { input: 0, cached: 0, output: 0 };
   const billed = billedUsage(b.id, a.turnId, a.usageFrom);
   if (billed) Object.assign(u, { input: billed.input, cached: billed.cached, output: billed.output });

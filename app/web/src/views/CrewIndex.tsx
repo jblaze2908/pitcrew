@@ -71,7 +71,7 @@ export function CrewIndex() {
                 const [line, tone] = status(b, S.pitstops), s = next.get(b.id), when = s?.next_run ? at(s.next_run) : null;
                 return (
                   <a key={b.id} className="crew2-row" href={`#/crew/${b.id}`}>
-                    <span className="crew2-who"><Face b={b} size="md" /><span className="col"><b>{b.name}</b><span className="small muted trunc">{jobLine(b)}</span></span></span>
+                    <span className="crew2-who"><Face b={b} size="md" live /><span className="col"><b>{b.name}</b><span className="small muted trunc">{jobLine(b)}</span></span></span>
                     <span className={`crew2-now${tone ? ` is-${tone}` : ""}`}>{line}</span>
                     <span className="crew2-next">{s && when ? <>{`${s.title || "Scheduled run"} ${when[0]} `}<span className="pc-m">{when[1]}</span></> : <span className="faint">Nothing scheduled</span>}</span>
                     <Icon name="chev" size={14} className="crew2-go" />
