@@ -2198,3 +2198,17 @@ test("done-check never auto-runs an environment dump as a check", async () => {
   run("INSERT INTO bots(id,name,created_at) VALUES('b_envchk','Envy',0)");
   for (const cmd of ["printenv", "env", "cat /proc/1/environ", "ls && printenv OPENROUTER"]) assert.notEqual((await R.classifyCheck("b_envchk", "th_none", cmd)).decision, "allow", cmd);
 });
+
+test("a retro on a fork streams no live activity, Pitcrew tools included", async () => {
+  const { onNotify } = await import("../app/dist/src/runtime/notify.js");
+  const { active, byCodex } = await import("../app/dist/src/runtime/state.js");
+  const { activityNow } = await import("../app/dist/src/runtime/bus.js");
+  const br = { bot: { id: "b_fork" } }, started = (codexId, id) => onNotify(br, "item/started", { threadId: codexId, item: { type: "dynamicToolCall", id, tool: "remember" } });
+  byCodex.set("cx_main", "th_forked"); byCodex.set("cx_fork", "th_forked"); active.set("th_forked", { turnId: "tu_f", fork: "cx_fork" });
+  started("cx_fork", "it_1");
+  assert.equal(activityNow.has("th_forked"), false, "nothing from the fork");
+  active.set("th_forked", { turnId: "tu_g" });
+  started("cx_main", "it_2");
+  assert.equal(activityNow.get("th_forked"), "remember", "the thread itself still shows it");
+  active.delete("th_forked"); byCodex.delete("cx_main"); byCodex.delete("cx_fork"); activityNow.delete("th_forked");
+});

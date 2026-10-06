@@ -17,11 +17,12 @@ const CHATGPT_MODELS = ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol",
 export const DEFAULT_MODEL: Record<ProviderId, string> = { openrouter: "anthropic/claude-sonnet-5.5", aigateway: "anthropic/claude-sonnet-5.5", openai: "gpt-6-astra" };
 const known = (p: string) => PROVIDERS[p as ProviderId] as (typeof PROVIDERS)[ProviderId] | undefined;
 
+// Runs on every /api/state: one secret read per keyed provider, one stat for the ChatGPT sign-in.
 export function providerStatus() {
   const s = {} as Record<ProviderId, ProviderStatus>;
   for (const [k, p] of Object.entries(PROVIDERS) as [ProviderId, (typeof PROVIDERS)[ProviderId]][]) {
     if (p.secret) { const m = secretMeta(p.secret); s[k] = { label: p.label, connected: !!m, updatedAt: m?.updated_at ?? null, test: lastTest[k] ?? null }; }
-    else s[k] = { label: p.label, connected: existsSync(chatgptAuthPath()), updatedAt: existsSync(chatgptAuthPath()) ? statSync(chatgptAuthPath()).mtimeMs : null, login: loginState.public() };
+    else { let at: number | null = null; try { at = statSync(chatgptAuthPath()).mtimeMs; } catch {} s[k] = { label: p.label, connected: at != null, updatedAt: at, login: loginState.public() }; }
   }
   return s;
 }
