@@ -47,7 +47,7 @@ export function CatchThePaint({ p, b }: { p: Painting; b: Bot }) {
     };
     raf = requestAnimationFrame(frame);
     return () => { cancelAnimationFrame(raf); T.removeEventListener("pointermove", onMove); T.removeEventListener("keydown", onKey); drops.forEach((d) => d.el.remove()); };
-  }, [p.id, p.palette]);
+  }, [p.id, p.palette.join()]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const what = p.n > 1 ? `${p.n} images` : "An image";
   return (

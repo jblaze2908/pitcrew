@@ -1,5 +1,6 @@
 // Image versions in one thread, rebuilt from its events: which image came from which, and which the driver kept.
 import type { ThreadEvent } from "../../../shared/types";
+import { fileUrl } from "./api";
 
 export interface Img { id: string; path: string; parentId: string | null; botId: string; caption: string; at: number; model?: string; cost?: number | null }
 export interface ImageIndex { byId: Map<string, Img>; all: Img[]; kept: Set<string>; latest: Img | null; edited: Set<string>;
@@ -27,6 +28,9 @@ export function indexImages(events: ThreadEvent[]): ImageIndex {
 }
 
 export const imgName = (p: string) => p.split("/").pop()!.replace(/\.\w+$/, "");
-export const imgSrc = (im: Pick<Img, "botId" | "path">) => `/files/${im.botId}/${im.path}?inline=1`;
-export const imgFile = (im: Pick<Img, "botId" | "path">) => `/files/${im.botId}/${im.path}`;
+export const imgFile = (im: Pick<Img, "botId" | "path">) => fileUrl(im.botId, im.path);
+export const imgSrc = (im: Pick<Img, "botId" | "path">) => `${imgFile(im)}?inline=1`;
+export const isImagePath = (p: string) => /\.(png|jpe?g|webp|gif)$/i.test(p);
+/** An uploaded attachment's name without the random prefix the upload route adds. */
+export const attachmentName = (p: string) => p.split("/").pop()!.replace(/^[a-z0-9]+-/, "");
 export const imgMeta = (im: Img) => [im.model, im.cost != null ? `$${Number(im.cost).toFixed(3)}` : null].filter(Boolean).join(" · ");

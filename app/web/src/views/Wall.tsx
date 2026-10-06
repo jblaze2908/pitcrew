@@ -53,8 +53,7 @@ export function Wall({ to, focus }: { to?: string; focus?: boolean }) {
             <div className="grid2">{notes.slice(0, 8).map((p) => <PitCard key={p.id} p={p} />)}</div></details>)}
         {!!boards.data?.length && (
           <details><summary>{`Dashboards · ${boards.data.length}`}</summary>
-            <div className="grid2">{boards.data.slice(0, 4).map((s) => <Surface key={s.id} s={s} extra={<a className="small faint" href={`#/t/${s.thread_id}`} style={{ marginLeft: "auto" }}>{s.bot_name}</a>}
-              onAction={async (action, values) => { await api.post(`/api/surfaces/${s.id}/action`, { action, values }); toast("Sent to the crew"); }} />)}</div></details>)}
+            <div className="grid2">{boards.data.slice(0, 4).map((s) => <Surface key={s.id} s={s} extra={<a className="small faint" href={`#/t/${s.thread_id}`} style={{ marginLeft: "auto" }}>{s.bot_name}</a>} />)}</div></details>)}
         {!!ideas.data?.length && (
           <details><summary>{`Crew suggestions · ${ideas.data.length}`}</summary>
             <div className="col">{ideas.data.slice(0, 8).map((i) => (

@@ -6,7 +6,7 @@ import type { RewindPlan } from "../../../../shared/types";
 import { Icon } from "../../components/Icon";
 import { BusyButton } from "../../components/ui";
 import { api } from "../../lib/api";
-import { hm } from "../../lib/format";
+import { hm, plural } from "../../lib/format";
 import { toast } from "../../lib/toast";
 
 type Mode = RewindPlan["mode"];
@@ -50,7 +50,7 @@ function RewindSheet({ turnId, mode, name, onClose, onDone }: { turnId: string; 
   useEffect(() => { api.get<RewindPlan>(`/api/turns/${turnId}/rewind?mode=${mode}`, { quiet: true }).then(setP, (e) => setError(e.message)); }, [turnId, mode]);
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; addEventListener("keydown", k); return () => removeEventListener("keydown", k); }, [onClose]);
   const label = MODES.find((m) => m.mode === mode)!.label;
-  const go = async () => { const r = await api.post<{ restored: string[]; failed: unknown[] }>(`/api/turns/${turnId}/rewind`, { mode }); toast(r.failed.length ? `Rewound; ${r.failed.length} file${r.failed.length === 1 ? "" : "s"} couldn't change back` : "Rewound"); onDone(); };
+  const go = async () => { const r = await api.post<{ restored: string[]; failed: unknown[] }>(`/api/turns/${turnId}/rewind`, { mode }); toast(r.failed.length ? `Rewound; ${plural(r.failed.length, "file")} couldn't change back` : "Rewound"); onDone(); };
   const back = p?.files.filter((f) => f.ok) || [], stuck = p?.files.filter((f) => !f.ok) || [];
   const blocked = !!p && mode !== "files" && p.rewound;
   return (
@@ -65,10 +65,10 @@ function RewindSheet({ turnId, mode, name, onClose, onDone }: { turnId: string; 
             {back.slice(0, 40).map((f) => <div key={f.path} className="fr"><span className={`k${f.kind}`}>{f.kind}</span><span className="pth">{f.path}</span><span className="hint">{HINT[f.kind]}</span></div>)}
             {back.length > 40 && <div className="fr"><span className="hint">{`and ${back.length - 40} more`}</span></div>}
             {stuck.map((f) => <div key={f.path} className="fr stuck"><span className="k">!</span><span className="pth">{f.path}</span><span className="hint">{`stays: ${f.why || "can't change back"}`}</span></div>)}
-            {(p.otherThreads > 0 || p.partial) && <div className="fr note">{[p.otherThreads ? `Includes changes from ${p.otherThreads} other thread${p.otherThreads === 1 ? "" : "s"} of ${name} since then.` : "", p.partial ? "A run changed more files than Pitcrew lists (300); some may stay." : ""].filter(Boolean).join(" ")}</div>}
+            {(p.otherThreads > 0 || p.partial) && <div className="fr note">{[p.otherThreads ? `Includes changes from ${plural(p.otherThreads, "other thread")} of ${name} since then.` : "", p.partial ? "A run changed more files than Pitcrew lists (300); some may stay." : ""].filter(Boolean).join(" ")}</div>}
           </div>}
           {mode !== "files" && <div className="rw-grp">
-            <div className="gh"><Svg d='<path d="M3 3.5h10v7H7l-3 2.5v-2.5H3z"/>' size={14} />Conversation<small>{`${p.messages} message${p.messages === 1 ? "" : "s"} hidden`}</small></div>
+            <div className="gh"><Svg d='<path d="M3 3.5h10v7H7l-3 2.5v-2.5H3z"/>' size={14} />Conversation<small>{`${plural(p.messages, "message")} hidden`}</small></div>
             <div className="fr note">{`Your message and what followed move to "Rewound": still readable, no longer in ${name}'s context.`}</div>
           </div>}
           <p className="keep">{`Can't be undone outside Pitcrew: anything the run did on a website (sent, paid, posted) stays done. ${p.websites.length ? `This run used ${p.websites.join(", ")}.` : "This run touched no websites."}`}</p>

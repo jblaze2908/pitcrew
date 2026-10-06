@@ -92,7 +92,7 @@ function BoardRow({ d, onChange }: { d: Board; onChange: () => void }) {
           <a className="small faint" href={`#/t/${d.thread_id}`}>Thread</a>
         </div>
       </div>
-      {s && <Surface s={s} onAction={async (action, values) => { await api.post(`/api/surfaces/${d.id}/action`, { action, values }); toast("Sent to the crew"); }} />}
+      {s && <Surface s={s} />}
     </div>
   );
 }

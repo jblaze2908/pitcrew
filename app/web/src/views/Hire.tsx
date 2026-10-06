@@ -5,7 +5,7 @@ import type { EngramConnection, EngramScope, Hue, PitStop, Shape } from "../../.
 import { Icon } from "../components/Icon";
 import { ModelPicker } from "../components/ModelPicker";
 import type { HireSpec } from "../components/PitCard";
-import { Face, Field, hueStyle } from "../components/ui";
+import { Face, Field, HUES, hueStyle, SHAPES } from "../components/ui";
 import { api } from "../lib/api";
 import { cap } from "../lib/format";
 import { go } from "../lib/router";
@@ -15,8 +15,6 @@ import { useFetch } from "../lib/useFetch";
 import { HouseholdBox, SCOPE_LABEL } from "./crew/ProfileTab";
 import { specWords } from "./Schedules";
 
-const HUES: Hue[] = ["c1", "c2", "c3", "c5", "c6"];
-const SHAPES: Shape[] = ["square", "round", "blob"];
 const HUE_NAME: Record<Hue, string> = { c1: "Blue", c2: "Teal", c3: "Green", c5: "Pink", c6: "Violet" };
 const DIALS = [["warmth", "Warmth", "Reserved", "Warm"], ["talk", "Talk", "Brief", "Chatty"], ["humour", "Humour", "Dry", "Playful"]] as const;
 const MAX_HABITS = 3;

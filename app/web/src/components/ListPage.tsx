@@ -47,7 +47,7 @@ export function MemberSelect({ value, onChange }: { value: string; onChange: (v:
   return <ListSelect value={value} onChange={onChange} options={opts} label="Member" />;
 }
 
-export const RANGES = [["7", "Last 7 days"], ["30", "Last 30 days"], ["90", "Last 90 days"], ["0", "All time"]] as const;
+const RANGES = [["7", "Last 7 days"], ["30", "Last 30 days"], ["90", "Last 90 days"], ["0", "All time"]] as const;
 export type Range = (typeof RANGES)[number][0];
 export const RangeSelect = ({ value, onChange }: { value: Range; onChange: (v: Range) => void }) => <ListSelect value={value} onChange={onChange} options={RANGES} label="Range" active={false} />;
 

@@ -5,13 +5,13 @@ import { toast } from "../lib/toast";
 import { useFetch } from "../lib/useFetch";
 import { BusyButton, Field, Seg } from "./ui";
 
-export function MailboxCard({ botId, name, domain, onSaved }: { botId: string; name: string; domain: string; onSaved: () => void }) {
+export function MailboxCard({ botId, name, domain }: { botId: string; name: string; domain: string }) {
   const f = useFetch(() => api.get<{ box: { handle: string; senders: string[]; others: "hold" | "drop" } | null }>(`/api/bots/${botId}/mailbox`), [botId]);
   const [handle, setHandle] = useState<string | null>(null), [senders, setSenders] = useState<string | null>(null), [others, setOthers] = useState<"hold" | "drop" | null>(null);
   if (!f.data) return null;
   const box = f.data.box, h = handle ?? box?.handle ?? name.toLowerCase().replace(/[^a-z0-9]+/g, ""), snd = senders ?? (box?.senders || []).join(", "), oth = others ?? box?.others ?? "hold";
-  const save = async () => { await api.put(`/api/bots/${botId}/mailbox`, { handle: h, senders: snd.split(/[\s,]+/).filter(Boolean), others: oth }); f.reload(); onSaved(); toast("Saved"); };
-  const off = async () => { await api.put(`/api/bots/${botId}/mailbox`, { off: true }); f.reload(); onSaved(); };
+  const save = async () => { await api.put(`/api/bots/${botId}/mailbox`, { handle: h, senders: snd.split(/[\s,]+/).filter(Boolean), others: oth }); f.reload(); toast("Saved"); };
+  const off = async () => { await api.put(`/api/bots/${botId}/mailbox`, { off: true }); f.reload(); };
   return (
     <div className="pc-card col">
       <div className="spread"><b className="pc-h3">{name}</b><span className={`pc-chip ${box ? "ok" : ""}`}>{box ? `${box.handle}@${domain}` : "No address"}</span></div>

@@ -12,16 +12,14 @@ interface Store {
   /** A member's display name, a retired one's included; never the raw id. */
   name: (id: string | null | undefined) => string;
   chief: BotCard | undefined;
-  /** The member whose thread is open, so the sidebar can mark it before /api/state knows the thread. */
-  threadBot: string | null;
-  setThreadBot: (id: string | null) => void;
+  /** A thread's title from the state's recent threads (12 a member); undefined for older ones. */
+  threadTitle: (id: string | null | undefined) => string | undefined;
 }
 
 const Ctx = createContext<Store | null>(null);
 
 export function StoreProvider({ initial, children }: { initial: State; children: ReactNode }) {
   const [S, setS] = useState(initial);
-  const [threadBot, setThreadBot] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const refresh = useCallback(async () => {
@@ -39,13 +37,15 @@ export function StoreProvider({ initial, children }: { initial: State; children:
 
   const value = useMemo<Store>(() => {
     const byId = new Map(S.bots.map((b) => [b.id, b]));
+    const titles = new Map(S.bots.flatMap((b) => b.threads.map((t) => [t.id, t.title] as const)));
     return {
-      S, setS, refresh, threadBot, setThreadBot,
+      S, setS, refresh,
       bot: (id) => (id ? byId.get(id) : undefined),
       name: (id) => (id && (byId.get(id)?.name || S.formerNames?.[id])) || "A former member",
       chief: S.bots.find((b) => b.kind === "chief"),
+      threadTitle: (id) => (id ? titles.get(id) : undefined),
     };
-  }, [S, refresh, threadBot]);
+  }, [S, refresh]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

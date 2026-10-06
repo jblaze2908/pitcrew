@@ -1,15 +1,15 @@
 // Permissions: the stop switch, the safety check, the mode new threads start in, approvals you've given, sites, the vault.
 import type { Learned, Rule, State } from "../../../../shared/types";
-import { RuleLabel } from "../../components/Approvals";
+import { RuleLabel } from "../../components/RuleLabel";
 import { VaultSettings } from "../../components/Vault";
 import { ConfirmButton, Face, Seg } from "../../components/ui";
 import { api } from "../../lib/api";
-import { plural } from "../../lib/format";
+import { dayMonth, plural } from "../../lib/format";
 import { useStore } from "../../lib/store";
 import { toast } from "../../lib/toast";
 import { useFetch } from "../../lib/useFetch";
 import { useSetting } from "./General";
-import { day, Row, Section, TabHead, Wide, useSaved } from "./kit";
+import { Row, Section, TabHead, Wide, useSaved } from "./kit";
 import { Sites } from "./Sites";
 
 type Mode = State["newThreadMode"];
@@ -85,7 +85,7 @@ function Approvals() {
       {rules.map((r) => (
         <Wide key={`r${r.id}`} className="st-member">
           <Face b={bot(r.bot_id)} size="xs" />
-          <div className="st-rl"><p className="st-l"><RuleLabel label={r.label} /></p><p className="st-h">{`${who(r.bot_id, r.bot_name)} · you chose Always on ${day(r.created_at)}`}</p></div>
+          <div className="st-rl"><p className="st-l"><RuleLabel label={r.label} /></p><p className="st-h">{`${who(r.bot_id, r.bot_name)} · you chose Always on ${dayMonth(r.created_at)}`}</p></div>
           <div className="st-ctl"><button className="st-q" onClick={async () => { await api.post(`/api/rules/${r.id}/revoke`); f.reload(); }}>Remove</button></div>
         </Wide>))}
       {taught.map((l) => {
