@@ -285,7 +285,8 @@ function SystemNote({ e, c }: { e: ThreadEvent; c: EventCtx }) {
 /** A user event that isn't the driver typing (a schedule, a resume, a retro) as a note; null for a real message. */
 function userNote(d: Record<string, any>): ReactNode {
   switch (d.via) {
-    case "check": return <Note icon="alert" bad>{said(d.display || "Done-check")}</Note>;
+    // The retry prompt itself: the done-check's own "trying again" note already says it.
+    case "check": return <></>;
     case "retro": return <Note icon="retro">{said(String(d.display || "Looked back at the run").replace(/^Retro\b/, "Looked back at the run").replace(/ · /g, ": "))}</Note>;
     case "teach": return <Note icon="mark">{said(String(d.display || "Save as skill").replace(/ · /g, ", "))}</Note>;
     case "resume": return <Note icon="restart">{/^Pitcrew restarted/.test(d.text || "") ? "Pitcrew restarted and picked up where it left off." : "The usage limit reset, so it picked up where it left off."}</Note>;
@@ -309,7 +310,8 @@ export interface EventCtx { cont?: boolean; b: Bot; fromName: string; pits: Reco
 
 /** A done-check result (runtime/donecheck.ts) as a note: checked with its proof one click away, a retry, or why not. */
 function CheckLine({ d }: { d: Record<string, any> }) {
-  if (d.status === "retrying") return <Note icon="alert" bad>{once(`The done-check couldn't confirm ${d.headline}, so it's trying again (${d.attempt} of ${d.of}).`)}</Note>;
+  // Trying again isn't a failure yet; the pit stop after the last try is.
+  if (d.status === "retrying") return <Note icon="check">{once(`The done-check couldn't confirm ${d.headline}, so it's trying again (${d.attempt} of ${d.of}).`)}</Note>;
   if (d.status !== "passed") return <Note icon="check">{said(`Not checked: ${d.why || "no grader"}`)}</Note>;
   const src = d.proof?.file ? `/shots/${d.proof.botId}/${d.proof.file}` : null;
   const how = `Graded by a second model against ${d.n} criteri${d.n === 1 ? "on" : "a"}${d.attempt ? ` after ${d.attempt} ${d.attempt === 1 ? "retry" : "retries"}` : ""}`;
@@ -326,7 +328,7 @@ export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
     // A scheduled run with nothing notable (runtime/turns.ts isQuiet): one note.
     case "agent": if (/^\s*QUIET\b/.test(d.text || "")) { const why = String(d.text).replace(/^\s*QUIET:?\s*/, "").trim(); return <Note icon="quiet">{why ? said(`Nothing new: ${why}`) : "Nothing new."}</Note>; }
       return <div className={`msg bot${c.cont ? " cont" : ""}`}>{c.cont ? <span /> : <Face b={c.b} size="sm" mood="idle" />}
-        {c.rewind?.ids.has(e.id) && e.turn_id ? <div className="reply"><Md text={d.text} /><ReplyActions text={d.text} turnId={e.turn_id} name={c.b.name} onRewound={c.rewind.onRewound} /></div> : <Md text={d.text} />}</div>;
+        {c.rewind?.ids.has(e.id) && e.turn_id ? <div className="reply"><Md text={d.text} botId={c.b.id} /><ReplyActions text={d.text} turnId={e.turn_id} name={c.b.name} onRewound={c.rewind.onRewound} /></div> : <Md text={d.text} botId={c.b.id} />}</div>;
     case "check": return <CheckLine d={d} />;
     case "shot": return <Shot e={e} b={c.b} />;
     case "image": return <Images e={e} b={c.b} c={c} />;

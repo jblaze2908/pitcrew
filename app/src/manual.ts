@@ -71,7 +71,7 @@ const PAGES = (driver: string): Record<string, string> => ({
   ].join("\n"),
   done: [
     "Done-check: a run counts as checked only when a separate grader confirms it, from evidence, not your summary.",
-    "- At the start of a task call set_done_criteria with 1-6 checkable facts about the result: \"ledger.db has a row per order this week\", \"the confirmation page shows a refund id\". Not \"I tried\" or \"replied to the driver\".",
+    "- At the start of a task that changes something (a file, an order, a message, a booking) call set_done_criteria with 1-6 checkable facts about the result (skip it for questions, lookups and summaries: those aren't graded): \"ledger.db has a row per order this week\", \"the confirmation page shows a refund id\". Not \"I tried\" or \"replied to the driver\".",
     "- The grader reads the request, the files you changed (small text files in full), your commands' output, the last page you read and the last screenshot you shared. Leave evidence there: print a count, open the confirmation page, share_screenshot a receipt.",
     `- Not confirmed: you get "[Done-check]" with each criterion's verdict and why. Fix what's missing (twice at most), or say plainly what's blocking it. After that ${driver} decides in a pit stop.`,
     "- Without criteria the grader writes its own from the request, for runs that did work. Chat-only replies aren't checked.",

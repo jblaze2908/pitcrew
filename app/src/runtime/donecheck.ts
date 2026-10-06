@@ -16,8 +16,11 @@ import { enqueue } from "./queue.js";
 import { pitStop } from "./pitstops.js";
 
 export const CRITERIA_MAX = 6, MAX_RETRIES = 2;
-const EXEC = new Set(["commandExecution", "fileChange", "browser", "computer", "mcpToolCall"]);
 const NOT_GRADED = new Set(["retro", "delegation", "plan"]);
+// Lookups (reading commands, MCP reads, opening pages) aren't graded unless the member set criteria: a grader sees only
+// clipped output, so it can't confirm an answer and sent members round in circles. Changes are graded.
+const BROWSER_ACTS = /^(click|type|fill form|select option|press key|file upload|drag|run code unsafe|evaluate|handle dialog|replay request)\b/;
+const changedSomething = (t: Record<string, any>) => t.type === "fileChange" || t.type === "computer" || (t.type === "browser" && BROWSER_ACTS.test(String(t.title || "")));
 
 /** The member's criteria as a clean list, or why they can't be used. */
 export function normCriteria(v: unknown): string[] | string {
@@ -100,7 +103,7 @@ export function gatherEvidence(threadId: string, turnIds: string[], botId: strin
   let image: string | null = null;
   if (sd?.file && /^[\w-]+\.jpg$/.test(sd.file)) { try { image = `data:image/jpeg;base64,${readFileSync(`${ROOT}/shots/${botId}/${sd.file}`).toString("base64")}`; } catch {} }
   if (image) parts.push(`## Screenshot attached: "${sd!.caption || ""}"`);
-  return { text: parts.join("\n\n").slice(0, 14000), image, proof: image ? { botId, file: sd!.file! } : null, worked: changes.size > 0 || tools.some((t) => EXEC.has(t.type) && t.server !== "engram") };
+  return { text: parts.join("\n\n").slice(0, 14000), image, proof: image ? { botId, file: sd!.file! } : null, worked: changes.size > 0 || tools.some(changedSomething) };
 }
 
 // ---------- the grader ----------
