@@ -208,7 +208,9 @@ export function Note({ icon, bad, title, children }: { icon: NoteIcon; bad?: boo
     <span>{children}</span></p>;
 }
 /** Stored notes come with and without a full stop; each sentence ends once, with a space before any inline action. */
-const said = (s: string) => `${/[.!?…:)”"]$/.test(s.trim()) ? s.trim() : `${s.trim()}.`} `;
+// Older done-check notes repeat the grader's own "Couldn't confirm" after ours.
+const once = (s: string) => s.replace(/(couldn'?t confirm):?\s+couldn'?t confirm:?/gi, "$1");
+const said = (raw: string) => { const s = once(raw).trim(); return `${/[.!?…:)”"]$/.test(s) ? s : `${s}.`} `; };
 
 type Learned = { memory_id: string; text: string; state: "saved" | "held" | "known" | "replaced" | "undone" };
 const LEARNED_SAID: Record<Learned["state"], string> = { saved: "Remembered", held: "Waiting for your review before it's shared", known: "Already knew", replaced: "Remembered, replacing an older note", undone: "Undone" };
@@ -307,7 +309,7 @@ export interface EventCtx { cont?: boolean; b: Bot; fromName: string; pits: Reco
 
 /** A done-check result (runtime/donecheck.ts) as a note: checked with its proof one click away, a retry, or why not. */
 function CheckLine({ d }: { d: Record<string, any> }) {
-  if (d.status === "retrying") return <Note icon="alert" bad>{`The done-check couldn't confirm ${d.headline}, so it's trying again (${d.attempt} of ${d.of}).`}</Note>;
+  if (d.status === "retrying") return <Note icon="alert" bad>{once(`The done-check couldn't confirm ${d.headline}, so it's trying again (${d.attempt} of ${d.of}).`)}</Note>;
   if (d.status !== "passed") return <Note icon="check">{said(`Not checked: ${d.why || "no grader"}`)}</Note>;
   const src = d.proof?.file ? `/shots/${d.proof.botId}/${d.proof.file}` : null;
   const how = `Graded by a second model against ${d.n} criteri${d.n === 1 ? "on" : "a"}${d.attempt ? ` after ${d.attempt} ${d.attempt === 1 ? "retry" : "retries"}` : ""}`;
