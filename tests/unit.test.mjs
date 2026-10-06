@@ -2111,8 +2111,12 @@ test("thread list: top level only, test threads hidden by default, pinned first,
   assert.deepEqual(p2.pinned, [], "pinned come with the first page only");
   assert.deepEqual(p2.rows.map((r) => r.id), ["th_tl01", "th_tl00"]);
   assert.equal(p2.next, null); assert.equal(p2.total, null);
-  assert.equal(L.threadPage({ bot: "b_tl2" }).rows.length, 0, "a sub-thread never lists at the top level");
-  assert.equal(L.threadPage({ bot: "b_tl2" }).hidden.sub, 2);
+  // Filtered to the helper, the parent isn't in the list, so its sub-threads are rows, as a search finds them.
+  const helper = L.threadPage({ bot: "b_tl2" });
+  assert.deepEqual(helper.rows.map((r) => r.id), ["th_tl_k2", "th_tl_k1"]);
+  assert.deepEqual(helper.hidden, { test: 0, sub: 0 }); assert.equal(helper.total, 2);
+  assert.deepEqual(L.threadPage({ bot: "b_tl2", q: "reconciling" }).rows.map((r) => r.id), ["th_tl_k1"]);
+  assert.ok(!L.threadPage({ limit: "50" }).rows.some((r) => r.id.startsWith("th_tl_k")), "unfiltered, they stay nested under th_tl13");
   const withTest = L.threadPage({ bot: "b_tl", test: "1", limit: "50" });
   assert.equal(withTest.rows[0].id, "th_tl_test"); assert.equal(withTest.total, 16); assert.equal(withTest.hidden.test, 0);
   assert.deepEqual(L.threadPage({ bot: "b_tl", archived: "1" }).rows.map((r) => r.id), ["th_tl_arch"]);

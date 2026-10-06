@@ -27,8 +27,8 @@ function mood(b: Bot, threads: ThreadSummary[], pending: { bot_id: string; kind?
 type CardStats = { last: string | null; spend: number };
 const STATS = "SELECT b.id, (SELECT status FROM turns WHERE bot_id=b.id ORDER BY started_at DESC LIMIT 1) last, (SELECT COALESCE(SUM(cost_usd),0) FROM turns WHERE bot_id=b.id AND started_at>=?) spend FROM bots b";
 const statsOf = (b: Bot): CardStats => one<CardStats>(`${STATS} WHERE b.id=?`, R.weekStart(), b.id) ?? { last: null, spend: 0 };
-// /api/state needs at most 12 threads a member (wall, sidebar, thread panel); the crew view asks for all of them.
-export function botCard(b: Bot, pending: { bot_id: string; kind?: string }[], limit = -1, stats = statsOf(b)): BotCard {
+// Every view needs at most 12 threads a member (wall, sidebar, thread panel); the Crew page pages its own (/api/threads).
+export function botCard(b: Bot, pending: { bot_id: string; kind?: string }[], limit = 12, stats = statsOf(b)): BotCard {
   // A scheduled run's own thread shows only while it runs, waits on the driver, or reported news or failed in the last 48 h;
   // quiet runs live on the Schedules page.
   const threads = all<ThreadSummary>(`SELECT id,replace(title,' · pinned','') AS title,status,created_at,updated_at,pinned FROM threads WHERE bot_id=? AND archived=0 AND test=0 AND (origin IS NULL OR json_extract(origin,'$.kind') IS NOT 'schedule'

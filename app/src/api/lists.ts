@@ -57,7 +57,21 @@ export function pitHistory(q: Q, at = Date.now()): PitHistoryPage {
 }
 
 // --- Threads -------------------------------------------------------------------------------------------------------
-const TOP = "(origin IS NULL OR json_extract(origin,'$.kind') IS NOT 'delegated')";
+// A sub-thread (a delegation or plan step) nests under its parent when the parent is in the same list (same archived,
+// test and member filter), else it is a row of its own, so nothing a search finds is missing from the list.
+type ListFilter = { archived: number; test: boolean; bot: string | null };
+const SUB = "json_extract(threads.origin,'$.kind') IS 'delegated'";
+function listed(alias: string, f: ListFilter): [string, (string | number)[]] {
+  const w = [`${alias}.archived=?`, `(${alias}.pinned=0 OR ${alias}.bot_id IN (SELECT id FROM bots WHERE archived=0))`], a: (string | number)[] = [f.archived];
+  if (!f.test) w.push(`${alias}.test=0`);
+  if (f.bot) { w.push(`${alias}.bot_id=?`); a.push(f.bot); }
+  return [w.join(" AND "), a];
+}
+/** Rows of the list for f: top-level threads, and sub-threads whose parent isn't listed (one PK probe per sub-thread). */
+function rowsOf(f: ListFilter): [string, (string | number)[]] {
+  const [own, oa] = listed("threads", f), [par, pa] = listed("p", f);
+  return [`${own} AND (NOT (${SUB}) OR NOT EXISTS (SELECT 1 FROM threads p WHERE p.id=json_extract(threads.origin,'$.fromThread') AND ${par}))`, [...oa, ...pa]];
+}
 // Pinned threads made before 5 Oct 2026 stored " · pinned" in the title itself.
 const COLS = "id,bot_id,replace(title,' · pinned','') AS title,status,pinned,archived,test,created_at,updated_at";
 const tidyText = (t: unknown) => unmark(t).replace(/\s+/g, " ").trim().slice(0, 180);
@@ -71,10 +85,9 @@ function lastLines(ids: string[]) {
   return new Map(rows.map((r) => [r.thread_id, { text: tidyText(json(r.data, {}).text), agent: r.kind === "agent" }]));
 }
 
-/** Top-level threads, pinned first (first page only), newest first, with sub-threads nested under their parent.
- *  Per request: one walk of threads_updated from the cursor (limit+1 rows, skipping sub-threads and test threads),
- *  one threads_parent lookup for the page's children, one events read for their last lines. The first page also
- *  counts the hidden ones, a scan of threads (hundreds of rows). A search reads every member's messages instead. */
+/** The list's rows (rowsOf), pinned first (first page only), newest first, sub-threads nested under listed parents.
+ *  Per request: one walk of threads_updated from the cursor (limit+1 rows), one threads_parent lookup for the page's
+ *  children, one events read for last lines; the first page also counts, two scans of threads (hundreds of rows). */
 export function threadPage(q: Q): ThreadPage {
   const limit = limitOf(q.limit, 12), cur = parseCursor(q.before), s = searchOf(q.q), bot = idOf(q.bot);
   const archived = q.archived === "1" ? 1 : 0, test = q.test === "1";
@@ -84,23 +97,28 @@ export function threadPage(q: Q): ThreadPage {
     const meta = hits.length ? new Map(all<ThreadListRow>(`SELECT ${COLS} FROM threads WHERE id IN (${marks(hits)})`, ...hits.map((h) => h.id)).map((r) => [r.id, r])) : new Map<string, ThreadListRow>();
     rows = hits.flatMap((h) => { const r = meta.get(h.id); return r && r.archived === archived && (test || !r.test) ? [{ ...r, snippet: h.snippet || undefined }] : []; });
   } else {
-    const w = ["archived=?", TOP], a: (string | number)[] = [archived];
-    if (!test) w.push("test=0");
-    if (bot) { w.push("bot_id=?"); a.push(bot); }
-    if (!cur) pinned = all<ThreadListRow>(`SELECT ${COLS} FROM threads WHERE ${w.join(" AND ")} AND pinned=1 AND bot_id IN (SELECT id FROM bots WHERE archived=0) ORDER BY updated_at DESC LIMIT 50`, ...a);
-    const got = all<ThreadListRow>(`SELECT ${COLS} FROM threads WHERE ${w.join(" AND ")} AND pinned=0${cur ? " AND (updated_at<? OR (updated_at=? AND id<?))" : ""} ORDER BY updated_at DESC, id DESC LIMIT ?`,
+    const [w, a] = rowsOf({ archived, test, bot });
+    if (!cur) pinned = all<ThreadListRow>(`SELECT ${COLS} FROM threads WHERE ${w} AND pinned=1 ORDER BY updated_at DESC LIMIT 50`, ...a);
+    const got = all<ThreadListRow>(`SELECT ${COLS} FROM threads WHERE ${w} AND pinned=0${cur ? " AND (updated_at<? OR (updated_at=? AND id<?))" : ""} ORDER BY updated_at DESC, id DESC LIMIT ?`,
       ...a, ...(cur ? [cur.ts, cur.ts, cur.id] : []), limit + 1);
     rows = got.slice(0, limit);
     const last = rows.at(-1); if (got.length > limit && last) next = cursorOf(last.updated_at, last.id);
   }
   const shown = [...pinned, ...rows];
-  const kidRows = shown.length && !s ? all<ThreadKid & { parent: string }>(`SELECT id,bot_id,title,status,updated_at,json_extract(origin,'$.fromThread') parent FROM threads WHERE json_extract(origin,'$.fromThread') IN (${marks(shown)}) ORDER BY created_at LIMIT 200`, ...shown.map((r) => r.id)) : [];
+  // Nested: sub-threads of the shown rows that pass the archived and test filters (any member's: they answer this one).
+  const kidRows = shown.length && !s ? all<ThreadKid & { parent: string }>(`SELECT id,bot_id,title,status,updated_at,json_extract(origin,'$.fromThread') parent FROM threads
+    WHERE json_extract(origin,'$.fromThread') IN (${marks(shown)}) AND ${SUB} AND archived=?${test ? "" : " AND test=0"} ORDER BY created_at LIMIT 200`, ...shown.map((r) => r.id), archived) : [];
   const lines = lastLines([...shown.filter((r) => !r.snippet).map((r) => r.id), ...kidRows.map((k) => k.id)]);
   for (const r of shown) { r.title = shownTitle(r.title); r.snippet = shownLine(r.snippet || lines.get(r.id)?.text || ""); }
   const kids: Record<string, ThreadKid[]> = {};
   for (const { parent, ...k } of kidRows) (kids[parent] ||= []).push({ ...k, title: shownTitle(k.title), snippet: shownLine(lines.get(k.id)?.text || ""), replied: !!lines.get(k.id)?.agent });
-  const counts = cur || s ? null : one<{ total: number; test: number; sub: number }>(`SELECT COALESCE(SUM(${TOP} AND test=0),0) total, COALESCE(SUM(${TOP} AND test=1),0) test, COALESCE(SUM(NOT ${TOP}),0) sub FROM threads WHERE archived=?${bot ? " AND bot_id=?" : ""}`, archived, ...(bot ? [bot] : []))!;
-  return { pinned, rows, kids, next, total: counts ? counts.total + (test ? counts.test : 0) : s ? rows.length : null, hidden: counts && { test: test ? 0 : counts.test, sub: counts.sub } };
+  // Every sub-thread is now a row or nested under a listed row, so none is left unlisted (hidden.sub stays 0).
+  let counts: { total: number; test: number } | null = null;
+  if (!cur && !s) {
+    const [w, a] = rowsOf({ archived, test, bot }), [wt, at] = rowsOf({ archived, test: true, bot });
+    counts = { total: one<{ n: number }>(`SELECT COUNT(*) n FROM threads WHERE ${w}`, ...a)!.n, test: test ? 0 : one<{ n: number }>(`SELECT COUNT(*) n FROM threads WHERE ${wt} AND threads.test=1`, ...at)!.n };
+  }
+  return { pinned, rows, kids, next, total: counts ? counts.total : s ? rows.length : null, hidden: counts && { test: counts.test, sub: 0 } };
 }
 
 // --- Telemetry -----------------------------------------------------------------------------------------------------
