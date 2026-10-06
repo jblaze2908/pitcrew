@@ -60,7 +60,7 @@ export function OriginChip({ origin: o, threadId, b }: { origin: Origin; threadI
   return (
     <span className="row" style={{ gap: 6, flex: "none" }}>
       {o.by !== "driver" && <span className="small faint">{o.by === "names" ? "You named several" : "Picked for you"}</span>}
-      <button ref={pill} className="to alt" style={hueStyle(b.hue)} title={tip} onClick={() => setMenu(true)}><Face b={b} size="xs" mood="idle" />{b.name}<Chev /></button>
+      <button ref={pill} className="to alt" style={hueStyle(b.hue)} title={tip} onClick={() => setMenu(true)}><Face b={b} size="xs" />{b.name}<Chev /></button>
       {menu && pill.current && <MemberMenu anchor={pill.current} auto={false} exclude={b.id} onClose={() => setMenu(false)} onPick={reroute} />}
     </span>
   );
