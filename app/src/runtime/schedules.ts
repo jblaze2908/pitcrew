@@ -65,6 +65,9 @@ export function backfillScheduleTitles() {
   return rows.length;
 }
 
+// What any schedule read returns: never the webhook secret (scheduleHook gives the driver that) nor check_last.
+const COLS = "id,bot_id,thread_id,spec,prompt,next_run,last_run,enabled,created_at,check_cmd,title,grade";
+const shown = (id: string) => one<ScheduleRow>(`SELECT ${COLS} FROM schedules WHERE id=?`, id)!;
 export function addSchedule(botId: string, threadId: string | null, spec: string, prompt: string, title?: string | null) {
   spec = spec.trim().toLowerCase();
   if (!prompt.trim()) throw new Error("A schedule needs a prompt");
@@ -73,10 +76,8 @@ export function addSchedule(botId: string, threadId: string | null, spec: string
   run("INSERT INTO schedules(id,bot_id,thread_id,spec,prompt,next_run,created_at,hook_secret,title) VALUES(?,?,?,?,?,?,?,?,?)", id, botId, threadId, spec, prompt.trim().slice(0, 2000), next, now(),
     isEventSpec(spec) ? newHookSecret() : null, cleanTitle(title) || scheduleTitle(prompt));
   audit("crew", "schedule.added", { id, botId, spec });
-  return one<ScheduleRow>("SELECT * FROM schedules WHERE id=?", id)!;
+  return shown(id);
 }
-// The webhook secret stays out of every list; the driver reads it with scheduleHook.
-const COLS = "id,bot_id,thread_id,spec,prompt,next_run,last_run,enabled,created_at,check_cmd,title,grade";
 export const listSchedules = (botId: string) => all<ScheduleRow>(`SELECT ${COLS} FROM schedules WHERE bot_id=? ORDER BY created_at`, botId);
 /** An event schedule's address and secret, for the driver to give the sender. */
 export function scheduleHook(id: string) {
@@ -106,7 +107,7 @@ export function updateSchedule(id: string, botId: string | null, ch: { spec?: st
   const enabled = ch.enabled ?? !!s.enabled, next = spec !== s.spec || (enabled && !s.enabled) ? nextRun(spec) : s.next_run;
   run("UPDATE schedules SET spec=?, prompt=?, enabled=?, next_run=?, hook_secret=? WHERE id=?", spec, prompt, enabled ? 1 : 0, next, isEventSpec(spec) ? s.hook_secret || newHookSecret() : null, id);
   audit(who, "schedule.updated", { id, botId: s.bot_id, spec, enabled, promptChanged: prompt !== s.prompt });
-  return one<ScheduleRow>("SELECT * FROM schedules WHERE id=?", id)!;
+  return shown(id);
 }
 /** The audit row keeps the spec and prompt, so a deleted schedule can be put back by hand. */
 export function deleteSchedule(id: string, botId: string | null, who: "crew" | "driver") {
