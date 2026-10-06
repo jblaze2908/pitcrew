@@ -72,6 +72,7 @@ const calls = (path) => E.calls.filter((c) => c.path === path).length;
 const A = await import("../app/dist/src/auth.js");
 const { run, one, all, now } = await import("../app/dist/src/db.js");
 const C = await import("../app/dist/src/crew.js");
+const CT = await import("../app/dist/src/crewTools.js");
 const { brainConfig, brainDir } = await import("../app/dist/src/computer.js");
 const { brainMcp } = await import("../app/dist/src/engramStore.js");
 const G = await import("../app/dist/src/engram.js");
@@ -445,7 +446,7 @@ test("publish_file: a workspace file becomes a private artifact; updates by id; 
   await assert.rejects(G.publishFile(C.getBot("bills"), "out/missing.pdf"), /No file/);
   writeFileSync(`${work}/out/big.bin`, Buffer.alloc((10 << 20) + 1));
   await assert.rejects(G.publishFile(C.getBot("bills"), "out/big.bin"), /over 10 MB/);
-  const names = (o) => C.dynamicTools(C.getBot("bills"), undefined, o).map((t) => t.name);
+  const names = (o) => CT.dynamicTools(C.getBot("bills"), undefined, o).map((t) => t.name);
   assert.ok(names({ engram: true }).includes("publish_file")); assert.ok(!names({}).includes("publish_file"), "only linked members get it");
 });
 

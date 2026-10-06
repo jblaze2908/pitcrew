@@ -14,7 +14,7 @@ import { execFs } from "./execfs.js";
 import { policyMount } from "./domains.js";
 import { brainMcp, type McpServer } from "./engramStore.js";
 import type { Bot } from "../shared/types.js";
-import type { ToolManifest, McpTool } from "./crew.js";
+import type { ToolManifest, McpTool } from "./crewTools.js";
 
 export const ROOT = process.env.PITCREW_ROOT || "/srv/pitcrew";
 export const IMAGE = process.env.PITCREW_COMPUTER_IMAGE || "pitcrew-computer:1";

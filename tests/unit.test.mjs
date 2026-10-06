@@ -573,7 +573,8 @@ test("tool results deliver images as images, never base64 in text; exec scripts 
 });
 
 test("the model sees the browser tools it uses, with honest descriptions", async () => {
-  const { dynamicTools, instructions, FILES_URL } = await import("../app/dist/src/crew.js");
+  const { instructions, FILES_URL } = await import("../app/dist/src/crew.js");
+  const { dynamicTools } = await import("../app/dist/src/crewTools.js");
   const t = (name, schema = {}) => ({ name, description: `pw ${name}`, inputSchema: { type: "object", properties: schema } });
   const manifest = { browser: ["browser_click", "browser_snapshot", "browser_evaluate", "browser_run_code_unsafe", "browser_emulate_media", "browser_resize", "browser_network_request", "browser_network_requests", "browser_close", "browser_drag", "browser_hover", "browser_take_screenshot",
     "browser_cookie_list", "browser_cookie_set", "browser_cookie_clear", "browser_localstorage_get", "browser_storage_state"].map((n) => t(n)),
@@ -1942,7 +1943,8 @@ test("retros run on a fork: the thread keeps its context and gets one summary li
   const T = await import("../app/dist/src/runtime/turns.js");
   const N = await import("../app/dist/src/runtime/notify.js");
   const Rt = await import("../app/dist/src/runtime/retro.js");
-  const { getBot, dynamicTools } = await import("../app/dist/src/crew.js");
+  const { getBot } = await import("../app/dist/src/crew.js");
+  const { dynamicTools } = await import("../app/dist/src/crewTools.js");
   const { memberLinked } = await import("../app/dist/src/engramStore.js");
   const { providerReady } = await import("../app/dist/src/providers.js");
   const manifest = { image: "", caps: "storage", execInfo: null, browser: [], computer: [] };
