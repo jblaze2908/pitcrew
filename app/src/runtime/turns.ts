@@ -30,22 +30,23 @@ import { CHANGELOG } from "../changelog.js";
 import { runReport, retroReason, retroPrompt, weeklyDue, retroOutcome } from "./retro.js";
 import type { Bot } from "../../shared/types.js";
 import type { Brain } from "../computer.js";
+import { httpErr } from "../auth.js";
 
 export const isRunning = (threadId: string) => active.has(threadId);
 
 export interface Message { text?: unknown; attachments?: string[]; mode?: string; trigger?: string; display?: string | null; edit?: EditRequest | null }
 export async function sendMessage(threadId: string, { text: given, attachments = [], mode = "auto", trigger = "driver", display = null, edit = null }: Message) {
   const t = getThread(threadId);
-  if (!t) throw Object.assign(new Error("No such thread"), { status: 404 });
+  if (!t) throw httpErr(404, "No such thread");
   let text = String(given || "").slice(0, 20000);
   // An image edit: the member gets the image, the marks and how to call the tool; the transcript shows what was typed.
   if (edit) {
-    let m; try { m = editMessage(t.bot_id, text, edit); } catch (e: any) { throw Object.assign(new Error(e.message), { status: 400 }); }
+    let m; try { m = editMessage(t.bot_id, text, edit); } catch (e: any) { throw httpErr(400, e.message); }
     const extras = [edit.mask ? "brushed" : "", edit.pins?.length ? `${edit.pins.length} pin${edit.pins.length > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ");
     display ??= `${text.trim() || "Edit this image"}${extras ? ` · ${extras}` : ""}`;
     text = m.text; attachments = [...attachments, ...m.attachments];
   }
-  if (!text.trim() && !attachments.length) throw Object.assign(new Error("Say something"), { status: 400 });
+  if (!text.trim() && !attachments.length) throw httpErr(400, "Say something");
   if (trigger === "driver" && text.trim() === "/refresh" && !attachments.length) return refresh(threadId);
   nameThread(t, text, attachments);
   const a = active.get(threadId);
@@ -344,15 +345,15 @@ export async function steerNote(threadId: string, text: string) {
 /** The driver's "Send now": steers it into the running turn, or starts it. A failed delivery puts it back in place. */
 export async function sendQueuedNow(threadId: string, id: string) {
   const t = getThread(threadId), q = peekQueued(threadId, id);
-  if (!t || !q) throw Object.assign(new Error("No such queued message"), { status: 404 });
-  if (!active.has(threadId)) { const why = blockedReason(getBot(t.bot_id)!); if (why) throw Object.assign(new Error(why), { status: 409 }); }
+  if (!t || !q) throw httpErr(404, "No such queued message");
+  if (!active.has(threadId)) { const why = blockedReason(getBot(t.bot_id)!); if (why) throw httpErr(409, why); }
   takeQueued(threadId, id);
   try { return await sendMessage(threadId, { text: q.text, attachments: q.attachments, mode: "auto", trigger: q.via, display: q.display }); }
   catch (e) { requeue(threadId, q); throw e; }
 }
 export function removeQueued(threadId: string, id: string) {
   const q = peekQueued(threadId, id);
-  if (!takeQueued(threadId, id)) throw Object.assign(new Error("No such queued message"), { status: 404 });
+  if (!takeQueued(threadId, id)) throw httpErr(404, "No such queued message");
   if (q?.via === "schedule") scheduleRunCancelled(threadId);
   return { ok: true };
 }
@@ -369,15 +370,15 @@ export async function interrupt(threadId: string) {
 // on request, never automatically: changed tools or context change the prompt prefix, so that turn misses the cache.
 const refreshing = new Set<string>();
 export function refresh(threadId: string) {
-  if (active.has(threadId)) throw Object.assign(new Error("Wait for the run to finish, then /refresh"), { status: 409 });
+  if (active.has(threadId)) throw httpErr(409, "Wait for the run to finish, then /refresh");
   refreshing.add(threadId);
   addEvent(threadId, null, "system", { text: "Tools and skills reload with your next message." });
   return { refreshed: true };
 }
 export async function compact(threadId: string) {
   const t = getThread(threadId);
-  if (!t?.codex_id) throw Object.assign(new Error("Nothing to compact yet"), { status: 400 });
-  if (active.has(threadId)) throw Object.assign(new Error("Wait for the run to finish"), { status: 409 });
+  if (!t?.codex_id) throw httpErr(400, "Nothing to compact yet");
+  if (active.has(threadId)) throw httpErr(409, "Wait for the run to finish");
   const b = getBot(t.bot_id)!, c = brain(b);
   await c.ensure();
   if (!c.loaded.has(t.codex_id)) { await c.request("thread/resume", { threadId: t.codex_id, model: b.model, modelProvider: b.provider, excludeTurns: true }); c.loaded.add(t.codex_id); }

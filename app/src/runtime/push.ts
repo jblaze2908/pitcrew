@@ -4,7 +4,7 @@
 // Skipped while the driver has Pitcrew open and visible (a presence beat every 60 s). Per pit stop: one HTTPS POST.
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { getSetting, setSetting, one, audit, now } from "../db.js";
-import { getSecret, putSecret, deleteSecret, macKey } from "../auth.js";
+import { getSecret, putSecret, deleteSecret, macKey, httpErr } from "../auth.js";
 import type { PitstopRow } from "../models.js";
 
 const HOST = process.env.PITCREW_HOST || "pitcrew.example.com";
@@ -17,7 +17,7 @@ export const markPresent = () => { seenAt = now(); };
 export function pushConfig() { const url = getSetting("push_url", "") || ""; return { url, token: !!getSecret("push_token") }; }
 export function setPushConfig(url: string, token?: string | null) {
   const u = url.trim();
-  if (u && !/^https:\/\/[^\s/]+\/[\w-]{1,64}$/.test(u)) throw Object.assign(new Error("Give the topic URL, like https://ntfy.example.com/pitcrew-crew"), { status: 400 });
+  if (u && !/^https:\/\/[^\s/]+\/[\w-]{1,64}$/.test(u)) throw httpErr(400, "Give the topic URL, like https://ntfy.example.com/pitcrew-crew");
   setSetting("push_url", u);
   if (token === "") deleteSecret("push_token"); else if (token) putSecret("push_token", token);
   audit("driver", "push.configured", { set: !!u });

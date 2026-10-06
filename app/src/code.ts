@@ -10,6 +10,7 @@ import { randomBytes } from "node:crypto";
 import { request, type IncomingMessage, type ServerResponse } from "node:http";
 import { readdirSync } from "node:fs";
 import { botDir, docker } from "./computer.js";
+import { httpErr } from "./auth.js";
 
 export interface Project { path: string; name: string; git: boolean; markers: string[] }
 interface Session { token: string; botId: string; path: string; lastUsed: number; open: number; host?: string; port?: number; stop?: () => Promise<unknown> }
@@ -59,7 +60,7 @@ const dockerBackend: CodeBackend = {
 
 export async function openProject(botId: string, path: string) {
   const project = listProjects(botId).find((p) => p.path === path);
-  if (!project) throw Object.assign(new Error("Not a project folder"), { status: 404 });
+  if (!project) throw httpErr(404, "Not a project folder");
   for (const s of sessions.values()) {
     if (s.botId !== botId) continue;
     if (s.path === path) { s.lastUsed = Date.now(); return { url: `/code/${s.token}/`, project }; }
