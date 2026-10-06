@@ -14,7 +14,7 @@ let backTo: string | null = null; // where the live view's Back returns to
 let streaming = false;
 const listeners = new Set<() => void>();
 
-export const threadOf = (r: Route) => (r.name === "t" ? r.args[0] || null : null);
+const threadOf = (r: Route) => (r.name === "t" ? r.args[0] || null : null);
 
 window.addEventListener("hashchange", () => {
   const prev = current.hash;

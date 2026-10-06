@@ -2,7 +2,7 @@
 // toggles and choices at once, text when you leave the field.
 import { useEffect, useRef, useState, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
 import type { BotCard, BotDetail, Decision, EngramScope, Hue, ProviderId, Shape, SitesView } from "../../../../shared/types";
-import { RuleLabel } from "../../components/Approvals";
+import { RuleLabel } from "../../components/RuleLabel";
 import { MailboxCard } from "../../components/MailboxCard";
 import { ModelPicker } from "../../components/ModelPicker";
 import { Sites as SiteList } from "../settings/Sites";
@@ -14,9 +14,8 @@ import { useStore } from "../../lib/store";
 import { toast } from "../../lib/toast";
 import { useFetch } from "../../lib/useFetch";
 
-export const DIALS = ["warmth", "talk", "humour"] as const;
+const DIALS = ["warmth", "talk", "humour"] as const;
 export const SCOPE_LABEL: Record<EngramScope, string> = { personal: "Personal", finance: "Money", health: "Health" };
-export const splitQuirks = (s: string) => s.split(";").map((x) => x.trim()).filter(Boolean);
 const DIAL_ENDS: Record<(typeof DIALS)[number], [string, string]> = { warmth: ["Dry", "Warm"], talk: ["Brief", "Chatty"], humour: ["Serious", "Playful"] };
 
 /** Hire's checkbox for household facts; member Settings uses a toggle row instead. */
@@ -277,5 +276,5 @@ function Privacy({ b, save, ok }: { b: BotCard; save: Save; ok: (k: string) => b
 function Email({ b }: { b: BotCard }) {
   const f = useFetch(() => api.get<{ domain: string }>("/api/mail", { quiet: true }), []);
   if (f.error) return <p className="ms-h">{`Couldn't load email settings: ${f.error}`}</p>;
-  return f.data ? <div className="mailbox"><MailboxCard botId={b.id} name={b.name} domain={f.data.domain} onSaved={() => {}} /></div> : null;
+  return f.data ? <div className="mailbox"><MailboxCard botId={b.id} name={b.name} domain={f.data.domain} /></div> : null;
 }

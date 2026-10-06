@@ -1,6 +1,6 @@
 // Permissions: the stop switch, the safety check, the mode new threads start in, approvals you've given, sites, the vault.
 import type { Learned, Rule, State } from "../../../../shared/types";
-import { RuleLabel } from "../../components/Approvals";
+import { RuleLabel } from "../../components/RuleLabel";
 import { VaultSettings } from "../../components/Vault";
 import { ConfirmButton, Face, Seg } from "../../components/ui";
 import { api } from "../../lib/api";

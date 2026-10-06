@@ -43,7 +43,7 @@ function QueuedStack({ threadId, queued, fromName, onEdit }: { threadId: string;
 }
 
 // How much this thread runs without pit stops (server: runtime/autonomy.ts). Labels only; the API keeps ask/handsfree/yolo.
-export const AUTONOMY = [
+const AUTONOMY = [
   ["ask", "Ask first", "Asks before sending, paying, signing in, installing, sharing, deleting or a new site."],
   ["handsfree", "Hands-free", "Stops only for paying, signing in, sending, sharing, deleting, look-alike or non-https sites, and house rules."],
   ["yolo", "YOLO", "No pit stops, paying and sending included. Only hard blocks, blocked sites and house rules stop it."],
@@ -92,7 +92,7 @@ function ContextRing({ threadId, ctx, running }: { threadId: string; ctx: { toke
 }
 
 /** The image the next message edits: the newest one by default (Thread.tsx), or one the driver picked. */
-export interface EditTarget { path: string; label: string; src: string }
+interface EditTarget { path: string; label: string; src: string }
 interface ComposerProps {
   threadId: string; name: string; running: boolean; queued: QueuedItem[]; fromName: string; target?: EditTarget | null; onClearTarget?: () => void;
   autonomy: string; onAutonomy: (a: string) => void; ctx: { tokens: number | null; window: number | null };
