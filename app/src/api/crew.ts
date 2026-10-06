@@ -15,7 +15,7 @@ import { verifyHook, overHookLimit } from "../runtime/hooks.js";
 import { botCard, LEARNED, liveLearned } from "./views.js";
 import { ledgerOverview, tablePreview } from "../ledger.js";
 import { listSkills } from "../runtime/skills.js";
-import type { LearnedRow, PitstopRow, ScheduleRow } from "../models.js";
+import type { LearnedRow, ScheduleRow } from "../models.js";
 
 const Memory = z.object({ text: trimmed(500), scope: pick(["agent", "global"] as const, "agent") });
 const optText = (max: number) => given((v) => (v == null ? null : String(v).slice(0, max)));
@@ -29,7 +29,7 @@ const member = (id: string) => { const b = getBot(id); if (!b) throw httpErr(404
 export const crewRoutes = new Hono<Env>()
   .get("/api/bots/:id", signedIn, async (c) => {
     const id = c.req.param("id"), b = member(id);
-    const pending = all<PitstopRow>("SELECT * FROM pitstops WHERE status='pending'");
+    const pending = all<{ bot_id: string; kind: string }>("SELECT bot_id, kind FROM pitstops WHERE status='pending' AND bot_id=?", id);
     // Agent memory is Pitcrew's own; global notes a linked member filed live in Engram (one GET per view).
     const memory = all("SELECT * FROM memory WHERE bot_id=? AND forgotten_at IS NULL ORDER BY created_at DESC", id);
     let global: unknown[] | null = null, memoryError: string | null = null;
