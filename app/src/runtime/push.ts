@@ -58,5 +58,6 @@ export function pushRunFailed(botName: string, spec: string, why: string, thread
   const open = `https://${HOST}/${threadId ? `#/t/${threadId}` : "#/schedules"}`;
   send({ title: `${botName}'s scheduled run failed`, message: `${spec}: ${why || "no reason given"}`, click: open, actions: [{ action: "view", label: "Open", url: open }], priority: 3, tags: ["warning"] }).catch(() => {});
 }
+export const pushBalance = (message: string) => send({ title: "OpenRouter balance low", message, click: "https://openrouter.ai/settings/credits", priority: 3, tags: ["moneybag"] }).catch(() => {});
 export const pushTest = () => send({ title: "Pitcrew", message: "Phone notifications work. Pit stops will show up here with Approve and Deny.", click: `https://${HOST}/` });
 export const pitForAct = (id: string) => one<PitstopRow>("SELECT * FROM pitstops WHERE id=?", id);

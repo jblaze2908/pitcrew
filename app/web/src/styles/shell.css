@@ -90,3 +90,11 @@
   .home .wr .acts{grid-column:2}
   .home .wr .pit{margin-left:14px}
 }
+
+/* One-time notice above the page (Shell Alerts): quiet, with a soft warning dot. */
+.alert{display:flex;align-items:center;gap:10px;margin:12px 24px 0;padding:10px 12px 10px 14px;border-radius:10px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--line-2);font-size:13.5px;color:var(--ink-2)}
+.alert .dot{width:7px;height:7px;border-radius:50%;background:var(--soft-warn,var(--ink-3));flex:none}
+.alert span{flex:1;min-width:0}
+.alert a{color:var(--ink);white-space:nowrap}
+.alert button{width:26px;height:26px;border-radius:6px;color:var(--ink-3);font-size:18px;line-height:1}
+.alert button:hover{background:var(--surface-2);color:var(--ink)}

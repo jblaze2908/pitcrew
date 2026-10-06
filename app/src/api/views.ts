@@ -11,6 +11,7 @@ import { newThreadAutonomy } from "../runtime/autonomy.js";
 import type { Bot, BotCard, Mood, PitStop, ProviderId, State, ThreadSummary, ThreadView, ThreadEvent } from "../../shared/types.js";
 import type { PitstopRow, EventRow, LearnedRow, SurfaceRow } from "../models.js";
 import { liveCommands } from "../runtime/state.js";
+import { balanceAlerts } from "../runtime/balance.js";
 
 // An Engram proposal waits on the driver, not on the member it's filed under, so it doesn't make that member "needs".
 function mood(b: Bot, threads: ThreadSummary[], pending: { bot_id: string; kind?: string }[], up: boolean): Mood {
@@ -46,6 +47,7 @@ export function state(): State {
     computersUp: allComputers().filter((c) => c.up).length,
     engram: { linked: linked(), url: engramUrl() },
     unread: R.inbox().unread,
+    alerts: balanceAlerts(),
     formerNames: Object.fromEntries(all<{ id: string; name: string }>("SELECT id, name FROM bots WHERE archived=1").map((b) => [b.id, b.name])),
   };
 }

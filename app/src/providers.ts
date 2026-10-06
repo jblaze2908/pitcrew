@@ -104,7 +104,7 @@ export function openrouterUsage() {
   if (!key) return Promise.resolve(null);
   // /credits (account balance) answers only management keys; an ordinary key gets 403 and we show its own cap instead.
   const get = (path: string) => timed(`https://openrouter.ai/api/v1/${path}`, { headers: { Authorization: `Bearer ${key}` } }).then((r) => (r.ok ? r.json() : {})).then((b: any) => b.data || null, () => null);
-  orUsage = { at: Date.now(), p: Promise.all([get("key"), get("credits")]).then(([k, c]) => k && { ...k, balance: c ? c.total_credits - c.total_usage : null }) };
+  orUsage = { at: Date.now(), p: Promise.all([get("key"), get("credits")]).then(([k, c]) => k && { ...k, balance: c ? c.total_credits - c.total_usage : null, credits: c ? { total: c.total_credits, used: c.total_usage } : null }) };
   return orUsage.p;
 }
 

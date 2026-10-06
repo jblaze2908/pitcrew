@@ -2,7 +2,6 @@
 import type { BotCard, BotDetail, State } from "../../../shared/types";
 import { Face } from "../components/ui";
 import { api } from "../lib/api";
-import { usd } from "../lib/format";
 import { useLiveReload } from "../lib/live";
 import { useStore } from "../lib/store";
 import { useFetch } from "../lib/useFetch";
@@ -18,11 +17,11 @@ const OLD: Record<string, [string, string?]> = {
   sites: ["settings", "permissions"], rules: ["settings", "permissions"], profile: ["settings"],
 };
 
-/** "GPT-6 Sol on your ChatGPT plan · $0.40 of $5 this week · asleep" */
+/** "GPT-6 Sol on your ChatGPT plan · asleep" */
 function metaLine(b: BotCard, S: State) {
   const how = b.provider === "openai" ? "on your ChatGPT plan" : `via ${S.providers[b.provider]?.label || b.provider}`;
   const state = b.mood === "working" ? "working" : b.mood === "needs" ? "waiting on you" : b.computer.up ? "awake" : "asleep";
-  return `${b.model || "No model"} ${how} · ${usd(b.spend)} of ${usd(b.weekly_cap_usd)} this week · ${state}`;
+  return `${b.model || "No model"} ${how} · ${state}`;
 }
 
 export function Crew({ id, tab: asked, rest: given }: { id: string; tab: string; rest: (string | undefined)[] }) {

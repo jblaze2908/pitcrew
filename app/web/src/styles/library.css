@@ -70,7 +70,7 @@
 .crew2{gap:20px}
 .crew2-tools{flex-wrap:nowrap}
 .crew2-tools .lib-search{width:240px}
-.crew2-head,.crew2-row{display:grid;grid-template-columns:minmax(220px,1.3fr) minmax(0,1.3fr) minmax(0,1fr) 72px 16px;gap:16px;align-items:center}
+.crew2-head,.crew2-row{display:grid;grid-template-columns:minmax(220px,1.3fr) minmax(0,1.3fr) minmax(0,1fr) 16px;gap:16px;align-items:center}
 .crew2-head{padding:0 18px 2px;font-size:12px;color:var(--ink-2)}
 .crew2-head .crew2-r{text-align:right}
 .crew2-grp{display:flex;align-items:baseline;gap:8px;font-size:13px;font-weight:600;padding:14px 4px 8px}

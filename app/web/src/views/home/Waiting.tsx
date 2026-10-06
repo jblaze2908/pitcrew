@@ -28,10 +28,7 @@ export function Waiting({ pits }: { pits: PitStop[] }) {
   return (
     <section className="wait" aria-label="Waiting on you">
       {pits.slice(0, SHOWN).map((p) => <Row key={p.id} p={p} where={(p.thread_id && titles.get(p.thread_id)) || ""} />)}
-      <div className="wf">
-        <span>{pits.length > SHOWN ? `${pits.length - SHOWN} more waiting` : ""}</span>
-        <a href="#/pitstops">All pit stops</a>
-      </div>
+      {pits.length > SHOWN && <div className="wf"><a href="#/pitstops">{`${pits.length - SHOWN} more waiting`}</a></div>}
     </section>);
 }
 

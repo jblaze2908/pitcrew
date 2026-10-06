@@ -53,7 +53,7 @@ const WHEN_LEAD = /^(?:(?:every|each|on)\s+[^,.:]{0,40}?\b(?:at\s+)?\d{1,2}[:.]\
 /** A schedule's name from its prompt: the first line minus any timing lead, cut to 60 characters on a word. No model call. */
 export function scheduleTitle(prompt: string) {
   const line = firstLine(prompt), rest = line.replace(WHEN_LEAD, "");
-  const t = titleFrom(rest ? rest[0].toUpperCase() + rest.slice(1) : line);
+  const t = titleFrom(rest ? rest[0].toUpperCase() + rest.slice(1) : line).replace(/\.$/, "");
   return t === UNTITLED ? "Untitled schedule" : t;
 }
 const cleanTitle = (t: string | null | undefined) => String(t || "").replace(/\s+/g, " ").trim().slice(0, 80);

@@ -4,7 +4,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AskResult, BotCard, RoutePick } from "../../../shared/types";
 import { api } from "../lib/api";
-import { cap, escRe, plainText } from "../lib/format";
+import { cap, escRe } from "../lib/format";
 import { connected, useStore } from "../lib/store";
 import { toast } from "../lib/toast";
 import { jobLine, MemberMenu, type MenuHandle } from "./MemberMenu";
@@ -14,7 +14,6 @@ const ROUTE_SURE = 0.55;
 const GUESS_AFTER_MS = 600;
 const STARTERS = ["Pay this month's electricity bill", "Compare my health-insurance renewal", "Watch BLR → GOI fares for 14 Dec"];
 
-const short = (t: string, n = 48) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
 type Sent = (r: { threadId: string; botId: string }) => void;
 /** to: a member to start with (New thread with …); the pill and @ can still change it. */
 export function AskBox({ onSent, to }: { onSent: Sent; to?: string | null }) {
@@ -184,7 +183,7 @@ function LiveAskBox({ onSent, start }: { onSent: Sent; start: string | null }) {
       </div>
       <div className="row sugs">
         {S.bots.length > 1
-          ? specialists.slice(0, 4).map((b) => <button key={b.id} className="sug" onClick={() => pickTo(b.id)}><Face b={b} size="xs" /><span className="who">{b.name}</span>{short(plainText(b.job)) || "Ask"}</button>)
+          ? specialists.slice(0, 4).map((b) => <button key={b.id} className="sug" onClick={() => pickTo(b.id)}><Face b={b} size="xs" />{b.name}</button>)
           : STARTERS.map((x) => <button key={x} className="sug" onClick={() => { setText(x); ta.current?.focus(); }}>{x}</button>)}
       </div>
       {menu?.mode === "pill" && pill.current && <MemberMenu anchor={pill.current} current={to} handle={menuKeys} onClose={() => setMenu(null)} onPick={pickTo} />}

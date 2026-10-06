@@ -153,7 +153,7 @@ export function pitHeading(p: PitStop): string {
   const flags = / · (verify: |jev blocked |after untrusted content).*$/.exec(p.title)?.[0] || "";
   const v = pitLabel(p);
   return p.kind === "mcp" ? `${v.label}${v.detail ? ` ${v.detail}` : ""}${plainWords(flags)}`
-    : p.kind === "secret" ? (d.secret?.kind === "card" ? `Pay on ${d.site?.host} with card “${d.secret?.name}” ••${d.secret?.last4}` : `Sign in to ${d.site?.host} with “${d.secret?.name}”`) : plainWords(p.title);
+    : p.kind === "secret" ? (d.secret?.kind === "card" ? `Pay on ${d.site?.host} with card “${d.secret?.name}” ••${d.secret?.last4}` : `Sign in to ${d.site?.host} with “${d.secret?.name}”`) : plainWords(p.title.replace(/^(Couldn't confirm) couldn'?t confirm:?\s*/i, "$1 "));
 }
 
 // A done-check that failed after its retries: each criterion with the grader's verdict, then what would fix it.

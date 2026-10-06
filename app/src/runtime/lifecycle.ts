@@ -9,6 +9,7 @@ import { interrupt, sendMessage, startQueues } from "./turns.js";
 import { decide } from "./pitstops.js";
 import { tickSchedules, scheduleRunsCut, backfillScheduleTitles } from "./schedules.js";
 import { backfillTitles } from "./titles.js";
+import { startBalanceWatch } from "./balance.js";
 
 export async function killSwitch() {
   setSetting("paused", "1");
@@ -37,6 +38,7 @@ export function bootRuntime() {
   }
   setTimeout(() => backfillTitles().catch(() => {}), 60000).unref();
   backfillScheduleTitles();
+  startBalanceWatch();
   setInterval(tickSchedules, 30000).unref();
   startShotSweeper();
   return cut;

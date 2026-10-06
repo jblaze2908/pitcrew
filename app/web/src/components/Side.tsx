@@ -3,7 +3,6 @@
 // Home's waiting rows open Pit stops. It folds to a rail that keeps every link.
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import type { BotCard, ThreadSummary } from "../../../shared/types";
-import { usd } from "../lib/format";
 import { go, type Route } from "../lib/router";
 import { useStore } from "../lib/store";
 import { Icon } from "./Icon";
@@ -45,7 +44,6 @@ export function Side({ route }: { route: Route }) {
   const r = recentsOf(S.bots, new Set(pending.map((p) => p.thread_id).filter(Boolean) as string[]));
   const open = route.name === "t" ? route.args[0] : null, member = route.name === "crew" ? route.args[0] || "" : null;
   const crew = S.bots.slice(0, CREW_ROWS), more = S.bots.length - crew.length;
-  const spend = `${usd(S.week.usd)} of ${usd(S.weekCap)} this week`;
   const initial = (S.driverName || "?").trim().charAt(0).toUpperCase();
 
   // A pit stop count shows in orange; with none waiting, Home's unread runs show in the quieter data tone.
@@ -74,7 +72,7 @@ export function Side({ route }: { route: Route }) {
       {crew.map((b) => <a key={b.id} className={`fc${member === b.id ? " on" : ""}`} href={`#/crew/${b.id}`} title={b.name}>{face(b)}</a>)}
       <span style={{ flex: 1 }} />
       {nav(route.name === "settings", "gear", "Settings", "#/settings")}
-      <a className="me" href="#/telemetry" title={`${S.driverName} · ${spend}`}>{initial}</a>
+      <a className="me" href="#/settings/account" title={S.driverName}>{initial}</a>
     </aside>);
 
   const row = (t: ThreadSummary, mark?: "wait" | "run") => (
@@ -104,7 +102,7 @@ export function Side({ route }: { route: Route }) {
       </div>
       <div className="foot">
         <span className="me">{initial}</span>
-        <a className="nm" href="#/telemetry" title="Spend and activity">{S.driverName}<small>{spend}</small></a>
+        <a className="nm" href="#/settings/account">{S.driverName}</a>
         <a className={`ib${route.name === "settings" ? " on" : ""}`} href="#/settings" title="Settings"><Icon name="gear" /></a>
       </div>
     </aside>);
