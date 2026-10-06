@@ -31,6 +31,10 @@ export function addSystemForBot(botId: string, text: string) {
 
 // Names an untitled thread from its first message, locally: no extra model call, and the text goes nowhere new.
 export const UNTITLED = "New thread";
+/** Titles and previews as lists show them. Older rows carry " · pinned", a scheduled run's "Title. · 5 Oct", and the
+ *  "QUIET:" reply scheduled prompts ask for; stored text stays as written. */
+export const shownTitle = (t: string) => t.replace(/ · pinned$/, "").replace(/\.( · \d{1,2} [A-Z][a-z]{2})$/, "$1");
+export const shownLine = (t: string) => t.replace(/^QUIET:\s*/i, "Nothing new · ");
 export function titleFrom(text: unknown, attachments: string[] = []) {
   let s = String(text || "").replace(/```[\s\S]*?(```|$)/g, " ").replace(/[`*_#>]+/g, "").replace(/\s+/g, " ").trim();
   if (!s) return attachments.length ? `Shared ${attachments[0].split("/").pop()!.replace(/^[a-z0-9]+-/, "")}`.slice(0, 60) : UNTITLED;
