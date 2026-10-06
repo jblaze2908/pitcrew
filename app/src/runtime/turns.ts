@@ -174,10 +174,11 @@ export async function startTurn(threadId: string, text: string, attachments: str
     // The member's own memory (agent tier, capped; tools.ts AGENT_MEMORY_MAX). Facts about the driver come from Engram's
     // profile and search; the member's Engram memories aren't listed, so the prompt doesn't grow with them.
     const mems = all<{ id: string; text: string }>("SELECT id,text FROM memory WHERE bot_id=? AND forgotten_at IS NULL ORDER BY created_at LIMIT 80", b.id);
-    const common = { model: b.model, modelProvider: b.provider, cwd: "/bot/work", developerInstructions: instructions(b, mems ?? [], egCtx, skillIndex(listSkills(b.id)), Math.max(0, CHANGELOG.length - (one<{ n: number }>("SELECT changelog_seen n FROM bots WHERE id=?", b.id)?.n || 0))) };
+    // Built only where instructions are sent (start, resume): listSkills reads each SKILL.md from disk.
+    const common = () => ({ model: b.model, modelProvider: b.provider, cwd: "/bot/work", developerInstructions: instructions(b, mems ?? [], egCtx, skillIndex(listSkills(b.id)), Math.max(0, CHANGELOG.length - (one<{ n: number }>("SELECT changelog_seen n FROM bots WHERE id=?", b.id)?.n || 0))) });
     let refreshed: string | null = null;
     if (!codexId) {
-      const st = await c.request("thread/start", { ...common, sandbox: "danger-full-access", approvalPolicy: "untrusted", environments: ENVS, dynamicTools: tools }, 120000);
+      const st = await c.request("thread/start", { ...common(), sandbox: "danger-full-access", approvalPolicy: "untrusted", environments: ENVS, dynamicTools: tools }, 120000);
       codexId = st.thread.id as string;
       run("UPDATE threads SET codex_id=?, tools_sig=? WHERE id=?", codexId, sig, threadId);
       c.loaded.add(codexId);
@@ -197,7 +198,7 @@ export async function startTurn(threadId: string, text: string, attachments: str
       if (eg && egCtx) refreshed = `Refreshed just now; this replaces any earlier Engram profile and skills list.\n\n${engramBlock(driverName(), egCtx, b.engram_scope)}`;
     } else if (!c.loaded.has(codexId)) {
       c.mcp.delete(codexId);
-      const r = await c.request("thread/resume", { threadId: codexId, ...common, sandbox: "danger-full-access", approvalPolicy: "untrusted", excludeTurns: true }, 120000);
+      const r = await c.request("thread/resume", { threadId: codexId, ...common(), sandbox: "danger-full-access", approvalPolicy: "untrusted", excludeTurns: true }, 120000);
       c.loaded.add(codexId);
       setRollout(b.id, codexId, r?.thread?.path);
       await c.mcpReady(codexId);
