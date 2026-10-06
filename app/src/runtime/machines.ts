@@ -31,7 +31,7 @@ export const computerHooks: ComputerHooks = {
     // The desktop the driver held is gone; a lease on it would block the crew with no screen to hand back from.
     if (!c.up && leases.has(c.bot.id)) releaseLease(c.bot.id, "computer.lease_released", "The computer stopped while you had control, so control went back to the crew.");
   },
-  onComputerBoot: (botId) => { for (const [tid, a] of active) if (getThread(tid)?.bot_id === botId) bus.emit("activity", { threadId: tid, botId, text: "Computer up" }); },
+  onComputerBoot: (botId) => { for (const tid of active.keys()) if (getThread(tid)?.bot_id === botId) bus.emit("activity", { threadId: tid, botId, text: "Computer up" }); },
 };
 export const computer = (bot: Bot) => computerFor(bot, computerHooks);
 export const brain = (bot: Bot) => brainFor(bot, brainHooks);

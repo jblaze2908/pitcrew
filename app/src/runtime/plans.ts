@@ -51,10 +51,10 @@ function dispatchPlan(planId: string) {
       });
       return;
     }
-    startItem(p, it, items);
+    startItem(p, it);
   }
 }
-async function startItem(p: Plan, it: PlanItem, items: PlanItem[]) {
+async function startItem(p: Plan, it: PlanItem) {
   const chief = getBot(one<{ bot_id: string }>("SELECT bot_id FROM threads WHERE id=?", p.thread_id)!.bot_id)!, owner = getBot(it.owner_bot)!, driver = getSetting("driver_name", "the driver");
   const end = (status: string, result: Partial<Handoff> | null, cost = 0) => {
     if (one<{ status: string }>("SELECT status FROM plan_items WHERE id=?", it.id)?.status === "cancelled") { run("UPDATE plan_items SET cost_usd=cost_usd+? WHERE id=?", cost, it.id); return; }

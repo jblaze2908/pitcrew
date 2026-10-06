@@ -1,12 +1,12 @@
 // The runtime: turns on each crew member's brain, its computer on demand, the jev gate and pit stops, Pitcrew tools,
 // delegation and plans, schedules, the screen lease and the kill switch. This is its public surface.
 export { bus, SSE_CAP } from "./bus.js";
-export { getThread, UNTITLED, titleFrom, isSmallTalk, findThreads, threadLink, saveUpload } from "./threads.js";
+export { getThread, UNTITLED, titleFrom, isSmallTalk, findThreads, saveUpload } from "./threads.js";
 export { weekStart, weekSpend, billedUsage, planLimits } from "./spend.js";
 export { computer, brain, computerHooks, isBusy, isThinking } from "./machines.js";
-export { isRunning, sendMessage, blockedReason, memoryDelta, warmPlan, prewarmBrain, interrupt, compact, refresh, startQueued, startQueues, idleQueued, sendQueuedNow, removeQueued } from "./turns.js";
+export { isRunning, sendMessage, memoryDelta, warmPlan, prewarmBrain, interrupt, compact, refresh, startQueued, startQueues, idleQueued, sendQueuedNow, removeQueued } from "./turns.js";
 export { listQueued, enqueue } from "./queue.js";
-export { SNAP_MAX, SNAP_MAX_EXPLICIT, SNAP_SMALL, SNAP_MODES, READ_MAX, DATA_MAX, shapeSnapshot, snapshotDiff, verifyLine, readTabs, snapshotToText, maskSecrets, capData } from "./pageText.js";
+export { SNAP_MAX, DATA_MAX, shapeSnapshot, verifyLine, readTabs, snapshotToText, maskSecrets, capData } from "./pageText.js";
 export { tidyElement, ground } from "./grounding.js";
 export { pattern, describePattern, standingRule, LEARN_AFTER, learnProgress } from "./rules.js";
 export { shadowVerify, logDecision } from "./gate.js";
@@ -15,16 +15,15 @@ export { siteStep, afterAction, mayConfirm } from "./sitegate.js";
 export { lastScheduledRun, scheduleOverview, scheduleRuns, runScheduleNow, tickSchedules, scheduleHook, fireEvent } from "./schedules.js";
 export { paintings } from "./painting.js";
 export { toContentItems, frontTab } from "./browser.js";
-export { findMember } from "./delegation.js";
 export { parseHandoff } from "./planStore.js";
 export { stopPlan } from "./plans.js";
 export { inbox, markSeen, markAllSeen } from "./inbox.js";
-export { activity, describeCall, ALLOWED_BY } from "./activity.js";
+export { activity } from "./activity.js";
 export { sideAsk, sidePrompt, NOT_CONNECTED } from "./side.js";
 export { nextRun, addSchedule, listSchedules, updateSchedule, deleteSchedule, scheduleTitle, backfillScheduleTitles } from "./schedules.js";
 export { takeControl, handBack, leaseHeld } from "./lease.js";
 export { killSwitch, resumeCrew, bootRuntime, settleCutTurns, resumable, resumeCut } from "./lifecycle.js";
 export { pushConfig, setPushConfig, pushTest, markPresent, readActToken, phoneMayApprove, pitForAct } from "./push.js";
-export { doneCheck, parseGrade, normCriteria, setDoneCriteria, gatherEvidence, retryPrompt, sendBack, classifyCheck, meets, MAX_RETRIES } from "./donecheck.js";
+export { doneCheck, parseGrade, normCriteria, setDoneCriteria, sendBack, classifyCheck, meets, MAX_RETRIES } from "./donecheck.js";
 export { rewind, rewindPlan, boundaryOf, type RewindMode } from "./rewind.js";
 export { MAIL_DOMAIN, mailbox, setMailbox, mailSecret, driverEmails, setDriverEmails, receiveMail, mailboxes, senderKind } from "./mail.js";

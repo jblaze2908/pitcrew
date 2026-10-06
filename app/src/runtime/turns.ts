@@ -18,7 +18,7 @@ import { editMessage, editTarget, type EditRequest } from "../images.js";
 import { activePlan, planLog, emitPlan, planRow } from "./planStore.js";
 import { ensureMemberToken, threadContext, skillsIndex } from "../engram.js";
 import { memberLinked } from "../engramStore.js";
-import { setRollout } from "./scripts.js";
+import { setRollout, forgetRollout } from "./scripts.js";
 import { taint, tainted } from "./taint.js";
 import { postLearned } from "./learned.js";
 import { isUsageLimit, armResume, clearResume } from "./resume.js";
@@ -116,12 +116,22 @@ export function recentLines(threadId: string, current = "", max = 8000, me = "Yo
   }
   return lines;
 }
+/** A Codex fork on the member's model and sandbox, its rollout tracked for Code Mode scripts (scripts.ts). extra: e.g.
+ * beforeTurnId (rewind.ts). */
+export async function forkThread(c: Brain, b: Bot, codexId: string, extra: Record<string, unknown> = {}) {
+  const f = await c.request("thread/fork", { threadId: codexId, ...extra, model: b.model, modelProvider: b.provider, cwd: "/bot/work", sandbox: "danger-full-access", approvalPolicy: "untrusted", excludeTurns: true }, 120000);
+  setRollout(b.id, f.thread.id, f.thread.path);
+  return f.thread.id as string;
+}
+/** A Codex thread the Pitcrew thread no longer uses: stop routing its notifications, forget its rollout, unload it. */
+export function dropCodex(c: Brain, codexId: string) {
+  byCodex.delete(codexId); forgetRollout(codexId);
+  return c.unload(codexId);
+}
 /** A Codex fork of the thread for a retro: same history, tools and instructions, but nothing it does comes back to the
  * thread (rewind.ts forks the same way). One thread/fork per retro, plus the fork's MCP connect. */
 export async function retroFork(c: Brain, b: Bot, codexId: string) {
-  const f = await c.request("thread/fork", { threadId: codexId, model: b.model, modelProvider: b.provider, cwd: "/bot/work", sandbox: "danger-full-access", approvalPolicy: "untrusted", excludeTurns: true }, 120000);
-  const id = f.thread.id as string;
-  setRollout(b.id, id, f.thread.path);
+  const id = await forkThread(c, b, codexId);
   // The fork has heard what its parent heard: memories saved since go in as context, like on the parent.
   c.loaded.add(id); c.mems.set(id, new Map(c.mems.get(codexId) ?? []));
   await c.mcpReady(id);
@@ -148,7 +158,7 @@ export async function startTurn(threadId: string, text: string, attachments: str
     // dynamicTools). When the set changed since this Codex thread started, start a new one and carry a recap over.
     if (codexId && t.tools_sig !== sig) {
       const old = codexId;
-      await c.unload(old).catch(() => {}); byCodex.delete(old);
+      await dropCodex(c, old).catch(() => {});
       codexId = null;
       run("UPDATE threads SET codex_id=NULL, carry=? WHERE id=?", recap(threadId, t.carry, text), threadId);
       addEvent(threadId, null, "system", { text: `${b.name}'s tools changed, so it started fresh with a recap of this thread.` });
@@ -176,11 +186,9 @@ export async function startTurn(threadId: string, text: string, attachments: str
       // the history, dynamic tools and the original instructions (new ones are ignored), so Engram's current skills and
       // profile go in as this turn's context (all measured 2026-10-02, codex 0.156.1). The old thread is never resumed.
       const old = codexId, seen = c.mems.get(old);
-      const f = await c.request("thread/fork", { threadId: old, model: b.model, modelProvider: b.provider, cwd: "/bot/work", sandbox: "danger-full-access", approvalPolicy: "untrusted", excludeTurns: true }, 120000);
-      codexId = f.thread.id as string;
-      setRollout(b.id, codexId, f.thread.path);
+      codexId = await forkThread(c, b, old);
       run("UPDATE threads SET codex_id=? WHERE id=?", codexId, threadId);
-      await c.unload(old); byCodex.delete(old);
+      await dropCodex(c, old);
       c.loaded.add(codexId);
       c.mems.set(codexId, seen ?? new Map());  // unknown after a brain restart: every memory goes in as context
       await c.mcpReady(codexId);
@@ -284,8 +292,8 @@ export async function finishTurn(threadId: string, status: string, error?: strin
   // A retro on a fork: drop the fork; the thread gets one line saying why it ran and what it changed.
   const f = folded.get(a.turnId);
   if (a.fork) {
-    folded.delete(a.turnId); byCodex.delete(a.fork); usage.delete(a.fork);
-    brain(b).unload(a.fork).catch(() => {});
+    folded.delete(a.turnId); usage.delete(a.fork);
+    dropCodex(brain(b), a.fork).catch(() => {});
     const row = one<{ changes: string | null; started_at: number }>("SELECT changes, started_at FROM turns WHERE id=?", a.turnId);
     addEvent(threadId, null, "system", { text: `${a.retro || "Retro"} · ${retroOutcome(b.id, row?.started_at ?? now(), json<{ path: string }[]>(row?.changes, []), f?.reply || "", status)}`, retro: { turnId: a.turnId } });
   }

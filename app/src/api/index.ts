@@ -27,7 +27,6 @@ export const api = new Hono<Env>()
   .route("/", homeRoutes)
   .route("/", vaultRoutes)
   .route("/", listRoutes);
-export type AppType = typeof api;
 
 api.notFound((c) => c.json({ error: "Not found" }, 404));
 api.onError((e: HttpError, c) => {

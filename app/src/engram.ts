@@ -15,7 +15,7 @@ import { bus } from "./runtime/bus.js";
 import { addEvent } from "./runtime/threads.js";
 import { active } from "./runtime/state.js";
 import { tainted } from "./runtime/taint.js";
-import type { Bot, ArtifactFilter, PublishedPage, EngramDecision, EngramDigest, EngramMigration, EngramProposal, EngramScope, EngramStatus, PitStop } from "../shared/types.js";
+import type { Bot, ArtifactFilter, PublishedPage, EngramDecision, EngramDigest, EngramMigration, EngramProposal, EngramStatus, PitStop } from "../shared/types.js";
 import type { PitstopRow, MemoryRow } from "./models.js";
 
 const MAX_BYTES = 2 << 20, FILE_MAX = 10 << 20, PROFILE_MAX = 6000, SKILLS_INDEX_MAX = 2000;
@@ -126,7 +126,7 @@ export async function setLink(urlIn: unknown, tokenIn: unknown) {
 }
 
 export function unlink() {
-  const ids = dropMembers();
+  dropMembers();
   deleteSecret(LINK_SECRET);
   run("DELETE FROM settings WHERE key='engram_digest'");
   for (const p of all<{ id: string }>("SELECT id FROM pitstops WHERE kind='engram' AND status='pending'")) closePit(p.id, "Engram unlinked");
@@ -139,7 +139,6 @@ function dropMembers() {
   for (const id of ids) { deleteSecret(memberSecret(id)); restartIdle(id); }
   run("DELETE FROM engram_members"); run("DELETE FROM settings WHERE key LIKE 'engram_revoked:%'");
   synced.clear(); memCache.clear();
-  return ids;
 }
 
 export function status(): EngramStatus {
