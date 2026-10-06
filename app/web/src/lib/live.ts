@@ -13,11 +13,15 @@ export const GLOBAL: ReadonlySet<StreamType> = new Set(["thread", "turn", "pitst
 let es: EventSource | null = null;
 let watching: string | null = null;
 const handlers = new Set<(e: LiveEvent) => void>();
+const resyncs = new Set<() => void>();
 
 function connect(thread: string | null) {
   es?.close();
   watching = thread;
   const src = new EventSource(thread ? `/api/stream?thread=${encodeURIComponent(thread)}` : "/api/stream");
+  // EventSource reconnects by itself but replays nothing: whatever happened in the gap (a run ending) is refetched.
+  let opened = false;
+  src.onopen = () => { if (opened) resyncs.forEach((fn) => fn()); opened = true; };
   for (const type of TYPES) {
     src.addEventListener(type, (m) => {
       const e = { type, data: JSON.parse((m as MessageEvent<string>).data) } as LiveEvent;
@@ -42,6 +46,17 @@ export function useLive(fn: (e: LiveEvent) => void) {
     const h = (e: LiveEvent) => ref.current(e);
     handlers.add(h);
     return () => { handlers.delete(h); };
+  }, []);
+}
+
+/** Calls fn after the stream reconnects, when events may have been missed. */
+export function useResync(fn: () => void) {
+  const ref = useRef(fn);
+  useEffect(() => { ref.current = fn; });
+  useEffect(() => {
+    const h = () => ref.current();
+    resyncs.add(h);
+    return () => { resyncs.delete(h); };
   }, []);
 }
 

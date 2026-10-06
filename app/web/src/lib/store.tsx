@@ -2,7 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { BotCard, State } from "../../../shared/types";
 import { api } from "./api";
-import { GLOBAL, useLive } from "./live";
+import { GLOBAL, useLive, useResync } from "./live";
 
 interface Store {
   S: State;
@@ -29,6 +29,7 @@ export function StoreProvider({ initial, children }: { initial: State; children:
     if (next) setS(next);
   }, []);
 
+  useResync(() => { refresh(); });
   useLive((e) => {
     if (!GLOBAL.has(e.type)) return;
     clearTimeout(timer.current);
