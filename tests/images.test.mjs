@@ -163,3 +163,11 @@ test("the thread reads an edit message back: the version, the marks, the pins an
   assert.deepEqual(editOf(I.editMessage(bot.id, "Bigger date", { image: "/bot/work/out/images/lighthouse.png" }).text), { image: "out/images/lighthouse.png", typed: "Bigger date", marked: null, brushed: false, pins: [], model: null });
   assert.equal(editOf("Just a message"), null);
 });
+
+test("saving an image never goes through a linked out/ folder", async () => {
+  const { symlinkSync, readdirSync } = await import("node:fs");
+  mkdirSync(`${root}/bots/b_imglink/work`, { recursive: true }); mkdirSync(`${root}/img_outside`);
+  symlinkSync(`${root}/img_outside`, `${root}/bots/b_imglink/work/out`);
+  assert.throws(() => I.saveImage("b_imglink", PNG, "png", "sneaky"), /isn.t a folder/);
+  assert.deepEqual(readdirSync(`${root}/img_outside`), []);
+});
