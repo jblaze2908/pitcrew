@@ -78,3 +78,18 @@ test("India-time day and week starts the totals use, and the clock notes show", 
   assert.equal(U.istClock(t), "01:30");
   assert.equal(U.istStamp(t), "2026-10-08 01:30");
 });
+
+test("creating or editing a schedule never returns its webhook secret; the hook route does", async () => {
+  const m = C.createBot(C.normaliseSpec({ name: "Hooked", job: "h" }));
+  const send = async (method, path, body) => {
+    const res = await api.fetch(new Request(`http://pit.test${path}`, { method, body: JSON.stringify(body), headers: { cookie, "x-pitcrew": "1", "content-type": "application/json" } }), { outgoing: { headersSent: false } });
+    assert.equal(res.status, 200, path); return res.json();
+  };
+  const made = await send("POST", `/api/bots/${m.id}/schedules`, { spec: "on event", prompt: "Sort the new invoice", check: "ls" });
+  assert.equal("hook_secret" in made, false); assert.equal("check_last" in made, false);
+  const edited = await send("PATCH", `/api/schedules/${made.id}`, { prompt: "Sort every new invoice" });
+  assert.equal(edited.prompt, "Sort every new invoice");
+  assert.equal("hook_secret" in edited, false); assert.equal("check_last" in edited, false);
+  const hook = await get(`/api/schedules/${made.id}/hook`);
+  assert.ok(hook.secret && hook.secret.length >= 16, "the driver still reads it from the hook route");
+});
