@@ -1,8 +1,6 @@
-// Workspace snapshots, for "what did this turn change?" regardless of how (apply_patch, sed, npm, a script).
-// Runs twice per turn (start, end). Cost: one lstat per file; files are re-hashed only when size or mtime moved, using
-// the bot's previous manifest. Bounded at MAX_FILES; contents ≤ MAX_KEEP (text or not) are kept, deduped by hash, in a
-// root-only shadow dir outside the bot's mount, so a crew member can't see or rewrite its own history. They are the
-// restore points for rewinding a run (runtime/rewind.ts): a changed file costs one write of its new bytes, once per content.
+// Workspace snapshots: what a turn changed however it changed it, and the restore points for rewind.ts. Twice per turn:
+// one lstat per file (up to MAX_FILES), a re-hash only when size or mtime moved. Contents ≤ MAX_KEEP are kept by hash in a
+// root-only shadow dir outside the bot's mount, so a member can't see or rewrite its own history.
 import { lstatSync, readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, statSync, unlinkSync, chownSync, chmodSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { botDir, ROOT, CREW_UID } from "./computer.js";

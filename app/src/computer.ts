@@ -74,12 +74,9 @@ export function brainConfig(b: Bot, servers: McpServer[] = brainMcp(b)) {
   const q = (s: string) => JSON.stringify(String(s));
   const lines = [
     `# Written by the Pitcrew control plane at brain start. Edits here are overwritten.`,
-    // With ChatGPT auth, Codex pulls the account's apps and plugins (Gmail, Drive…) into every thread: ~100k tokens of
-    // tools per request (measured 2026-10-01) and authority no crew member was granted. Pitcrew supplies browser and
-    // computer tools itself, behind jev.
-    // Built-ins Pitcrew never serves: goal tools, request_user_input (answered "unhandled") and the skills catalogue.
-    // ~7 KB less per model request (measured 2026-10-01, codex 0.156.1, keys checked with --strict-config).
-    // image_generation stays on: Codex offers image_gen only on ChatGPT auth, billed to the plan (notify.ts saves results).
+    // Off: the ChatGPT account's apps and plugins (~100k tokens of tools per request, and authority nobody granted) and
+    // built-ins Pitcrew never serves (~7 KB per request); both measured 2026-10-01, codex 0.156.1. image_generation stays
+    // on: image_gen exists only on ChatGPT auth and bills the plan (notify.ts saves results).
     `[features]`, ...["apps", "plugins", "remote_plugin", "plugin_sharing", "recommended_plugins", "tool_suggest", "skill_mcp_dependency_install",
       "browser_use", "browser_use_external", "browser_use_full_cdp_access", "computer_use", "in_app_browser", "multi_agent", "realtime_conversation", "goals"].map((f) => `${f} = false`),
     `tool_call_mcp_elicitation = true`, ``,

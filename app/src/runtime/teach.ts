@@ -1,10 +1,7 @@
-// Teach by doing: while the driver holds a member's screen (lease.ts), a recorder in the computer notes what they do in
-// the browser the way a person would say it: pages opened, what was clicked (role and label, never coordinates), which
-// fields were typed into, forms sent, downloads. Typed text is never read: the page script has no access to field values,
-// and sanitizeStep keeps only whitelisted fields. On hand back the member hears the steps and the driver is offered
-// "Save as skill?"; the member drafts SKILL.md from them. The log lives in memory per lease, capped, and is dropped once used.
-// Cost: nothing unless a lease is held; then one docker exec running a CDP client on the computer's loopback, one JSON
-// line per driver action.
+// Teach by doing: while the driver holds a member's screen (lease.ts), a recorder notes their browser steps as a person
+// would say them (pages, clicked role and label, fields typed into, never the text), for the member to save as a skill.
+// Typed values never leave the page: the script can't read them and sanitizeStep keeps whitelisted fields only.
+// Cost: nothing without a lease; with one, one docker exec (a CDP client on loopback) and one JSON line per action.
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { one, run, driverName } from "../db.js";
