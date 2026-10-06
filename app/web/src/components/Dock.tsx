@@ -1,7 +1,7 @@
 // A small view-only window onto one crew member's screen that stays put while you move around the app.
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Bot } from "../../../shared/types";
-import { openScreen } from "../lib/novnc";
+import { useWatchScreen } from "../lib/novnc";
 import { Face } from "./ui";
 
 type Docked = Pick<Bot, "id" | "name" | "hue" | "shape">;
@@ -18,17 +18,7 @@ export function DockProvider({ children }: { children: ReactNode }) {
 
 function Dock({ b, onClose }: { b: Docked; onClose: () => void }) {
   const screen = useRef<HTMLDivElement>(null);
-  const [status, setStatus] = useState("Connecting…");
-  useEffect(() => {
-    let rfb: Awaited<ReturnType<typeof openScreen>> | null = null, gone = false;
-    openScreen(screen.current!, b.id, true).then((r) => {
-      if (gone) return r.disconnect();
-      rfb = r;
-      r.addEventListener("connect", () => setStatus("Live"));
-      r.addEventListener("disconnect", () => setStatus("Disconnected"));
-    }).catch((e: Error) => setStatus(e.message));
-    return () => { gone = true; rfb?.disconnect(); };
-  }, [b.id]);
+  const status = useWatchScreen(screen, b.id);
   return (
     <div className="dock">
       <div className="bar"><Face b={b} size="xs" /><b className="small">{b.name}</b><span className="small faint">{status}</span><span style={{ flex: 1 }} />

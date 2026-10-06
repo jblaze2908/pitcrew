@@ -4,11 +4,12 @@ import type { QueuedItem } from "../../../../shared/types";
 import { Icon } from "../../components/Icon";
 import { BusyButton, Seg } from "../../components/ui";
 import { api } from "../../lib/api";
+import { plural } from "../../lib/format";
+import { attachmentName, isImagePath } from "../../lib/images";
 import { go } from "../../lib/router";
 import { toast } from "../../lib/toast";
 
 interface Attachment { path: string; name: string; preview: string | null }
-const isImg = (n: string) => /\.(png|jpe?g|webp|gif)$/i.test(n);
 
 // Typed alone in the composer, these act on the thread instead of being sent to the crew member.
 interface Command { name: string; hint: string; when: "idle" | "running" | "any"; run: (threadId: string) => Promise<unknown> }
@@ -20,7 +21,6 @@ const COMMANDS: Command[] = [
 ];
 
 const viaLabel = (via: string, fromName: string) => via === "schedule" ? "Scheduled" : via === "plan" ? "Plan step" : via === "resume" ? "Pick up" : via === "retro" ? "Review" : via === "delegation" ? `${fromName} asks` : "Queued";
-const fileName = (p: string) => p.split("/").pop()!.replace(/^[a-z0-9]+-/, "");
 
 /** Messages waiting for the run to end, Claude Code style: they join the transcript only when they go to the member. */
 function QueuedStack({ threadId, queued, fromName, onEdit }: { threadId: string; queued: QueuedItem[]; fromName: string; onEdit: (q: QueuedItem) => Promise<void> }) {
@@ -31,7 +31,7 @@ function QueuedStack({ threadId, queued, fromName, onEdit }: { threadId: string;
         <div key={q.id} className="qi">
           <span className="lab">{viaLabel(q.via, fromName)}</span>
           <span className="txt" title={q.display || q.text}>{q.display || q.text}</span>
-          {q.attachments.length > 0 && <span className="n" title={q.attachments.map(fileName).join(", ")}>{`+${q.attachments.length} file${q.attachments.length > 1 ? "s" : ""}`}</span>}
+          {q.attachments.length > 0 && <span className="n" title={q.attachments.map(attachmentName).join(", ")}>{`+${plural(q.attachments.length, "file")}`}</span>}
           <span className="acts">
             <BusyButton onClick={() => api.post(`/api/threads/${threadId}/queue/${q.id}/send-now`)}>Send now</BusyButton>
             <BusyButton onClick={() => onEdit(q)}>Edit</BusyButton>
@@ -119,14 +119,14 @@ export function Composer({ threadId, name, running, queued, fromName, target, on
   const upload = async (files: File[]) => {
     for (const f of files) {
       const r = await api.post<{ path: string }>(`/api/threads/${threadId}/upload?name=${encodeURIComponent(f.name)}`, f, { raw: true });
-      setAtts((list) => [...list, { path: r.path, name: f.name, preview: isImg(f.name) ? URL.createObjectURL(f) : null }]);
+      setAtts((list) => [...list, { path: r.path, name: f.name, preview: isImagePath(f.name) ? URL.createObjectURL(f) : null }]);
     }
   };
   // Edit pulls the message back into the box (ahead of any draft); sending it again re-queues or delivers it.
   const edit = async (q: QueuedItem) => {
     await api.del(`/api/threads/${threadId}/queue/${q.id}`);
     setText((t) => (t.trim() ? `${q.text}\n${t}` : q.text));
-    setAtts((list) => [...list, ...q.attachments.filter((p) => !list.some((a) => a.path === p)).map((p) => ({ path: p, name: fileName(p), preview: null }))]);
+    setAtts((list) => [...list, ...q.attachments.filter((p) => !list.some((a) => a.path === p)).map((p) => ({ path: p, name: attachmentName(p), preview: null }))]);
     ta.current?.focus();
   };
   const remove = (a: Attachment) => { if (a.preview) URL.revokeObjectURL(a.preview); setAtts((list) => list.filter((x) => x !== a)); };

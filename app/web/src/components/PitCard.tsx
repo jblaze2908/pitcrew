@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import type { EngramDecision, Personality, PitStop } from "../../../shared/types";
 import { api } from "../lib/api";
-import { ago, kb, plainWords, unwrapShell, usd, when } from "../lib/format";
+import { ago, kb, plainWords, plural, unwrapShell, usd, when } from "../lib/format";
 import { pitLabel } from "../lib/steps";
 import { useStore } from "../lib/store";
 import { toast } from "../lib/toast";
@@ -222,6 +222,6 @@ function TeachSummary({ d, who }: { d: Record<string, any>; who: string }) {
   const steps: string[] = d.steps || [];
   return <div className="col" style={{ gap: 4 }}>
     <p className="small muted">{`${who} heard these steps. Save them and ${who} writes them up as a skill to do this itself next time.`}</p>
-    {steps.length > 0 && <details><summary className="small faint">{`${d.n} step${d.n === 1 ? "" : "s"}${d.full ? " (recording stopped there)" : ""} · typed text not recorded`}</summary><ol className="small">{steps.slice(0, 60).map((s, i) => <li key={i}>{s}</li>)}</ol>{steps.length > 60 && <p className="small faint">{`…and ${steps.length - 60} more`}</p>}</details>}
+    {steps.length > 0 && <details><summary className="small faint">{`${plural(d.n, "step")}${d.full ? " (recording stopped there)" : ""} · typed text not recorded`}</summary><ol className="small">{steps.slice(0, 60).map((s, i) => <li key={i}>{s}</li>)}</ol>{steps.length > 60 && <p className="small faint">{`…and ${steps.length - 60} more`}</p>}</details>}
   </div>;
 }

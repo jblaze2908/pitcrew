@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { Decision, SiteRow, SitesView } from "../../../../shared/types";
 import { EffectChip, Seg } from "../../components/ui";
 import { api } from "../../lib/api";
-import { when } from "../../lib/format";
+import { plural, when } from "../../lib/format";
 import { useFetch } from "../../lib/useFetch";
 import { Menu, useSaved } from "./kit";
 
@@ -39,7 +39,7 @@ export function Sites({ scope, intro }: { scope: string; intro?: string }) {
   const blocked = shown.filter((r) => r.mode === "blocked"), mine = shown.filter((r) => r.mode !== "blocked" && r.by !== "preset"), presets = shown.filter((r) => r.mode !== "blocked" && r.by === "preset");
   const allPresets = data.sites.filter((r) => r.mode !== "blocked" && r.by === "preset");
   const line = (r: SiteRow) => <Line key={r.domain} r={r} store={store} put={put} remove={async () => { await remove(r.domain); reload(); }} />;
-  const group = (title: string, rows: SiteRow[]) => rows.length > 0 && <div className="st-group"><div className="st-sub"><span>{title}</span><span>{rows.length === 1 ? "1 site" : `${rows.length} sites`}</span></div>{rows.map(line)}</div>;
+  const group = (title: string, rows: SiteRow[]) => rows.length > 0 && <div className="st-group"><div className="st-sub"><span>{title}</span><span>{plural(rows.length, "site")}</span></div>{rows.map(line)}</div>;
   // The presets folded to one line: the read-only ones by name, then any that differ.
   const ro = allPresets.filter((r) => kindOf(r) === "read").map((r) => r.domain), other = allPresets.filter((r) => kindOf(r) !== "read");
   const summary = [ro.length ? `${ro.slice(0, 6).join(", ")}${ro.length > 6 ? ` and ${ro.length - 6} more` : ""} ${ro.length === 1 ? "is" : "are"} read only.` : "",

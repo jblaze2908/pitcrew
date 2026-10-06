@@ -3,11 +3,11 @@ import { useEffect, useState } from "react";
 import type { EngramStatus } from "../../../../shared/types";
 import { BusyButton, Face } from "../../components/ui";
 import { api } from "../../lib/api";
-import { ago, plural } from "../../lib/format";
+import { ago, dayMonth, plural } from "../../lib/format";
 import { useStore } from "../../lib/store";
 import { toast } from "../../lib/toast";
 import { useFetch } from "../../lib/useFetch";
-import { day, Menu, Row, SecretRow, Section, TabHead, TextSave, Wide, useSaved } from "./kit";
+import { Menu, Row, SecretRow, Section, TabHead, TextSave, Wide, useSaved } from "./kit";
 
 export function Connections() {
   return (
@@ -64,7 +64,7 @@ function Memory() {
       {s.linked && <>
         <div className="st-sub"><span>Each member's access</span><span>A new token reaches a member when it next starts</span></div>
         {s.members.map((x) => {
-          const line = !x.eligible ? "Private, so it stays out until its memories go under Money or Health." : x.revoked ? `Its token was revoked in Engram${x.at ? ` on ${day(x.at)}` : ""}.` : x.linked ? `Own token since ${day(x.at)}` : "No token yet";
+          const line = !x.eligible ? "Private, so it stays out until its memories go under Money or Health." : x.revoked ? `Its token was revoked in Engram${x.at ? ` on ${dayMonth(x.at)}` : ""}.` : x.linked ? `Own token since ${dayMonth(x.at)}` : "No token yet";
           const rotate = async () => { after(await api.post<EngramStatus>(`/api/engram/members/${x.id}/rotate`), "New token"); };
           return (
             <Wide key={x.id} className="st-member">

@@ -10,6 +10,7 @@ import { MemberMenu } from "../components/MemberMenu";
 import { Surface } from "../components/Surface";
 import { Chev, ConfirmButton, Face, hueStyle, Loader } from "../components/ui";
 import { api } from "../lib/api";
+import { plural } from "../lib/format";
 import { useLive, useResync } from "../lib/live";
 import { go } from "../lib/router";
 import { useStore } from "../lib/store";
@@ -21,10 +22,9 @@ import { noteFolds, renderEvent, Steps, type EventCtx } from "./thread/Events";
 import { isCommand, TAB_LABEL, tabFor, useThreadRuns, WorkPanel, type LiveCmd, type Tab } from "./thread/WorkPanel";
 
 export function Thread({ id }: { id?: string }) {
-  const { S, setThreadBot, refresh } = useStore();
+  const { S, refresh } = useStore();
   useEffect(() => { if (!id) go("#/"); }, [id]);
   const { data, error } = useFetch(() => (id ? api.get<ThreadView>(`/api/threads/${id}`) : Promise.resolve(null)), [id]);
-  useEffect(() => { if (data) setThreadBot(data.bot.id); return () => setThreadBot(null); }, [data, setThreadBot]);
   // Loading the thread marked it seen on the server; Home's unread count catches up (only when it had any to drop).
   useEffect(() => { if (data && S.unread) refresh(); }, [data]);
   if (error && !data) return <div className="page"><p className="badc">{error}</p></div>;
@@ -275,7 +275,7 @@ function LiveThread({ d }: { d: ThreadView }) {
             if ("steps" in it) return <Steps key={it.key} events={it.steps} pits={pits} results={scriptResults} closeSignal={closeSteps} initialOpen={it.key === openOnLoad.current || liveIds.current.has(it.steps[0].id)} />;
             if ("rewound" in it) {
               const n = it.rewound.filter((e) => e.kind === "user" || e.kind === "agent").length;
-              return <details key={it.key} className="rewound"><summary>{`Rewound · ${n} message${n === 1 ? "" : "s"}`}<Icon name="chev" size={12} /></summary>
+              return <details key={it.key} className="rewound"><summary>{`Rewound · ${plural(n, "message")}`}<Icon name="chev" size={12} /></summary>
                 <div className="rw-body">{layout(it.rewound, { ...evCtx, rewind: undefined, onContinue: undefined }, true).map(draw)}</div></details>;
             }
             return <Fragment key={it.key}>{it.el}</Fragment>;
@@ -358,7 +358,6 @@ function ThreadSurface({ s }: { s: SurfaceRow }) {
   const [saved, setSaved] = useState(!!s.saved);
   const toggle = async () => { const next = !saved; setSaved(next); await api.post(`/api/surfaces/${s.id}/save`, { saved: next }); };
   return (
-    <Surface s={s} lockOnAction extra={<button className="small faint" onClick={toggle}>{s.data ? (saved ? "On Home" : "Pin to Home") : saved ? "Saved to Library" : "Keep in Library"}</button>}
-      onAction={async (action, values) => { await api.post(`/api/surfaces/${s.id}/action`, { action, values }); toast("Sent to the crew"); }} />
+    <Surface s={s} lockOnAction extra={<button className="small faint" onClick={toggle}>{s.data ? (saved ? "On Home" : "Pin to Home") : saved ? "Saved to Library" : "Keep in Library"}</button>} />
   );
 }

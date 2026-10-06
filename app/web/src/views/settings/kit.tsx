@@ -1,9 +1,9 @@
 // The one Settings template: tab head, sections, label/help rows, toggles, the quiet "Saved", secrets and the row menu.
 // Save model everywhere: a change saves at once (text on leaving the field) and "Saved" shows by that row.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { BlurInput, Switch } from "../../components/ui";
+import { dayMonth } from "../../lib/format";
 
-const dayFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" });
-export const day = (t: number | null | undefined) => (t ? dayFmt.format(new Date(t)).replace("Sept", "Sep") : "");
 
 export function TabHead({ title, intro }: { title: string; intro: string }) {
   return <div className="st-head"><h2>{title}</h2><p>{intro}</p></div>;
@@ -32,27 +32,25 @@ export function Row({ label, help, bad, saved, children, below }: { label: React
 /** A full-width row for lists and explainers that don't fit label + control. */
 export const Wide = ({ children, className = "" }: { children: ReactNode; className?: string }) => <div className={`st-row st-wide ${className}`}>{children}</div>;
 
-/** [shown, flash]: flash() shows the row's "Saved" for 2.5 s. */
-export function useSaved(): [boolean, () => void] {
-  const [on, setOn] = useState(false);
+/** [shown, flash]: flash(key) shows that key for `ms`, so one timer serves a page of rows. */
+export function useFlash<T>(ms: number): [T | null, (v: T) => void] {
+  const [on, setOn] = useState<T | null>(null);
   const t = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(t.current), []);
-  const flash = useCallback(() => { setOn(true); clearTimeout(t.current); t.current = setTimeout(() => setOn(false), 2500); }, []);
+  const flash = useCallback((v: T) => { setOn(() => v); clearTimeout(t.current); t.current = setTimeout(() => setOn(null), ms); }, [ms]);
   return [on, flash];
 }
 
-export function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
-  return <button type="button" role="switch" aria-checked={on} aria-label={label} className={`st-tg${on ? " on" : ""}`} onClick={() => onChange(!on)} />;
+/** [shown, flash]: flash() shows the row's "Saved" for 2.5 s. */
+export function useSaved(): [boolean, () => void] {
+  const [on, flash] = useFlash<true>(2500);
+  return [!!on, useCallback(() => flash(true), [flash])];
 }
 
-/** A text field that saves when you leave it (or press Enter), only if it changed. */
-export function TextSave({ value, onSave, placeholder, wide }: { value: string; onSave: (v: string) => Promise<unknown>; placeholder?: string; wide?: boolean }) {
-  const [v, setV] = useState(value);
-  useEffect(() => setV(value), [value]);
-  return <input className={`st-in${wide ? " wide" : ""}`} value={v} placeholder={placeholder} onChange={(e) => setV(e.target.value)}
-    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-    onBlur={() => { if (v !== value) onSave(v).catch(() => setV(value)); }} />;
-}
+export const Toggle = (p: { on: boolean; onChange: (v: boolean) => void; label: string }) => <Switch className="st-tg" {...p} />;
+
+export const TextSave = ({ value, onSave, placeholder, wide }: { value: string; onSave: (v: string) => Promise<unknown>; placeholder?: string; wide?: boolean }) =>
+  <BlurInput className={`st-in${wide ? " wide" : ""}`} value={value} placeholder={placeholder} onSave={onSave} />;
 
 /** A write-only secret: "Saved ···· date" and Replace, which opens an empty field. The value is never shown. */
 export function SecretRow({ label, help, bad, has, at, onSave, onRemove, placeholder, saveLabel = "Save", extra }: {
@@ -77,7 +75,7 @@ export function SecretRow({ label, help, bad, has, at, onSave, onRemove, placeho
   return (
     <Row label={label} help={help} bad={bad} saved={saved} below={has && open ? field : undefined}>
       {has ? <>
-        <span className="st-val">{`Saved ····${at ? ` ${day(at)}` : ""}`}</span>
+        <span className="st-val">{`Saved ····${at ? ` ${dayMonth(at)}` : ""}`}</span>
         {!open && <button className="st-q" onClick={() => setOpen(true)}>Replace</button>}
         {extra}
         {onRemove && <Menu items={[{ label: "Remove", danger: true, confirm: "Remove it?", run: onRemove }]} />}
