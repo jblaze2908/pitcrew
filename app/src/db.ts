@@ -1,6 +1,6 @@
 // SQLite store for the control plane. One file, WAL mode; every write is synchronous and small. synchronous=NORMAL skips
 // the per-commit fsync (0.56 → 0.005 ms, measured): a power cut can lose the last commits, never corrupt the file.
-import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import { randomBytes } from "node:crypto";
 
 export const DATA = process.env.PITCREW_DATA || "/srv/pitcrew/data";
@@ -166,9 +166,20 @@ type Param = SQLInputValue | undefined;
 
 export const now = () => Date.now();
 export const uid = (p: string) => `${p}_${randomBytes(9).toString("base64url")}`;
-export const one = <T = Row>(sql: string, ...a: Param[]) => db.prepare(sql).get(...(a as SQLInputValue[])) as T | undefined;
-export const all = <T = Row>(sql: string, ...a: Param[]) => db.prepare(sql).all(...(a as SQLInputValue[])) as T[];
-export const run = (sql: string, ...a: Param[]) => db.prepare(sql).run(...(a as SQLInputValue[]));
+// Prepared once per SQL text: preparing costs about 5 µs on a primary-key read, 30 µs on a list query (measured), on
+// every call. Bounded, oldest out, because IN (?,…) lists make one text per length.
+const stmts = new Map<string, StatementSync>(), STMT_MAX = 500;
+function stmt(sql: string) {
+  let s = stmts.get(sql);
+  if (!s) {
+    if (stmts.size >= STMT_MAX) stmts.delete(stmts.keys().next().value!);
+    stmts.set(sql, (s = db.prepare(sql)));
+  }
+  return s;
+}
+export const one = <T = Row>(sql: string, ...a: Param[]) => stmt(sql).get(...(a as SQLInputValue[])) as T | undefined;
+export const all = <T = Row>(sql: string, ...a: Param[]) => stmt(sql).all(...(a as SQLInputValue[])) as T[];
+export const run = (sql: string, ...a: Param[]) => stmt(sql).run(...(a as SQLInputValue[]));
 /** "?,?,?" for an IN list of xs. */
 export const marks = (xs: readonly unknown[]) => xs.map(() => "?").join(",");
 // Parsed JSON columns are dynamic; callers that care name T.
