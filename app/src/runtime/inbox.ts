@@ -2,7 +2,7 @@
 // opens its thread after it ended (threads.seen_at, set by GET /api/threads/:id and by an open thread when its run ends).
 // A delegated run also counts as seen once the asking thread was opened, since its answer lands there too. QUIET
 // schedule runs are listed but never unread: nothing happened worth a look.
-import { all, run, now, json } from "../db.js";
+import { all, run, now, json, marks } from "../db.js";
 import type { Inbox, InboxItem } from "../../shared/types.js";
 
 export const INBOX_DAYS = 7, INBOX_SCAN = 80, READ_KEEP = 8;
@@ -28,7 +28,7 @@ export function inbox(at = now()): Inbox {
     WHERE t.ended_at>=? AND t.status IN ('completed','failed') AND t.trigger!='retro' AND th.archived=0 ORDER BY t.ended_at DESC LIMIT ?`, at - INBOX_DAYS * 86400000, INBOX_SCAN);
   const origins = new Map(rows.map((r) => [r.turn_id, json<{ kind?: string; fromBot?: string; fromThread?: string }>(r.origin, {})]));
   const asking = [...new Set([...origins.values()].filter((o) => o.kind === "delegated" && o.fromThread).map((o) => o.fromThread!))];
-  const askSeen = new Map(asking.length ? all<{ id: string; seen_at: number | null }>(`SELECT id, seen_at FROM threads WHERE id IN (${asking.map(() => "?").join(",")})`, ...asking).map((r) => [r.id, r.seen_at]) : []);
+  const askSeen = new Map(asking.length ? all<{ id: string; seen_at: number | null }>(`SELECT id, seen_at FROM threads WHERE id IN (${marks(asking)})`, ...asking).map((r) => [r.id, r.seen_at]) : []);
   const waiting = new Set(all<{ thread_id: string }>("SELECT DISTINCT thread_id FROM pitstops WHERE status='pending' AND thread_id IS NOT NULL").map((r) => r.thread_id));
   // "Waiting on you" is the thread's state now, so only its newest run carries it.
   const items: InboxItem[] = [], flagged = new Set<string>(); let read = 0;

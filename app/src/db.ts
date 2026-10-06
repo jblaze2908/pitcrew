@@ -169,6 +169,8 @@ export const uid = (p: string) => `${p}_${randomBytes(9).toString("base64url")}`
 export const one = <T = Row>(sql: string, ...a: Param[]) => db.prepare(sql).get(...(a as SQLInputValue[])) as T | undefined;
 export const all = <T = Row>(sql: string, ...a: Param[]) => db.prepare(sql).all(...(a as SQLInputValue[])) as T[];
 export const run = (sql: string, ...a: Param[]) => db.prepare(sql).run(...(a as SQLInputValue[]));
+/** "?,?,?" for an IN list of xs. */
+export const marks = (xs: readonly unknown[]) => xs.map(() => "?").join(",");
 // Parsed JSON columns are dynamic; callers that care name T.
 // A NULL column parses as null without throwing (JSON.parse(null) reads "null"), so null falls back to the default too.
 export const json = <T = any>(s: unknown, d: any = null): T => { if (s == null || s === "") return d; try { return JSON.parse(s as string) ?? d; } catch { return d; } };

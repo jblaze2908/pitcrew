@@ -1,7 +1,7 @@
 // The long lists (Pit stops history, Threads, Telemetry runs): filters validated against allowlists, parameterized SQL,
 // and "before" cursors so every page reads limit+1 rows off an index. Newer pages are the client's cursor stack.
 import { Hono } from "hono";
-import { one, all, json } from "../db.js";
+import { one, all, json, marks } from "../db.js";
 import * as R from "../runtime/index.js";
 import { listBots } from "../crew.js";
 import { shownTitle, shownLine } from "../runtime/threads.js";
@@ -61,10 +61,12 @@ const TOP = "(origin IS NULL OR json_extract(origin,'$.kind') IS NOT 'delegated'
 const COLS = "id,bot_id,replace(title,' · pinned','') AS title,status,pinned,archived,test,created_at,updated_at";
 const tidyText = (t: unknown) => String(t || "").replace(/[*_`#>]+|\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\s+/g, " ").trim().slice(0, 180);
 
-/** The last thing said in each thread, and whether it was the member: one grouped read over events_thread. */
+/** The last thing said in each thread, and whether it was the member: one statement, one backward events_thread probe
+ *  per thread that stops at the first message (a grouped MAX(id) read every event of every thread instead). */
 function lastLines(ids: string[]) {
   if (!ids.length) return new Map<string, { text: string; agent: boolean }>();
-  const rows = all<{ thread_id: string; kind: string; data: string }>(`SELECT thread_id, kind, data FROM events WHERE id IN (SELECT MAX(id) FROM events WHERE kind IN ('agent','user') AND thread_id IN (${ids.map(() => "?").join(",")}) GROUP BY thread_id)`, ...ids);
+  const rows = all<{ thread_id: string; kind: string; data: string }>(`SELECT th.id thread_id, e.kind, e.data FROM threads th
+    JOIN events e ON e.id=(SELECT id FROM events WHERE thread_id=th.id AND kind IN ('agent','user') ORDER BY id DESC LIMIT 1) WHERE th.id IN (${marks(ids)})`, ...ids);
   return new Map(rows.map((r) => [r.thread_id, { text: tidyText(json(r.data, {}).text), agent: r.kind === "agent" }]));
 }
 
@@ -78,7 +80,7 @@ export function threadPage(q: Q): ThreadPage {
   let rows: ThreadListRow[], pinned: ThreadListRow[] = [], next: string | null = null;
   if (s) {
     const hits = (bot ? listBots().filter((b) => b.id === bot) : listBots()).flatMap((b) => R.findThreads(b.id, s, { limit: 50 }));
-    const meta = hits.length ? new Map(all<ThreadListRow>(`SELECT ${COLS} FROM threads WHERE id IN (${hits.map(() => "?").join(",")})`, ...hits.map((h) => h.id)).map((r) => [r.id, r])) : new Map<string, ThreadListRow>();
+    const meta = hits.length ? new Map(all<ThreadListRow>(`SELECT ${COLS} FROM threads WHERE id IN (${marks(hits)})`, ...hits.map((h) => h.id)).map((r) => [r.id, r])) : new Map<string, ThreadListRow>();
     rows = hits.flatMap((h) => { const r = meta.get(h.id); return r && r.archived === archived && (test || !r.test) ? [{ ...r, snippet: h.snippet || undefined }] : []; });
   } else {
     const w = ["archived=?", TOP], a: (string | number)[] = [archived];
@@ -91,7 +93,7 @@ export function threadPage(q: Q): ThreadPage {
     const last = rows.at(-1); if (got.length > limit && last) next = cursorOf(last.updated_at, last.id);
   }
   const shown = [...pinned, ...rows];
-  const kidRows = shown.length && !s ? all<ThreadKid & { parent: string }>(`SELECT id,bot_id,title,status,updated_at,json_extract(origin,'$.fromThread') parent FROM threads WHERE json_extract(origin,'$.fromThread') IN (${shown.map(() => "?").join(",")}) ORDER BY created_at LIMIT 200`, ...shown.map((r) => r.id)) : [];
+  const kidRows = shown.length && !s ? all<ThreadKid & { parent: string }>(`SELECT id,bot_id,title,status,updated_at,json_extract(origin,'$.fromThread') parent FROM threads WHERE json_extract(origin,'$.fromThread') IN (${marks(shown)}) ORDER BY created_at LIMIT 200`, ...shown.map((r) => r.id)) : [];
   const lines = lastLines([...shown.filter((r) => !r.snippet).map((r) => r.id), ...kidRows.map((k) => k.id)]);
   for (const r of shown) { r.title = shownTitle(r.title); r.snippet = shownLine(r.snippet || lines.get(r.id)?.text || ""); }
   const kids: Record<string, ThreadKid[]> = {};
