@@ -10,7 +10,7 @@ import { MemberMenu } from "../components/MemberMenu";
 import { Surface } from "../components/Surface";
 import { Chev, ConfirmButton, Face, hueStyle, Loader } from "../components/ui";
 import { api } from "../lib/api";
-import { useLive } from "../lib/live";
+import { useLive, useResync } from "../lib/live";
 import { go } from "../lib/router";
 import { useStore } from "../lib/store";
 import { toast } from "../lib/toast";
@@ -94,6 +94,14 @@ function LiveThread({ d }: { d: ThreadView }) {
   const [pits, setPits] = useState<Record<string, PitStop>>(() => Object.fromEntries(d.pitstops.map((p) => [p.id, p])));
   const [surfaces, setSurfaces] = useState<Record<string, SurfaceRow>>(() => Object.fromEntries(d.surfaces.map((s) => [s.id, s])));
   const [running, setRunning] = useState(d.thread.running);
+  // After a dropped stream, take the server's word for the transcript and whether it's still running.
+  useResync(async () => {
+    const f = await api.get<ThreadView>(`/api/threads/${d.thread.id}`, { quiet: true }).catch(() => null);
+    if (!f) return;
+    setEvents(f.events); setQueued(f.queued); setRunning(f.thread.running);
+    setPits(Object.fromEntries(f.pitstops.map((p) => [p.id, p]))); setLive(f.commands || []);
+    if (!f.thread.running) { buffer.current = null; setStreaming(null); }
+  });
   const [title, setTitle] = useState(d.thread.title);
   const [autonomy, setAutonomy] = useState(d.thread.autonomy || "ask");
   const [pinned, setPinned] = useState(!!d.thread.pinned);
@@ -257,7 +265,7 @@ function LiveThread({ d }: { d: ThreadView }) {
       <section className="convo">
         <header className="thd">
           <TitleMenu id={id} title={title} onRenamed={setTitle} b={card} pinned={pinned} onPinned={setPinned} />
-          {origin ? <OriginChip origin={origin} threadId={id} b={b} /> : <a className="who" style={hueStyle(b.hue)} href={`#/crew/${b.id}`} title={`${b.name}'s profile`}><Face b={b} size="xs" mood={running ? "working" : "idle"} />{b.name}</a>}
+          {origin ? <OriginChip origin={origin} threadId={id} b={b} /> : <a className="who" style={hueStyle(b.hue)} href={`#/crew/${b.id}`} title={`${b.name}'s profile`}><Face b={b} size="xs" mood={running ? "working" : undefined} />{b.name}</a>}
           <span style={{ flex: 1 }} />
           {lease && <button className="pc-pill s" onClick={handBack}>Hand back</button>}
           {!showPanel && !side && tabs.length > 0 && <button className="reo" title="Open the work panel" onClick={() => setOpen(true)}><Icon name="panel" size={14} />{TAB_LABEL[cur!]}</button>}
@@ -340,7 +348,7 @@ function OriginChip({ origin: o, threadId, b }: { origin: Origin; threadId: stri
   return (
     <span className="row" style={{ gap: 6, flex: "none" }}>
       {o.by !== "driver" && <span className="small faint">{o.by === "names" ? "You named several" : "Picked for you"}</span>}
-      <button ref={pill} className="to alt" style={hueStyle(b.hue)} title={tip} onClick={() => setMenu(true)}><Face b={b} size="xs" mood="idle" />{b.name}<Chev /></button>
+      <button ref={pill} className="to alt" style={hueStyle(b.hue)} title={tip} onClick={() => setMenu(true)}><Face b={b} size="xs" />{b.name}<Chev /></button>
       {menu && pill.current && <MemberMenu anchor={pill.current} auto={false} exclude={b.id} onClose={() => setMenu(false)} onPick={reroute} />}
     </span>
   );
