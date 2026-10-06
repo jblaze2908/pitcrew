@@ -336,13 +336,9 @@ export function toContentItems(content: McpContent[], { codeMode = false } = {})
 }
 
 // ---------- tab focus ----------
-// Playwright drives its own current tab, which needn't be Chrome's foreground one (a popup opened, the driver switched
-// tabs in the live view, or a fresh MCP session adopted tab 0). Then the live view shows another tab, and Chrome throttles
-// the background tab's animation frames, so clicks wait on stability checks and time out. Before each action, bring the
-// agent's tab to the front. Costs two local MCP calls, only while more than one tab is open.
-// Only when something could have moved the foreground: the first action of a session, a change in the tab count (a popup,
-// a closed tab), or a driver watching the live view (they can switch tabs there). Otherwise the agent's tab is still in
-// front, and the check cost two MCP calls per action (the Blinkit backfill ran 165 navigations with 3 tabs open).
+// Chrome throttles a background tab, so actions on Playwright's tab time out when another is in front (a popup, the
+// driver switching tabs in the live view). Two local MCP calls bring it forward, only when the foreground could have
+// moved: a session's first action, a changed tab count, or a driver watching.
 const tabCounts = new WeakMap<Rpc, number>(); // browser MCP session → tab count from its last response
 const fronted = new WeakSet<Rpc>();            // sessions whose current tab was brought to the front since the count last changed
 export const needsFront = (mcp: Rpc, viewers = 0) => viewers > 0 || !fronted.has(mcp);

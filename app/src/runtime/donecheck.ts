@@ -1,10 +1,6 @@
-// Done-check: when a run whose member named its done criteria (set_done_criteria) finishes, Pitcrew checks only those.
-// A criterion with a check runs that read-only command on the member's computer and passes or fails on its output, no
-// model; one without is judged by a second model from the screenshot, last page and files. No criteria, no check.
-// Fail → the member goes back once with what failed; still failing → a quiet "Not confirmed" note, never a pit stop.
-// Scheduled runs are checked only when their schedule's grade flag is on. Cost per checked run, after finishTurn and
-// off its path: ≤6 docker execs (20 s cap each), one gate classification per check (rules, else one jev call), and at
-// most one model ask, only when some criterion has no check. No grader → those criteria are "not checked".
+// Done-check: a finished run with criteria (set_done_criteria) gets each check command run read-only on its computer, and
+// the criteria without one judged by a second model from the evidence. A fail goes back once, then a "Not confirmed" note.
+// Per checked run, off finishTurn's path: ≤6 docker execs (20 s cap each), one gate verdict per check, ≤1 model ask.
 import { readFileSync } from "node:fs";
 import { one, all, run, now, json, getSetting, audit, marks } from "../db.js";
 import { getSecret } from "../auth.js";

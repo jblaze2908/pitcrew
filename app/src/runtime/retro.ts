@@ -61,11 +61,8 @@ export function reportText(r: RunReport) {
     `Tool calls: ${tools}.`, `Failed ${r.failed}, declined ${r.declined}, blocked ${r.blocks}, pit stops ${r.pitstops}, rate-limited ${r.limits}.`,
     r.repeated.length ? `Repeated: ${r.repeated.join(", ")}.` : ""].filter(Boolean).join("\n");
 }
-// A retro runs on a Codex fork of the thread (turns.ts startTurn), so the thread's context never carries it. Before, the
-// prompt (764 chars for a five-tool report, measured 2026-10-05; ~200 tokens, estimate) plus every tool call, output
-// and the reply of the retro stayed in the thread and rode as input on each later turn until compaction. Now: none of it.
-// The retro turn itself costs what it did, except the fork may miss the provider's prompt cache on the inherited history
-// once (estimate: verify with cached_tokens / input_tokens on a trigger='retro' turn). The thread keeps one summary line.
+// A retro runs on a Codex fork (turns.ts startTurn), so none of it rides in the thread's later turns; the fork may miss
+// the prompt cache once (estimate: check cached_tokens / input_tokens on a trigger='retro' turn).
 /** What a retro changed, for its summary line: skill folders and other files from the turn's changes, memory rewritten
  * or forgotten and suggestions filed since it started (two indexed counts; another thread's edits in that window count too). */
 export function retroOutcome(botId: string, since: number, changes: { path: string }[], reply: string, status: string) {
