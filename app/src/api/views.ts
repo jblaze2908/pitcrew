@@ -12,6 +12,7 @@ import type { Bot, BotCard, Mood, PitStop, ProviderId, State, ThreadSummary, Thr
 import type { PitstopRow, EventRow, LearnedRow, SurfaceRow } from "../models.js";
 import { liveCommands } from "../runtime/state.js";
 import { balanceAlerts } from "../runtime/balance.js";
+import { shownTitle } from "../runtime/threads.js";
 
 // An Engram proposal waits on the driver, not on the member it's filed under, so it doesn't make that member "needs".
 function mood(b: Bot, threads: ThreadSummary[], pending: { bot_id: string; kind?: string }[], up: boolean): Mood {
@@ -29,7 +30,7 @@ export function botCard(b: Bot, pending: { bot_id: string; kind?: string }[], li
   const threads = all<ThreadSummary>(`SELECT id,replace(title,' · pinned','') AS title,status,created_at,updated_at,pinned FROM threads WHERE bot_id=? AND archived=0 AND test=0 AND (origin IS NULL OR json_extract(origin,'$.kind') IS NOT 'schedule'
     OR status IN ('running','needs') OR EXISTS (SELECT 1 FROM schedule_runs r WHERE r.thread_id=threads.id AND r.status IN ('reported','failed') AND r.fired_at>?)) ORDER BY pinned DESC, updated_at DESC LIMIT ?`, b.id, Date.now() - 48 * 3600000, limit);
   const c = allComputers().find((x) => x.bot.id === b.id), br = allBrains().find((x) => x.bot.id === b.id);
-  return { ...b, threads, mood: mood(b, threads, pending, !!c?.up || !!br?.up), spend: R.weekSpend(b.id), computer: { up: !!c?.up, desktop: !!c?.desktopUp, startedAt: c?.startedAt ?? null, lease: R.leaseHeld(b.id) } };
+  return { ...b, threads: threads.map((t) => ({ ...t, title: shownTitle(t.title) })), mood: mood(b, threads, pending, !!c?.up || !!br?.up), spend: R.weekSpend(b.id), computer: { up: !!c?.up, desktop: !!c?.desktopUp, startedAt: c?.startedAt ?? null, lease: R.leaseHeld(b.id) } };
 }
 export const pitRow = R.pitRow;
 export const LEARNED = `SELECT l.rowid id, l.*, ${R.LEARN_AFTER} need, b.name bot_name FROM learned l JOIN bots b ON b.id=l.bot_id`;
@@ -61,6 +62,6 @@ export async function threadView(id: string): Promise<ThreadView> {
   // Bound dashboards run their queries here (cached per ledger version; ledger.ts), once per thread load.
   const surfaces = surfIds.length ? await Promise.all(all<Pick<SurfaceRow, "id" | "title" | "spec" | "saved" | "bot_id">>(`SELECT id,title,spec,saved,bot_id FROM surfaces WHERE id IN (${surfIds.map(() => "?").join(",")})`, ...surfIds)
     .map(({ bot_id, ...s }) => resolveSurface({ ...s, spec: json(s.spec) }, bot_id))) : [];
-  return { thread: { ...t, running: R.isRunning(id) }, bot: getBot(t.bot_id)!, events, pitstops: pits, surfaces, queued: R.listQueued(id), painting: R.paintings(id),
+  return { thread: { ...t, title: shownTitle(t.title), running: R.isRunning(id) }, bot: getBot(t.bot_id)!, events, pitstops: pits, surfaces, queued: R.listQueued(id), painting: R.paintings(id),
     commands: [...liveCommands.values()].filter((c) => c.threadId === id).map(({ threadId: _, ...c }) => c) };
 }

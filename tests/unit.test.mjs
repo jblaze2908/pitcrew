@@ -2122,3 +2122,13 @@ test("OpenRouter balance: a notice at 90% used, dismissed once, back after a top
   assert.equal(B.balanceAlerts().length, 1, "a new total is a new notice");
   setSetting("or_balance", "");
 });
+
+test("lists show titles and previews tidied; a done-check never says Couldn't confirm twice", async () => {
+  const T = await import("../app/dist/src/runtime/threads.js");
+  assert.equal(T.shownTitle("Grocery Tracker · pinned"), "Grocery Tracker");
+  assert.equal(T.shownTitle("Daily Blinkit ledger update for Jai. · 5 Oct"), "Daily Blinkit ledger update for Jai · 5 Oct");
+  assert.equal(T.shownTitle("Ends with a period."), "Ends with a period.", "only the run-date form loses its period");
+  assert.equal(T.shownLine("QUIET: checked Blinkit"), "Nothing new · checked Blinkit");
+  const p = R.pitRow({ id: "x", title: "Couldn't confirm Couldn't confirm the order is in the CSV", detail: "{}", jev: "{}", status: "approved", kind: "check" });
+  assert.equal(p.title, "Couldn't confirm the order is in the CSV");
+});

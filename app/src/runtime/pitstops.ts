@@ -18,7 +18,8 @@ import { applyCheckDecision } from "./donecheck.js";
 export const pitRow = (p: PitstopRow | undefined): PitStop | undefined => {
   if (!p) return p;
   const detail = json(p.detail, {}), match = detail.pattern || detail.signature;
-  return { ...p, detail, jev: json(p.jev, {}), learn: p.status === "pending" ? learnProgress(p) : null, similar: p.status === "pending" && match && ["command", "mcp"].includes(p.kind) ? describePattern(match) : null };
+  // A done-check grader sometimes opens its headline with our own "Couldn't confirm"; older rows kept both.
+  return { ...p, title: p.title.replace(/^(Couldn't confirm) couldn'?t confirm:?\s*/i, "$1 "), detail, jev: json(p.jev, {}), learn: p.status === "pending" ? learnProgress(p) : null, similar: p.status === "pending" && match && ["command", "mcp"].includes(p.kind) ? describePattern(match) : null };
 };
 
 export interface PitStopSpec { id?: string; botId: string; threadId: string | null; kind: string; effect: string; title: string; detail: object; jev?: object; expiresMin?: number }

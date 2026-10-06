@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { one, all, json } from "../db.js";
 import * as R from "../runtime/index.js";
 import { listBots } from "../crew.js";
+import { shownTitle, shownLine } from "../runtime/threads.js";
 import { signedIn, type Env } from "../http/guard.js";
 import type { PitHistoryPage, PitHistoryRow, RunPage, RunRow, TelemetrySummary, ThreadKid, ThreadListRow, ThreadPage } from "../../shared/types.js";
 import type { PitstopRow } from "../models.js";
@@ -50,7 +51,7 @@ export function pitHistory(q: Q, at = Date.now()): PitHistoryPage {
   const from = "FROM pitstops p LEFT JOIN threads th ON th.id=p.thread_id";
   const page = all<PitstopRow & { thread_title: string | null }>(`SELECT p.*, th.title thread_title ${from} WHERE ${[...w, ...(cur ? ["(p.created_at<? OR (p.created_at=? AND p.id<?))"] : [])].join(" AND ")} ORDER BY p.created_at DESC, p.id DESC LIMIT ?`,
     ...a, ...(cur ? [cur.ts, cur.ts, cur.id] : []), limit + 1);
-  const rows = page.slice(0, limit).map((p) => ({ ...R.pitRow(p)!, thread_title: p.thread_title }) as PitHistoryRow), last = rows.at(-1);
+  const rows = page.slice(0, limit).map((p) => ({ ...R.pitRow(p)!, thread_title: p.thread_title && shownTitle(p.thread_title) }) as PitHistoryRow), last = rows.at(-1);
   return { rows, next: page.length > limit && last ? cursorOf(last.created_at, last.id) : null, total: cur ? null : one<{ n: number }>(`SELECT COUNT(*) n ${from} WHERE ${w.join(" AND ")}`, ...a)!.n };
 }
 
@@ -92,9 +93,9 @@ export function threadPage(q: Q): ThreadPage {
   const shown = [...pinned, ...rows];
   const kidRows = shown.length && !s ? all<ThreadKid & { parent: string }>(`SELECT id,bot_id,title,status,updated_at,json_extract(origin,'$.fromThread') parent FROM threads WHERE json_extract(origin,'$.fromThread') IN (${shown.map(() => "?").join(",")}) ORDER BY created_at LIMIT 200`, ...shown.map((r) => r.id)) : [];
   const lines = lastLines([...shown.filter((r) => !r.snippet).map((r) => r.id), ...kidRows.map((k) => k.id)]);
-  for (const r of shown) if (!r.snippet) r.snippet = lines.get(r.id)?.text || "";
+  for (const r of shown) { r.title = shownTitle(r.title); r.snippet = shownLine(r.snippet || lines.get(r.id)?.text || ""); }
   const kids: Record<string, ThreadKid[]> = {};
-  for (const { parent, ...k } of kidRows) (kids[parent] ||= []).push({ ...k, snippet: lines.get(k.id)?.text || "", replied: !!lines.get(k.id)?.agent });
+  for (const { parent, ...k } of kidRows) (kids[parent] ||= []).push({ ...k, title: shownTitle(k.title), snippet: shownLine(lines.get(k.id)?.text || ""), replied: !!lines.get(k.id)?.agent });
   const counts = cur || s ? null : one<{ total: number; test: number; sub: number }>(`SELECT COALESCE(SUM(${TOP} AND test=0),0) total, COALESCE(SUM(${TOP} AND test=1),0) test, COALESCE(SUM(NOT ${TOP}),0) sub FROM threads WHERE archived=?${bot ? " AND bot_id=?" : ""}`, archived, ...(bot ? [bot] : []))!;
   return { pinned, rows, kids, next, total: counts ? counts.total + (test ? counts.test : 0) : s ? rows.length : null, hidden: counts && { test: test ? 0 : counts.test, sub: counts.sub } };
 }
