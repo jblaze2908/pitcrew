@@ -221,8 +221,9 @@ function LiveThread({ d }: { d: ThreadView }) {
   const plan = useMemo(() => { let p: PlanSnapshot | null = null; for (const e of events) if (e.kind === "plan") p = e.data as PlanSnapshot; return p; }, [events]);
   const card = { ...b, threads: b.threads || [], computer: b.computer || { up: false, desktop: false, startedAt: null, lease: false } } as BotCard;
   const runs = useThreadRuns(b.id, id, runsBump);
+  const seenScreen = useMemo(() => events.some((e) => tabFor(e) === "screen"), [events]), seenCmd = useMemo(() => events.some(isCommand), [events]);
   const tabs = (["plan", "screen", "terminal", "files"] as Tab[]).filter((t) =>
-    t === "plan" ? !!plan : t === "screen" ? card.computer.desktop || events.some((e) => tabFor(e) === "screen") : t === "terminal" ? live.length > 0 || events.some(isCommand) : runs.length > 0);
+    t === "plan" ? !!plan : t === "screen" ? card.computer.desktop || seenScreen : t === "terminal" ? live.length > 0 || seenCmd : runs.length > 0);
   const cur = tabs.includes(tab) ? tab : tabs[0];
   // The side question takes the right column while it's open; the work panel comes back when it closes.
   const showPanel = open && tabs.length > 0 && !side;

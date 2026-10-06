@@ -100,12 +100,13 @@ function Row({ s, open, onOpen, reload }: { s: Sched; open: boolean; onOpen: () 
   const runNow = async () => { await api.post(`/api/schedules/${s.id}/run`); toast("Started"); setTimeout(reload, 1500); };
   const toggle = async () => { await api.patch(`/api/schedules/${s.id}`, { enabled: !s.enabled }); reload(); };
   const next = s.next_run ? nextWhen(s.next_run) : null;
+  const oldestFirst = [...s.runs].reverse();
   return (
     <tr className={`sch2-row${open ? " on" : ""}${s.enabled ? "" : " off"}`} onClick={onOpen}>
       <td className="sch2-name"><b>{s.title || s.prompt.split("\n")[0]}</b><span className="sch2-who"><Face b={bot(s.bot_id)} size="xs" />{s.bot_name}</span></td>
       <td className="nw">{specWords(s.spec)}</td>
       <td className="nw">{!s.enabled ? <span className="faint">{isEvent(s.spec) ? "On the next event" : "When resumed"}</span> : next ? <>{`${next[0]} `}<span className="pc-m">{next[1]}</span></> : isEvent(s.spec) ? "On the next event" : ""}</td>
-      <td className="nw">{s.runs.length ? <span className="dots">{Array.from({ length: 14 }, (_, i) => { const r = [...s.runs].reverse()[i - (14 - s.runs.length)]; return <i key={i} className={r ? result(r)[1] : "none"} title={r ? `${sinceLabel(r.fired_at)} · ${result(r)[0]}` : ""} />; })}</span>
+      <td className="nw">{s.runs.length ? <span className="dots">{Array.from({ length: 14 }, (_, i) => { const r = oldestFirst[i - (14 - s.runs.length)]; return <i key={i} className={r ? result(r)[1] : "none"} title={r ? `${sinceLabel(r.fired_at)} · ${result(r)[0]}` : ""} />; })}</span>
         : <span className="faint">No runs yet</span>}</td>
       <td className={`nw${bad ? " badc" : ""}`}>{word}</td>
       <td className="sch2-acts" onClick={(e) => e.stopPropagation()}>

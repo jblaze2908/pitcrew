@@ -13,6 +13,7 @@ import { useFetch } from "../../lib/useFetch";
 import { specWords } from "../Schedules";
 
 const FIRST = 5; // threads shown before "All N threads"
+const LIST_MAX = 50; // api/lists.ts limitOf caps a page here
 const short = (t: number) => { const d = dayLabel(t); return d === "Today" ? hm(t) : d; };
 
 export function OverviewTab({ b, d }: { b: BotCard; d: BotDetail }) {
@@ -77,7 +78,7 @@ const flat = (p: ThreadPage) => [...p.pinned, ...p.rows];
 // Its threads with the last thing said; search covers titles and anything said in them.
 function Threads({ b }: { b: BotCard }) {
   const [q, setQ] = useState(""), [all, setAll] = useState(false);
-  const list = useFetch(() => api.get<ThreadPage>(`/api/threads?bot=${encodeURIComponent(b.id)}`, { quiet: true }).then(flat), [b.id]);
+  const list = useFetch(() => api.get<ThreadPage>(`/api/threads?bot=${encodeURIComponent(b.id)}&limit=${LIST_MAX}`, { quiet: true }).then(flat), [b.id]);
   useLiveReload((e) => e.type === "thread" && "botId" in e.data && e.data.botId === b.id, list.reload);
   const [found, setFound] = useState<ThreadListRow[] | null>(null);
   // Search waits for a 200 ms pause in typing.

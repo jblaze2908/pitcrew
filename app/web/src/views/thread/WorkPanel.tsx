@@ -37,7 +37,9 @@ interface Props {
 
 export function WorkPanel(p: Props) {
   const liveTab: Tab | null = p.live.length ? "terminal" : p.b.computer.desktop && p.running ? "screen" : null;
-  const count = (t: Tab) => t === "terminal" ? p.events.filter(isCommand).length + p.live.length : t === "files" ? new Set(p.runs.flatMap((r) => r.changes.map((c) => c.path))).size : t === "plan" && p.plan ? `${p.plan.items.filter((i) => i.status === "done").length}/${p.plan.items.length}` : null;
+  const nCmds = useMemo(() => p.events.filter(isCommand).length, [p.events]);
+  const nFiles = useMemo(() => new Set(p.runs.flatMap((r) => r.changes.map((c) => c.path))).size, [p.runs]);
+  const count = (t: Tab) => t === "terminal" ? nCmds + p.live.length : t === "files" ? nFiles : t === "plan" && p.plan ? `${p.plan.items.filter((i) => i.status === "done").length}/${p.plan.items.length}` : null;
   return (
     <aside className="work">
       <div className="wtop">
