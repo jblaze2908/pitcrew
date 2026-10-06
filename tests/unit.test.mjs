@@ -1076,6 +1076,7 @@ test("threads are named by the plan model once they have a topic, never over a t
   assert.equal(Tt.cleanTitle('"Blinkit order backfill."'), "Blinkit order backfill");
   assert.equal(Tt.cleanTitle("Title: Goa trip in December"), "Goa trip in December");
   assert.equal(Tt.cleanTitle("NONE"), null);
+  assert.equal(Tt.cleanTitle("Pitcrew latest changes source notes unavailable NONE"), null);
   assert.equal(Tt.cleanTitle("Tijori tool availability уточification"), null);
   assert.equal(Tt.cleanTitle("Поездка в Гоа"), "Поездка в Гоа");
   assert.equal(Tt.cleanTitle("Here is a long explanation of what this thread is about and why it matters a lot"), null);
@@ -1087,6 +1088,7 @@ test("threads are named by the plan model once they have a topic, never over a t
   assert.equal(await Tt.nameFromConversation("th_name", { ask }), null, "greetings alone are not sent");
   assert.equal(asked, null);
   say("user", "how are you doing?"); say("agent", "Good, ready.");
+  run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('th_name',NULL,'user',?,0)", JSON.stringify({ text: "[Done-check] source notes unavailable", via: "check" }));
   say("user", "pull my Swiggy orders since January into a CSV"); say("agent", "Pulled 63 orders into out/swiggy.csv");
   assert.equal(await Tt.nameFromConversation("th_name", { ask }), "Swiggy order history export");
   assert.equal(asked, "Driver: pull my Swiggy orders since January into a CSV\n\nAgent: Pulled 63 orders into out/swiggy.csv", "small talk and its replies are dropped");
@@ -1543,7 +1545,17 @@ test("done-check: fail steers the member twice, then a pit stop; Try again, Acce
   let called = 0;
   assert.equal(await R.doneCheck("th_dc2", t5, { grader: async () => { called++; return null; } }), "skipped");
   assert.equal(await R.doneCheck("th_dc2", turn("tu_dc10", "retro", "th_dc2", crit), { grader: async () => { called++; return null; } }), "skipped");
+  // A lookup (reading commands, opening a page) without criteria isn't graded; a click is.
+  const t6 = turn("tu_dc11", "driver", "th_dc2");
+  ev("th_dc2", t6, "tool", { type: "commandExecution", input: "whats_new", exitCode: 0, output: "ten notes" });
+  ev("th_dc2", t6, "tool", { type: "browser", title: "navigate https://example.com" });
+  ev("th_dc2", t6, "agent", { text: "Here's what changed." });
+  assert.equal(await R.doneCheck("th_dc2", t6, { grader: async () => { called++; return null; } }), "skipped");
   assert.equal(called, 0, "skipped runs never open a grader");
+  const t7 = turn("tu_dc12", "driver", "th_dc2");
+  ev("th_dc2", t7, "tool", { type: "browser", title: "click Place order on shop.example.com" });
+  ev("th_dc2", t7, "agent", { text: "Ordered." });
+  assert.equal(await R.doneCheck("th_dc2", t7, { grader: async () => null }), "unchecked", "a click is work, so it's graded");
 });
 
 test("rewind: files go back to before a run, links are never followed, the chat is marked and recapped", async () => {

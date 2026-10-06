@@ -35,8 +35,8 @@ export function Track({ pct, hue, shape, state = "working" }: { pct: number; hue
 
 export const Chev = () => <span className="chev" />;
 
-export function Md({ text, className = "md" }: { text: string | null | undefined; className?: string }) {
-  return <div className={className} dangerouslySetInnerHTML={{ __html: mdToHtml(text) }} />;
+export function Md({ text, className = "md", botId }: { text: string | null | undefined; className?: string; botId?: string }) {
+  return <div className={className} dangerouslySetInnerHTML={{ __html: mdToHtml(text, botId) }} />;
 }
 
 /** Inline code and bold as elements, the rest as plain text: for bubbles and one-line cells where block markdown won't fit. */

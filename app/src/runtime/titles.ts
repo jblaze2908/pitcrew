@@ -17,7 +17,7 @@ export function cleanTitle(s: unknown) {
   const t = String(s || "").split("\n")[0].replace(/^["'“”‘’`*#\s]+|["'“”‘’`*.\s]+$/g, "").replace(/^title:\s*/i, "").replace(/\s+/g, " ").trim();
   const words = t.split(" ").length;
   const mixed = /[A-Za-z][\u0400-\u04FF]|[\u0400-\u04FF][A-Za-z]/.test(t); // seen on gpt-6-luna: "уточification"
-  return t && !mixed && !/^none$/i.test(t) && words <= 8 && t.length <= 70 ? t : null;
+  return t && !mixed && !/\bNONE\b/.test(t) && words <= 8 && t.length <= 70 ? t : null;
 }
 
 /** The opening exchanges with greetings dropped: up to 3 driver messages and the first reply to each, 600 chars apiece.
@@ -27,8 +27,10 @@ export function openingText(threadId: string, latest = false) {
   const out: string[] = [];
   let asks = 0, skipping = false;
   for (const e of all<{ kind: string; data: string }>("SELECT kind, data FROM events WHERE thread_id=? AND kind IN ('user','agent') ORDER BY id LIMIT 60", threadId)) {
-    const text = String(json<{ text?: string }>(e.data, {}).text || "").trim();
+    const d = json<{ text?: string; via?: string }>(e.data, {}), text = String(d.text || "").trim();
     if (!text) continue;
+    // Pitcrew's own prompts (done-check retries, resumes, schedules) aren't the driver's words.
+    if (e.kind === "user" && d.via && d.via !== "driver") continue;
     if (e.kind === "user") {
       if (asks >= 3) break;
       if ((skipping = isSmallTalk(text))) continue;
@@ -46,7 +48,7 @@ function latestText(threadId: string) {
     const d = json<{ text?: string; via?: string }>(e.data, {}), text = String(d.text || "").trim();
     if (!text) continue;
     // Only what the driver typed: retro, resume, schedule and delegation prompts are Pitcrew's words.
-    if (e.kind === "user") { open = !d.via && !isSmallTalk(text); if (open) pairs.push([`Driver: ${text.slice(0, 600)}`]); }
+    if (e.kind === "user") { open = (!d.via || d.via === "driver") && !isSmallTalk(text); if (open) pairs.push([`Driver: ${text.slice(0, 600)}`]); }
     else if (open) { pairs.at(-1)!.push(`Agent: ${text.slice(0, 600)}`); open = false; }
   }
   return pairs.slice(-3).flat().join("\n\n");
