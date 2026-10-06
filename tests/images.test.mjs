@@ -9,6 +9,7 @@ mkdirSync(`${root}/data`); Object.assign(process.env, { PITCREW_ROOT: root, PITC
 const A = await import("../app/dist/src/auth.js");
 const I = await import("../app/dist/src/images.js");
 const C = await import("../app/dist/src/crew.js");
+const CT = await import("../app/dist/src/crewTools.js");
 const { dynamicTool } = await import("../app/dist/src/runtime/tools.js");
 const { onNotify } = await import("../app/dist/src/runtime/notify.js");
 const { active, byCodex } = await import("../app/dist/src/runtime/state.js");
@@ -38,7 +39,7 @@ writeFileSync(`${root}/outside.png`, PNG);
 
 test("generate_image needs an OpenRouter key and only gets the tool with one", async () => {
   await assert.rejects(I.generateImage(bot.id, { prompt: "a cat" }), /OpenRouter key/);
-  const names = (o) => C.dynamicTools(bot, undefined, o).map((t) => t.name);
+  const names = (o) => CT.dynamicTools(bot, undefined, o).map((t) => t.name);
   assert.ok(names({ images: true }).includes("generate_image"));
   assert.ok(!names({}).includes("generate_image"));
   A.putSecret("openrouter", "sk-or-test");

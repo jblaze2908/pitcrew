@@ -2,7 +2,8 @@
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { one, all, run, now, uid, json, getSetting, marks, driverName } from "../db.js";
-import { getBot, instructions, dynamicTools, engramBlock } from "../crew.js";
+import { getBot, instructions, engramBlock } from "../crew.js";
+import { dynamicTools } from "../crewTools.js";
 import { botDir, toolManifest } from "../computer.js";
 import { providerReady, estimateCost } from "../providers.js";
 import { snapshot, changes, pruneShadow } from "../snapshot.js";
