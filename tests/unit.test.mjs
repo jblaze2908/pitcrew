@@ -2224,3 +2224,33 @@ test("a retro on a fork streams no live activity, Pitcrew tools included", async
   assert.equal(activityNow.get("th_forked"), "remember", "the thread itself still shows it");
   active.delete("th_forked"); byCodex.delete("cx_main"); byCodex.delete("cx_fork"); activityNow.delete("th_forked");
 });
+
+test("the in-flight tool kind rides the activity event and the member card, and clears at turn end", async () => {
+  const { onNotify } = await import("../app/dist/src/runtime/notify.js");
+  const { active, byCodex } = await import("../app/dist/src/runtime/state.js");
+  const { bus, toolNow } = await import("../app/dist/src/runtime/bus.js");
+  const { botCard } = await import("../app/dist/src/api/views.js");
+  const { getBot } = await import("../app/dist/src/crew.js");
+  const T = await import("../app/dist/src/runtime/turns.js");
+  run("INSERT INTO bots(id,name,provider,created_at) VALUES('b_kind','Kind','openai',0)");
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_kind','b_kind','k',0,0)");
+  run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,provider,model,started_at) VALUES('tu_kind','th_kind','b_kind','running','chat','openai','m',1)");
+  byCodex.set("cx_kind", "th_kind"); active.set("th_kind", { turnId: "tu_kind", codexTurnId: null, base: null, total: null, last: null, usageFrom: 0 });
+  const scoped = [], global = [], tap = (into, type) => ({ writableLength: 0, destroy() {}, on() {}, write(s) { const m = new RegExp(`^event: ${type}\ndata: (.*)\n\n$`, "s").exec(s); if (m) into.push(JSON.parse(m[1])); } });
+  bus.add(tap(scoped, "activity"), "th_kind"); bus.add(tap(global, "tool"));
+  const br = { bot: { id: "b_kind" } }, start = (item) => onNotify(br, "item/started", { threadId: "cx_kind", item });
+  start({ type: "commandExecution", id: "k1", command: "ls" });
+  assert.equal(scoped.at(-1).toolKind, "shell");
+  assert.equal(botCard(getBot("b_kind"), []).toolKind, "shell");
+  start({ type: "mcpToolCall", id: "k2", server: "browser", tool: "browser_click", arguments: {} });
+  start({ type: "mcpToolCall", id: "k3", server: "browser", tool: "browser_type", arguments: {} });
+  assert.equal(scoped.at(-1).toolKind, "browser");
+  assert.equal(botCard(getBot("b_kind"), []).toolKind, "browser");
+  bus.emit("activity", { threadId: "th_kind", botId: "b_kind", text: "Computer up" });
+  assert.equal(toolNow.get("th_kind").kind, "browser", "an activity without a kind leaves it alone");
+  await T.finishTurn("th_kind", "completed");
+  assert.equal(toolNow.has("th_kind"), false);
+  assert.equal(botCard(getBot("b_kind"), []).toolKind, null);
+  assert.deepEqual(global.map((g) => g.toolKind), ["shell", "browser", null], "every client hears each change once, not each call");
+  byCodex.delete("cx_kind");
+});

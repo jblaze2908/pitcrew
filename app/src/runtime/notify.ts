@@ -2,6 +2,7 @@
 import { run } from "../db.js";
 import { recordChatgptLimits } from "../providers.js";
 import type { Brain } from "../computer.js";
+import type { ToolKind } from "../../shared/types.js";
 import { bus } from "./bus.js";
 import { active, byCodex, items, liveCommands, OUT_CAP, shellVerdicts, usage } from "./state.js";
 import { addEvent } from "./threads.js";
@@ -28,6 +29,17 @@ function toolTitle(it: Item) {
   }
 }
 // Text content, or the structured result when there is no text. Kept up to `max` for the step's Output.
+// What kind of tool an item is, for the face (shared/types.ts ToolKind).
+function toolKind(it: Item): ToolKind {
+  switch (it.type) {
+    case "commandExecution": return "shell";
+    case "fileChange": return "file";
+    case "webSearch": return "web";
+    case "imageGeneration": return "image";
+    case "mcpToolCall": return it.server === "browser" ? "browser" : it.server === "computer" ? "computer" : "other";
+    default: return "other";
+  }
+}
 function mcpResultText(it: Item, max = 1500) {
   const c = it.result?.content || it.result?.contentItems || [];
   const text = (Array.isArray(c) ? c : []).filter((x) => x.type === "text").map((x) => x.text).join("\n");
@@ -64,7 +76,7 @@ export function onNotify(c: Brain, method: string, p: Record<string, any>) {
       if (it.type === "imageGeneration") startPainting(threadId, { id: it.id, botId: c.bot.id, n: 1, aspect: "1:1", palette: paletteFor(""), model: "gpt-image-2" });
       // Browser and pixel tools announce themselves from their own handler, with the grounded element.
       if (!fork && (["commandExecution", "mcpToolCall", "fileChange", "webSearch", "imageGeneration"].includes(it.type) || (it.type === "dynamicToolCall" && !/^(browser|computer)_/.test(it.tool))))
-        bus.emit("activity", { threadId, botId: c.bot.id, text: toolTitle(it) });
+        bus.emit("activity", { threadId, botId: c.bot.id, text: toolTitle(it), toolKind: toolKind(it) });
       break;
     }
     case "item/completed": {

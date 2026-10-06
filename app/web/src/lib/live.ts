@@ -4,7 +4,7 @@ import type { StreamEvents, StreamType } from "../../../shared/types";
 
 export type LiveEvent = { [K in StreamType]: { type: K; data: StreamEvents[K] } }[StreamType];
 
-const TYPES = ["thread", "turn", "pitstop", "computer", "paused", "lease", "event", "delta", "activity", "context", "queue", "painting", "output"] as const satisfies readonly StreamType[];
+const TYPES = ["thread", "turn", "pitstop", "computer", "paused", "lease", "event", "delta", "activity", "context", "queue", "painting", "output", "tool"] as const satisfies readonly StreamType[];
 // A stream type missing from TYPES is never listened for (the Terminal once missed "output"): this fails the build instead.
 const everyType: Exclude<StreamType, (typeof TYPES)[number]> extends never ? true : never = true; void everyType;
 /** Events that change /api/state; the rest only matter to an open thread. */

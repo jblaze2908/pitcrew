@@ -59,7 +59,7 @@ export function Side({ route }: { route: Route }) {
     {nav(route.name === "library", "library", "Library", "#/library")}
   </>;
   // The face carries the member's state (asleep with its z, working with its light, done, needs you): sm is the smallest size that shows all of it.
-  const face = (b: BotCard) => <Face b={b} size="sm" />;
+  const face = (b: BotCard) => <Face b={b} size="sm" live />;
 
   if (rail) return (
     <aside className="side folded">

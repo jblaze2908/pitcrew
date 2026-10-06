@@ -1,6 +1,6 @@
 // The runtime: turns on each crew member's brain, its computer on demand, the jev gate and pit stops, Pitcrew tools,
 // delegation and plans, schedules, the screen lease and the kill switch. This is its public surface.
-export { bus, SSE_CAP } from "./bus.js";
+export { bus, SSE_CAP, toolKindOf } from "./bus.js";
 export { getThread, UNTITLED, titleFrom, isSmallTalk, findThreads, saveUpload } from "./threads.js";
 export { weekStart, weekSpend, billedUsage, planLimits } from "./spend.js";
 export { computer, brain, computerHooks, isBusy, isThinking } from "./machines.js";

@@ -6,7 +6,7 @@ type El<P> = DetailedHTMLProps<HTMLAttributes<HTMLElement>, HTMLElement> & P;
 declare module "react" {
   namespace JSX {
     interface IntrinsicElements {
-      "pc-bot": El<{ size?: string; hue?: string; shape?: string; mood?: string }>;
+      "pc-bot": El<{ size?: string; hue?: string; shape?: string; mood?: string; moment?: string }>;
       "pc-track": El<{ pct?: string; hue?: string; shape?: string; state?: string }>;
       "pc-loader": El<{ size?: string }>;
       "pc-logo": El<{ size?: string; wordmark?: string }>;
