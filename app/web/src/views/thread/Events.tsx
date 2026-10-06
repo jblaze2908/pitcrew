@@ -1,24 +1,19 @@
-// One transcript event as an element. Tool calls are grouped by the caller (see groupEvents).
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { attachmentName, imgFile, imgSrc, isImagePath, type Img, type ImageIndex } from "../../lib/images";
+// One transcript event as an element. layout.ts decides which events draw and groups tool calls into Steps.
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { editOf, type EditAsk } from "../../../../shared/edits";
 import type { Bot, DelegationCard as Deleg, PitStop, PlanSnapshot, ThreadEvent } from "../../../../shared/types";
 import { DelegationCard } from "../../components/DelegationCard";
-import { OUTCOME, PitCard } from "../../components/PitCard";
+import { PitCard } from "../../components/PitCard";
 import { PlanCard, PlanChip } from "../../components/PlanCard";
-import { BusyButton, Face, Inline, Md } from "../../components/ui";
-import { plainWords, plural, tidyTitle } from "../../lib/format";
-import { pitLabel, runSummary, stepView } from "../../lib/steps";
-import { Icon } from "../../components/Icon";
-import { StepIcon } from "../../components/StepIcon";
-import { api } from "../../lib/api";
-import { useFetch } from "../../lib/useFetch";
+import { Face, Inline, Md } from "../../components/ui";
+import { plural } from "../../lib/format";
+import { attachmentName, imgFile, imgSrc, isImagePath, type Img, type ImageIndex } from "../../lib/images";
+import { CheckLine, LearnedNotes, Note, said, SystemNote, userNote } from "./Notes";
 import { catches } from "./Painting";
 import { ReplyActions } from "./Rewind";
+import { Tool } from "./Steps";
 
-export const stepOk = (e: ThreadEvent) => e.data.status === "completed" && (e.data.exitCode == null || e.data.exitCode === 0);
-
-export function UserMsg({ e, botId, fromName, images, onView }: { e: ThreadEvent; botId: string; fromName: string; images?: ImageIndex; onView?: (im: Img) => void }) {
+function UserMsg({ e, botId, fromName, images, onView }: { e: ThreadEvent; botId: string; fromName: string; images?: ImageIndex; onView?: (im: Img) => void }) {
   const d = e.data;
   const via = d.via === "schedule" ? "Scheduled" : d.via === "delegation" ? `${fromName} asks` : d.via === "plan" ? "Plan step" : d.via === "resume" ? "Picked up again" : null;
   const ed = editOf(d.text), loose = (p: string): Img => ({ id: `a:${p}`, path: p, parentId: null, botId, caption: "", at: e.ts });
@@ -112,190 +107,6 @@ function Images({ e, b, c }: { e: ThreadEvent; b: Bot; c: EventCtx }) {
   );
 }
 
-/** A Code Mode script: its code, and its output once the turn has it (a scriptResult event, merged in by callId). */
-function Script({ e, result }: { e: ThreadEvent; result?: Record<string, any> }) {
-  const failed = !!result && result.status !== "completed", lines = String(e.data.code || "").split("\n").length;
-  return (
-    <details className="tool script"><summary><StepIcon name="code" /><span className="lbl">Ran a script</span><span className="det">{`${plural(lines, "line")}${result ? "" : " · running"}`}</span>{failed && <span className="tag failed">Failed</span>}</summary>
-      <pre>{e.data.code}</pre>
-      {result?.output && <><p className="small faint" style={{ margin: "8px 0 4px" }}>Output</p><pre>{result.output}</pre></>}
-    </details>
-  );
-}
-
-// JSON reads better indented; anything else as it came.
-const asJson = (t: string) => { try { const j = JSON.parse(t); return typeof j === "object" && j ? JSON.stringify(j, null, 2) : null; } catch { return null; } };
-// Engram puts a one-line untrusted notice before the JSON; keep the line, indent the rest.
-const pretty = (s: unknown) => {
-  const t = String(s ?? ""), whole = asJson(t);
-  if (whole) return whole;
-  const nl = t.indexOf("\n"), rest = nl > 0 ? asJson(t.slice(nl + 1)) : null;
-  return rest ? `${t.slice(0, nl)}\n\n${rest}` : t;
-};
-function Section({ label, text, bad }: { label: string; text: string; bad?: boolean }) {
-  const [copied, setCopied] = useState(false);
-  const copy = () => navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200); }, () => {});
-  return (
-    <div className={`dbg${bad ? " bad" : ""}`}>
-      <div className="dbg-h"><span>{label}</span><button type="button" className="small faint" onClick={copy}>{copied ? "Copied" : "Copy"}</button></div>
-      <pre>{text}</pre>
-    </div>
-  );
-}
-const ms = (d: Record<string, any>) => {
-  const n = typeof d.durationMs === "number" ? d.durationMs : d.timing && typeof d.timing === "object" ? Object.values(d.timing as Record<string, number>).reduce((a, b) => a + (Number(b) || 0), 0) : null;
-  return n == null ? null : n < 1000 ? `${Math.round(n)} ms` : `${(n / 1000).toFixed(1)} s`;
-};
-/** What a step did, for debugging: which tool, how long, how it ended, then its input, output and error. */
-function Debug({ d }: { d: Record<string, any> }) {
-  const meta = [d.server && d.tool ? `${d.server} · ${d.tool}` : d.type, ms(d), d.status, d.exitCode != null ? `exit ${d.exitCode}` : null, d.cwd ? `in ${d.cwd}` : null, d.viaScript ? "from a script" : null].filter(Boolean).join(" · ");
-  return (
-    <div className="tool-debug">
-      <p className="small faint">{meta}</p>
-      {d.input && <Section label="Input" text={pretty(d.input)} />}
-      {d.output && <Section label="Output" text={pretty(d.output)} />}
-      {d.error && <Section label="Error" text={String(d.error)} bad />}
-    </div>
-  );
-}
-
-const SECRET_SCOPE: Record<string, string> = { thread: "allowed for this task", always: "always allowed", once: "allowed once" };
-/** pit: the decided pit stop that gated this call, shown as its outcome tag and jev's reason instead of a row of its own. */
-export function Tool({ e, results, pit }: { e: ThreadEvent; results?: Map<string, Record<string, any>>; pit?: PitStop }) {
-  if (e.data.type === "script") return <Script e={e} result={results?.get(e.data.callId)} />;
-  const failed = !stepOk(e) && e.data.status !== "inProgress";
-  const v = stepView(tidyTitle(e.data.title), e.data.conn), j = pit?.jev || {};
-  return <details className={`tool${e.data.viaScript ? " nested" : ""}`}><summary><StepIcon name={v.icon} /><span className="lbl">{v.label}</span>{v.detail && <span className={`det${v.icon === "terminal" ? " code" : ""}`}>{v.detail}</span>}
-    {failed ? <span className="tag failed">Failed</span> : pit && <span className={`tag ${pit.status}`}>{pit.kind === "secret" && pit.status === "approved" ? SECRET_SCOPE[pit.scope || ""] || OUTCOME.approved : OUTCOME[pit.status]}</span>}</summary>
-    {j.reason && <p className="why">{`Safety check: ${plainWords(j.reason)}`}</p>}<Debug d={e.data} /></details>;
-}
-
-/** Each decided pit stop's gated call: the next tool call within 4 steps with the same label (an approved call runs
- * right after its pit stop). A pit stop with no such call (denied, expired) keeps its own row. */
-function gatedCalls(events: ThreadEvent[], pits: Record<string, PitStop>) {
-  const byCall = new Map<number, PitStop>(), merged = new Set<number>();
-  events.forEach((e, i) => {
-    const p = e.kind === "pitstop" ? pits[e.data.id] : undefined;
-    if (!p || p.status !== "approved") return;
-    const label = pitLabel(p).label;
-    const hit = events.slice(i + 1, i + 5).find((x) => x.kind === "tool" && !byCall.has(x.id) && stepView(tidyTitle(x.data.title), x.data.conn).label === label);
-    if (hit) { byCall.set(hit.id, p); merged.add(e.id); }
-  });
-  return { byCall, merged };
-}
-
-// Every system event in a thread is one quiet line: a small icon and a grey sentence aligned with the reply text.
-const NOTE_ICON = {
-  restart: '<path d="M13 8a5 5 0 1 1-1.5-3.5M13 2.5v2.5h-2.5"/>',
-  shield: '<path d="M8 2l5 2v4c0 3-2.2 5-5 6-2.8-1-5-3-5-6V4z"/>',
-  mark: '<path d="M4.5 2.5h7v11L8 11l-3.5 2.5z"/>',
-  tools: '<path d="M2.5 5h11M2.5 11h11"/><circle cx="6" cy="5" r="1.7" fill="var(--ground)"/><circle cx="10" cy="11" r="1.7" fill="var(--ground)"/>',
-  retro: '<path d="M3 4h7M3 8h10M3 12h5"/>',
-  clock: '<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2l2.2 1.4"/>',
-  quiet: '<path d="M12.5 10A5 5 0 0 1 6 3.5a5 5 0 1 0 6.5 6.5z"/>',
-  check: '<path d="M3.5 8.5l3 3 6-7"/>',
-  alert: '<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.5M8 11h.01"/>',
-  info: '<circle cx="8" cy="8" r="5.5"/><path d="M8 7.5v3.5M8 5h.01"/>',
-  mail: '<rect x="2.5" y="3.5" width="11" height="9" rx="1.5"/><path d="M3 4.5l5 4 5-4"/>',
-  compact: '<path d="M5 3l3 3 3-3M5 13l3-3 3 3"/>',
-  rewind: '<path d="M6.5 4.5L3 8l3.5 3.5M3 8h10"/>',
-} as const;
-type NoteIcon = keyof typeof NOTE_ICON;
-export function Note({ icon, bad, title, children }: { icon: NoteIcon; bad?: boolean; title?: string; children: ReactNode }) {
-  return <p className={`tnote${bad ? " bad" : ""}`} title={title}>
-    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: NOTE_ICON[icon] }} />
-    <span>{children}</span></p>;
-}
-/** Stored notes come with and without a full stop; each sentence ends once, with a space before any inline action. */
-// Older done-check notes repeat the grader's own "Couldn't confirm" after ours.
-const once = (s: string) => s.replace(/(couldn'?t confirm):?\s+couldn'?t confirm:?/gi, "$1");
-const said = (raw: string) => { const s = once(raw).trim(); return `${/[.!?…:)”"]$/.test(s) ? s : `${s}.`} `; };
-
-type Learned = { memory_id: string; text: string; state: "saved" | "held" | "known" | "replaced" | "undone" };
-const LEARNED_SAID: Record<Learned["state"], string> = { saved: "Remembered", held: "Waiting for your review before it's shared", known: "Already knew", replaced: "Remembered, replacing an older note", undone: "Undone" };
-/** What this run remembered, one note per memory with Undo inline; read from the turn, so an undo shows after a reload. */
-function LearnedNotes({ d }: { d: Record<string, any> }) {
-  const f = useFetch(() => api.get<{ items: Learned[] }>(`/api/turns/${d.turnId}/learned`, { quiet: true }), [d.turnId]);
-  const [items, setItems] = useState<Learned[] | null>(null);
-  const list = items ?? f.data?.items ?? null;
-  if (!list?.length) return null;
-  const undo = async (m: Learned) => setItems((await api.post<{ items: Learned[] }>(`/api/turns/${d.turnId}/learned/${encodeURIComponent(m.memory_id)}/undo`)).items);
-  return <>{list.map((m) => (
-    <Note key={m.memory_id} icon="mark">{said(`${LEARNED_SAID[m.state]}: ${m.text}`)}
-      {m.state === "saved" && <BusyButton className="lnk" busyLabel="Undoing…" onClick={() => undo(m)}>Undo</BusyButton>}</Note>))}</>;
-}
-
-const MODE_SAID: Record<string, string> = {
-  ask: "You switched this thread to Ask first: it asks before sending, paying, signing in, installing, sharing or deleting.",
-  handsfree: "You switched this thread to Hands-free: it stops only for paying, signing in, sending, sharing and deleting.",
-  yolo: "You switched this thread to YOLO: no pit stops, paying and sending included. Hard blocks and house rules still apply.",
-};
-// Mode notes are stored with the server's long sentence (api/threads.ts AUTONOMY_NOTE); the label before the colon names the mode.
-const modeOf = (t: string) => /^Ask first:/.test(t) ? "ask" : /^Hands-free:/.test(t) ? "handsfree" : /^YOLO:/.test(t) ? "yolo" : null;
-const isRestart = (e: ThreadEvent) => e.kind === "system" && /^Pitcrew restarted/.test(e.data.text || "");
-const CONTINUE = "Say continue to pick it up.";
-const isRemembered = (t: string) => /^(Remembered|Sent to Engram for [^:]*review): /.test(t);
-
-/** Notes that fold into a neighbour: a restart into the resume or "continue" right after it, and "Remembered" into the
- * run's memory notes (LearnedNotes). Also the newest mode note, the only one offering a way back. One pass per events change. */
-export function noteFolds(events: ThreadEvent[]) {
-  const hide = new Set<number>(), learned = new Set<string>();
-  let modeNote: number | null = null;
-  for (const e of events) {
-    if (e.kind === "learned" && e.turn_id) learned.add(e.turn_id);
-    if (e.kind === "system" && modeOf(e.data.text || "")) modeNote = e.id;
-  }
-  events.forEach((e, i) => {
-    if (isRestart(e)) {
-      const next = events.slice(i + 1, i + 5).find((x) => x.kind === "user" || x.kind === "system");
-      if (next && ((next.kind === "user" && next.data.via === "resume") || next.data.text === CONTINUE)) hide.add(e.id);
-    }
-    if (e.kind === "system" && e.turn_id && learned.has(e.turn_id) && isRemembered(e.data.text || "")) hide.add(e.id);
-  });
-  return { hide, modeNote };
-}
-
-/** A retro's note: "Looking back at the run · <why> · <what changed>" (runtime/turns.ts) as a sentence, the change behind Details. */
-function RetroNote({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-  const parts = text.split(" · "), why = parts.length > 2 ? parts[1] : null, outcome = parts.slice(why ? 2 : 1).join(" · ");
-  return <>
-    <Note icon="retro">{said(`How this run went: ${why || outcome || "looked back at it"}`)}
-      {why && outcome && <button className="lnk" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Hide" : "Details"}</button>}</Note>
-    {open && <p className="tnote sub"><span>{said(`Looking back on it: ${outcome}`)}</span></p>}
-  </>;
-}
-
-function SystemNote({ e, c }: { e: ThreadEvent; c: EventCtx }) {
-  const d = e.data, t = String(d.text || "");
-  // A restart cut the run (runtime/lifecycle.ts): nothing broke on the member's side, so no red.
-  if (isRestart(e)) return <Note icon="restart">Pitcrew restarted during this run, so it stopped partway.</Note>;
-  if (t === CONTINUE) return <Note icon="restart">{"Pitcrew restarted, so the last run stopped partway. "}{c.onContinue && <button className="lnk" onClick={c.onContinue}>Pick up where it left off</button>}</Note>;
-  // A mode change isn't a failure: older YOLO notes were stored with the bad tone.
-  const mode = modeOf(t);
-  if (mode) return <Note icon="shield">{`${MODE_SAID[mode]} `}{mode !== "ask" && e.id === c.modeNote && c.autonomy === mode && c.onAutonomy && <button className="lnk" onClick={() => c.onAutonomy!("ask")}>Back to Ask first</button>}</Note>;
-  if (d.retro) return <RetroNote text={t} />;
-  const icon: NoteIcon = /tools changed|^Tools and skills reload/.test(t) ? "tools" : /^(Remembered|Noted for this thread|Learned|Sent to Engram)/.test(t) ? "mark"
-    : /compact/i.test(t) ? "compact" : /^Rewound/.test(t) ? "rewind" : /^(Usage limit|Scheduled|Changed schedule|Cancelled schedule)/.test(t) ? "clock"
-    : /untrusted content/.test(t) ? "shield" : /^Published/.test(t) ? "check" : d.tone === "bad" ? "alert" : "info";
-  return <Note icon={icon} bad={d.tone === "bad"}>{said(plainWords(t).replace(/^Sent to Engram for [^:]*review: /, "Waiting for your review before it's shared: "))}</Note>;
-}
-
-/** A user event that isn't the driver typing (a schedule, a resume, a retro) as a note; null for a real message. */
-function userNote(d: Record<string, any>): ReactNode {
-  switch (d.via) {
-    // The retry prompt itself: the done-check's own "trying again" note already says it.
-    case "check": return <></>;
-    case "retro": return <Note icon="retro">{said(String(d.display || "Looked back at the run").replace(/^Retro\b/, "Looked back at the run").replace(/ · /g, ": "))}</Note>;
-    case "teach": return <Note icon="mark">{said(String(d.display || "Save as skill").replace(/ · /g, ", "))}</Note>;
-    case "resume": return <Note icon="restart">{/^Pitcrew restarted/.test(d.text || "") ? "Pitcrew restarted and picked up where it left off." : "The usage limit reset, so it picked up where it left off."}</Note>;
-    case "email": return <Note icon="mail">{said(d.display || "An email arrived")}</Note>;
-    // A scheduled run's prompt is the same every time: a note, not a message bubble.
-    case "schedule": return <Note icon="clock">{/^\[Event\]/.test(d.text || "") ? said(d.display || "An event arrived") : said(`Scheduled run, ${String(d.text || "").replace(/^\[Scheduled: ([^\]]+)\][\s\S]*/, "$1")}`)}</Note>;
-  }
-  return null;
-}
-
 export interface EventCtx { cont?: boolean; b: Bot; fromName: string; pits: Record<string, PitStop>; latest: Map<string, Record<string, any>>; surface: (id: string) => ReactNode;
   /** Opens the work panel's Plan tab; when set, plans show as a chip in the chat instead of the full card. */
   onPlan?: () => void;
@@ -306,42 +117,6 @@ export interface EventCtx { cont?: boolean; b: Bot; fromName: string; pits: Reco
   rewind?: { ids: Set<number>; onRewound: () => void };
   /** Folded notes and the newest mode note (noteFolds), plus the thread's mode so that note can offer the way back. */
   hide?: Set<number>; modeNote?: number | null; autonomy?: string; onAutonomy?: (a: string) => void }
-
-type Crit = { text: string; verdict: "pass" | "fail" | "unknown"; why: string; check?: string; out?: string };
-const VERDICT_WORD: Record<string, string> = { pass: "Passed", fail: "Failed", unknown: "Not checked" };
-const bare = (why: string) => why.replace(/^not checked: /, "");
-/** The proof behind a done-check note: each criterion, the command that checked it and that command's output. */
-function CheckDetails({ crit }: { crit: Crit[] }) {
-  return <div className="chk-d">{crit.map((c, i) => <div key={i} className={`chk-c ${c.verdict}`}>
-    <span>{`${VERDICT_WORD[c.verdict] || "Not checked"}: ${c.text}`}{c.why && <span className="faint">{` · ${bare(c.why)}`}</span>}</span>
-    {c.check && <code>{`$ ${c.check}`}</code>}
-    {c.out && <pre>{c.out}</pre>}
-  </div>)}</div>;
-}
-
-/** A done-check result (runtime/donecheck.ts) as a note: checked with its proof one click away, a retry, not confirmed
- * (soft red, with Send back), or why not. Older events carry headline/why/evidence instead of criteria. */
-function CheckLine({ d }: { d: Record<string, any> }) {
-  const [open, setOpen] = useState(false), [sent, setSent] = useState("");
-  const crit = (Array.isArray(d.criteria) ? d.criteria : []) as Crit[], fail = crit.find((c) => c.verdict === "fail");
-  const toggle = (label: string) => crit.length > 0 && <button className="lnk" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Hide" : label}</button>;
-  const details = open && <CheckDetails crit={crit} />;
-  // Going back once isn't a failure yet.
-  if (d.status === "retrying") return <><Note icon="check">{fail ? said(`Not confirmed yet: ${fail.text}, so it went back to fix it`) : once(`The done-check couldn't confirm ${d.headline}, so it's trying again (${d.attempt} of ${d.of}). `)}{toggle("Details")}</Note>{details}</>;
-  if (d.status === "failed") {
-    const send = async () => { try { await api.post(`/api/turns/${d.root}/check/retry`, undefined, { quiet: true }); setSent("Sent back."); } catch (e: any) { setSent(said(e.message || "Couldn't send it back")); } };
-    return <><Note icon="alert" bad>{said(`Not confirmed: ${fail?.text || d.headline}${fail?.why ? ` — ${fail.why}` : ""}`)}
-      {sent ? <span className="faint">{`${sent} `}</span> : d.root && <><BusyButton className="lnk" busyLabel="Sending back…" onClick={send}>Send back</BusyButton>{" "}</>}{toggle("Details")}</Note>{details}</>;
-  }
-  if (d.status !== "passed") {
-    const u = crit.find((c) => c.verdict === "unknown"), ok = crit.filter((c) => c.verdict === "pass").length;
-    return <><Note icon="check">{said(u ? `${ok ? `Checked ${ok} of ${crit.length}. ` : ""}Not checked: ${u.text} — ${bare(u.why)}` : `Not checked: ${d.why || "no grader"}`)}{toggle("Details")}</Note>{details}</>;
-  }
-  const src = d.proof?.file ? `/shots/${d.proof.botId}/${d.proof.file}` : null, ran = crit.some((c) => c.check);
-  const how = `${ran ? "Checked by running the member's check commands" : "Graded by a second model"} against ${d.n} criteri${d.n === 1 ? "on" : "a"}${d.attempt ? " after one more try" : ""}`;
-  const head = d.evidence ? <>{"Checked: "}<Inline text={said(d.evidence)} /></> : crit.length ? said(crit.length === 1 ? `Checked: ${crit[0].text}` : `Checked: all ${crit.length} criteria`) : "Checked. ";
-  return <><Note icon="check" title={how}>{head}{ran && toggle("Proof")}{ran && src && " "}{src && <a className="lnk" href={src} target="_blank" rel="noopener">{ran ? "Screenshot" : "Proof"}</a>}</Note>{details}</>;
-}
 
 /** The element for one event, or null when it draws nothing (an unknown pit stop or surface). */
 export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
@@ -369,32 +144,4 @@ export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
     case "surface": return c.surface(d.id);
   }
   return null;
-}
-
-
-/** A run's tool calls fold into one "N steps" row under the message before them: open while the run goes, folded when
- * it ends (closeSignal bumps). Decided pit stops ride in the same group as their own line, counted in the summary. */
-export function Steps({ events, pits, initialOpen, closeSignal, results }: { events: ThreadEvent[]; pits: Record<string, PitStop>; initialOpen: boolean; closeSignal: number; results?: Map<string, Record<string, any>> }) {
-  const [open, setOpen] = useState(initialOpen);
-  const first = useRef(closeSignal);
-  useEffect(() => { if (closeSignal !== first.current) setOpen(false); }, [closeSignal]);
-  const tools = events.filter((e) => e.kind === "tool"), decided = events.flatMap((e) => (e.kind === "pitstop" && pits[e.data.id] ? [pits[e.data.id]] : []));
-  const bad = tools.filter((e) => !stepOk(e) && e.data.status !== "inProgress").length;
-  const n = (st: PitStop["status"]) => decided.filter((p) => p.status === st).length;
-  const gated = useMemo(() => gatedCalls(events, pits), [events, pits]);
-  const said = useMemo(() => runSummary(tools.map((e) => ({ type: String(e.data.type), nested: !!e.data.viaScript, v: stepView(tidyTitle(e.data.title || ""), e.data.conn) }))), [events]);
-  // Approvals stay out of the sentence; only what went wrong gets a (soft) colour.
-  const trouble = [n("expired") ? { k: "expired", t: `${n("expired")} no answer` } : null, n("denied") ? { k: "denied", t: `${n("denied")} denied` } : null, bad ? { k: "failed", t: `${bad} failed` } : null].filter(Boolean) as { k: string; t: string }[];
-  return (
-    <details className="steps" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary>
-        {said.map((p, i) => typeof p === "string" ? <Fragment key={i}>{p}</Fragment> : <em key={i}>{p.em}</em>)}
-        {trouble.map((x) => <Fragment key={x.k}>{" · "}<span className={`tr ${x.k}`}>{x.t}</span></Fragment>)}
-        <Icon name="chev" size={12} />
-      </summary>
-      <div className="steps-body">{events.map((e) => e.kind === "pitstop"
-        ? pits[e.data.id] && !gated.merged.has(e.id) && <PitCard key={e.id} p={pits[e.data.id]} row />
-        : <Tool key={e.id} e={e} results={results} pit={gated.byCall.get(e.id)} />)}</div>
-    </details>
-  );
 }
