@@ -4,8 +4,7 @@
 // gated per call (gate.ts never lets a fully allowed site skip jev for them), with secrets masked and size capped.
 import { getBot } from "../crew.js";
 import { audit, driverName } from "../db.js";
-import { chownSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { chownSync, lstatSync, mkdirSync, readFileSync, statSync, writeFileSync, openSync, writeSync, fchownSync, closeSync, constants as FS } from "node:fs";
 import { PW_SETTLE_MS, botDir, type Brain, type Rpc } from "../computer.js";
 import type { ToolResult } from "../shots.js";
 import { siteOf, lookalike, homograph } from "../sites.js";
@@ -303,24 +302,33 @@ function scrubSnapshotFile(botId: string, threadId: string, text: string) {
   try { if (lstatSync(f).isFile()) { const t = readFileSync(f, "utf8"), c = scrubFilled(threadId, t); if (c !== t) writeFileSync(f, c); } } catch {}
 }
 
-// A /bot/work path as its host file, with its folder made, or null when it would leave the work dir. Folders it makes
-// belong to the work dir's owner (the bot's uid), never root: the control plane runs as root, the bot doesn't.
+// A /bot/work path as its host file, with its folder made, or null when it would leave the work dir. The member owns
+// the workspace and can plant links, and the control plane runs as root: no link is followed, folder or file.
 export function workFile(botId: string, path: string) {
   const rel = path.replace(/^\/bot\/work\//, "");
   if (!rel || rel.startsWith("/") || rel.split("/").includes("..")) return null;
-  const root = `${botDir(botId)}/work`, f = `${root}/${rel}`;
+  const root = `${botDir(botId)}/work`, parts = rel.split("/").filter(Boolean);
   try {
-    const made = mkdirSync(dirname(f), { recursive: true });
-    if (!realpathSync(dirname(f)).startsWith(realpathSync(root))) return null;
-    if (made) { const o = statSync(root); for (let d = dirname(f); d.length >= made.length; d = dirname(d)) chownSync(d, o.uid, o.gid); }
-    return f;
+    const o = statSync(root);
+    let dir = root;
+    for (const seg of parts.slice(0, -1)) {
+      dir = `${dir}/${seg}`;
+      const st = lstatSync(dir, { throwIfNoEntry: false });
+      if (!st) { mkdirSync(dir); chownSync(dir, o.uid, o.gid); } else if (st.isSymbolicLink() || !st.isDirectory()) return null;
+    }
+    const f = `${dir}/${parts.at(-1)}`;
+    return lstatSync(f, { throwIfNoEntry: false })?.isSymbolicLink() ? null : f;
   } catch { return null; }
 }
-// Writes a file the bot must be able to change afterwards: owned like its work dir.
+// Writes a file the bot must be able to change afterwards, owned like its work dir. O_NOFOLLOW: a link swapped in after
+// workFile checked is refused, not written through.
 export function writeAsBot(botId: string, file: string, data: string) {
-  writeFileSync(file, data);
-  const o = statSync(`${botDir(botId)}/work`);
-  try { chownSync(file, o.uid, o.gid); } catch {}
+  const fd = openSync(file, FS.O_WRONLY | FS.O_CREAT | FS.O_TRUNC | FS.O_NOFOLLOW, 0o644);
+  try {
+    writeSync(fd, data);
+    const o = statSync(`${botDir(botId)}/work`);
+    try { fchownSync(fd, o.uid, o.gid); } catch {}
+  } finally { closeSync(fd); }
 }
 
 // Codex hands a dynamic tool's result to an exec script (nested call ids "exec-…") as ONE string, its text and image
