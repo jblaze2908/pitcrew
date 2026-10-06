@@ -22,8 +22,8 @@ const Memory = z.object({ text: trimmed(500), scope: pick(["agent", "global"] as
 const MemoryEdit = z.object({ text: text(500) });
 const ForgetSource = z.object({ source: raw });
 const optText = (max: number) => given((v) => (v == null ? null : String(v).slice(0, max)));
-const Schedule = z.object({ threadId: field((v) => v || null), spec: text(100), prompt: text(), title: optText(80), check: optText(500) });
-const ScheduleEdit = z.object({ enabled: z.boolean().optional(), spec: z.string().max(100).optional(), prompt: z.string().max(2000).optional(), check: z.string().max(500).nullable().optional(), title: optText(80) });
+const Schedule = z.object({ threadId: field((v) => v || null), spec: text(100), prompt: text(), title: optText(80), check: optText(500), grade: z.boolean().optional() });
+const ScheduleEdit = z.object({ enabled: z.boolean().optional(), spec: z.string().max(100).optional(), prompt: z.string().max(2000).optional(), check: z.string().max(500).nullable().optional(), title: optText(80), grade: z.boolean().optional() });
 const Project = z.object({ path: text() });
 const HandBack = z.object({ note: text() });
 
@@ -78,6 +78,8 @@ export const crewRoutes = new Hono<Env>()
   // "Learned this run" card: what a turn remembered, and undoing a new one.
   .get("/api/turns/:id/learned", signedIn, (c) => c.json({ items: learnedFor(c.req.param("id")) }))
   .post("/api/turns/:id/learned/:mid/undo", signedIn, async (c) => c.json({ items: await undoLearned(c.req.param("id"), c.req.param("mid")) }))
+  // A "Not confirmed" note's Send back (runtime/donecheck.ts).
+  .post("/api/turns/:id/check/retry", signedIn, (c) => { const r = R.sendBack(c.req.param("id")); if (!r.ok) throw httpErr(409, r.text); return c.json(r); })
   .post("/api/bots/:id/memory/forget-source", signedIn, async (c) => { const id = c.req.param("id"), b = await jsonBody(c, ForgetSource); const r = run("UPDATE memory SET forgotten_at=? WHERE bot_id=? AND source=? AND forgotten_at IS NULL", now(), id, String(b.source)); audit("driver", "memory.forgot_source", { id, source: b.source }); return c.json({ forgotten: Number(r.changes) }); })
   // The Schedules page's "New schedule" and a member's own page; the check is the driver's alone, like on PATCH.
   .post("/api/bots/:id/schedules", signedIn, async (c) => {
@@ -85,7 +87,7 @@ export const crewRoutes = new Hono<Env>()
     if (bot.archived) throw httpErr(400, "That member has retired");
     try {
       const s = R.addSchedule(id, b.threadId as string | null, b.spec, b.prompt, b.title);
-      return c.json(b.check?.trim() ? R.updateSchedule(s.id, null, { check: b.check }, "driver") : s);
+      return c.json(b.check?.trim() || b.grade ? R.updateSchedule(s.id, null, { ...(b.check?.trim() ? { check: b.check } : {}), ...(b.grade ? { grade: true } : {}) }, "driver") : s);
     } catch (e: any) { throw httpErr(400, e.message); }
   })
   .patch("/api/schedules/:id", signedIn, async (c) => { const b = await jsonBody(c, ScheduleEdit); try { return c.json(R.updateSchedule(c.req.param("id"), null, b, "driver")); } catch (e: any) { throw httpErr(400, e.message); } })

@@ -113,8 +113,10 @@ export interface Thread {
 export type EventKind = "user" | "agent" | "tool" | "system" | "error" | "shot" | "image" | "changes" | "pitstop" | "surface" | "delegation" | "plan" | "learned" | "check";
 /** rewound: when a rewind took this event out of the member's conversation (still drawn, under "Rewound"). */
 export interface ThreadEvent<D = Record<string, any>> { id: number; thread_id: string; turn_id: string | null; kind: EventKind; data: D; ts: number; rewound?: number | null }
-/** A done-check result as the thread draws it (runtime/donecheck.ts). */
-export interface CheckCriterion { text: string; verdict: "pass" | "fail" | "unknown"; why: string }
+/** A member's done criterion (set_done_criteria): check is a read-only shell command, expect what its output must show. */
+export interface DoneCriterion { text: string; check?: string; expect?: string }
+/** A done-check result as the thread draws it (runtime/donecheck.ts); out is the check's scrubbed output tail. */
+export interface CheckCriterion { text: string; verdict: "pass" | "fail" | "unknown"; why: string; check?: string; out?: string }
 /** What a rewind would change back (runtime/rewind.ts), for the confirm sheet. */
 export interface RewindPlan {
   turnId: string; threadId: string; at: number; mode: "both" | "chat" | "files"; rewound: boolean;
