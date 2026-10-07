@@ -833,6 +833,52 @@ test("each schedule firing is recorded: late, linked to its turn, ended quiet or
   R.deleteSchedule(s.id, null, "driver");
 });
 
+test("an 'after' schedule runs when its upstream run finishes, with its reply, and is skipped when that run fails", async () => {
+  const { active } = await import("../app/dist/src/runtime/state.js");
+  const T = await import("../app/dist/src/runtime/turns.js");
+  const Sx = await import("../app/dist/src/runtime/schedules.js");
+  run("INSERT INTO bots(id,name,provider,created_at) VALUES('b_chA','Fetcher','openrouter',0)");
+  run("INSERT INTO bots(id,name,provider,created_at) VALUES('b_chB','Writer','openrouter',0)");
+  run("INSERT INTO bots(id,name,provider,created_at,private) VALUES('b_chP','Diary','openrouter',0,1)");
+  const a = R.addSchedule("b_chA", null, "daily 23:30", "Pull today's numbers", "Pull numbers");
+  const b = R.addSchedule("b_chA", null, `After ${a.id}`, "Tidy the numbers");
+  assert.equal(b.spec, `after ${a.id}`, "the id keeps its case"); assert.equal(b.next_run, null, "never fires on the clock");
+  assert.throws(() => R.addSchedule("b_chB", null, `after ${a.id}`, "Write it up"), /your own/, "a member can't chain another member's schedule");
+  const c = R.addSchedule("b_chB", null, `after ${a.id}`, "Write it up", null, "driver");
+  const d = R.addSchedule("b_chA", null, `after ${b.id}`, "File it");
+  assert.throws(() => R.addSchedule("b_chP", null, `after ${a.id}`, "Note it", null, "driver"), /private/);
+  assert.throws(() => R.addSchedule("b_chA", null, "after sc_nope", "x"), /No schedule sc_nope/);
+  assert.throws(() => R.updateSchedule(a.id, null, { spec: `after ${d.id}` }, "driver"), /loop/);
+  // A's run ends QUIET: B (same member) and C (driver-linked) start with its reply; D waits on B.
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_chA','b_chA','Pull',0,0)");
+  run("INSERT INTO schedule_runs(id,schedule_id,bot_id,thread_id,kind,due_at,fired_at,status) VALUES('sr_chA',?,'b_chA','th_chA','manual',1,?,'queued')", a.id, Date.now());
+  run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,provider,model,started_at) VALUES('tu_chA','th_chA','b_chA','running','schedule','openrouter','m',3)");
+  Sx.scheduleRunStarted("th_chA", "tu_chA");
+  active.set("th_chA", { turnId: "tu_chA", codexTurnId: null, base: null, total: null, last: null, usageFrom: 0, quietFrom: 0 });
+  run("INSERT INTO events(thread_id,turn_id,kind,data,ts) VALUES('th_chA','tu_chA','agent',?,4)", JSON.stringify({ text: "QUIET: 42 orders, ₹18,400" }));
+  await T.finishTurn("th_chA", "completed");
+  await new Promise((r) => setTimeout(r, 50));
+  for (const s of [b, c]) {
+    const [r] = R.scheduleRuns(s.id);
+    assert.equal(r.kind, "after");
+    const said = JSON.parse(one("SELECT data FROM events WHERE thread_id=? AND kind='user' ORDER BY id LIMIT 1", r.thread_id).data).text;
+    assert.match(said, /^\[After “Pull numbers” \(Fetcher\)\][\s\S]*Its reply:\n42 orders, ₹18,400/);
+  }
+  // B's turn couldn't start (no provider), so D after it is skipped, not run.
+  assert.equal(R.scheduleRuns(b.id)[0].status, "failed");
+  const [dr] = R.scheduleRuns(d.id);
+  assert.equal(dr.status, "skipped"); assert.match(dr.summary, /failed, so this didn't run/); assert.equal(dr.thread_id, null);
+  // A run that fails skips the whole chain after it.
+  R.runScheduleNow(a.id);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(R.scheduleRuns(a.id)[0].status, "failed");
+  assert.equal(R.scheduleRuns(b.id)[0].status, "skipped"); assert.equal(R.scheduleRuns(d.id)[0].status, "skipped");
+  // Deleting the upstream pauses what ran after it.
+  assert.equal(R.deleteSchedule(a.id, null, "driver").paused, 2);
+  assert.deepEqual([b, c].map((s) => one("SELECT enabled FROM schedules WHERE id=?", s.id).enabled), [0, 0]);
+  for (const s of [b, c, d]) R.deleteSchedule(s.id, null, "driver");
+});
+
 test("weekdays and monthly schedules land on the right days in India time", () => {
   const ist = (ms) => new Date(ms + 5.5 * 3600000);
   const fri = Date.UTC(2026, 9, 2, 12, 0) - 5.5 * 3600000; // Fri 2 Oct 12:00 IST

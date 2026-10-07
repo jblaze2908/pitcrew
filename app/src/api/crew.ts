@@ -47,7 +47,7 @@ export const crewRoutes = new Hono<Env>()
     retireBot(id, "driver"); return c.json({ ok: true });
   })
   // Manual hire: the driver filled the form and pressed Hire on the review screen; that is the HITL step.
-  .post("/api/hire", signedIn, async (c) => { const s = normaliseSpec(await readJson(c)); const bot = createBot(s); if (s.schedule?.spec && s.schedule.prompt) R.addSchedule(bot.id, null, s.schedule.spec, s.schedule.prompt); memberChanged(bot); return c.json(bot); })
+  .post("/api/hire", signedIn, async (c) => { const s = normaliseSpec(await readJson(c)); const bot = createBot(s); if (s.schedule?.spec && s.schedule.prompt) R.addSchedule(bot.id, null, s.schedule.spec, s.schedule.prompt, null, "driver"); memberChanged(bot); return c.json(bot); })
   .get("/api/bots/:id/projects", signedIn, (c) => { const id = c.req.param("id"); member(id); return c.json(listProjects(id)); })
   .post("/api/bots/:id/projects/open", signedIn, async (c) => { const id = c.req.param("id"); member(id); const b = await jsonBody(c, Project); const r = await openProject(id, b.path); audit("driver", "code.opened", { botId: id, path: r.project.path }); return c.json(r); })
   // What data a member keeps: its ledgers (tables, rows, columns) and the dashboards it built on them.
@@ -79,7 +79,7 @@ export const crewRoutes = new Hono<Env>()
     const id = c.req.param("id"), b = await jsonBody(c, Schedule), bot = member(id);
     if (bot.archived) throw httpErr(400, "That member has retired");
     try {
-      const s = R.addSchedule(id, b.threadId as string | null, b.spec, b.prompt, b.title);
+      const s = R.addSchedule(id, b.threadId as string | null, b.spec, b.prompt, b.title, "driver");
       return c.json(b.check?.trim() || b.grade ? R.updateSchedule(s.id, null, { ...(b.check?.trim() ? { check: b.check } : {}), ...(b.grade ? { grade: true } : {}) }, "driver") : s);
     } catch (e: any) { throw httpErr(400, e.message); }
   })
