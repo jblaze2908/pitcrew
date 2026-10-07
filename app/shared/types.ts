@@ -172,7 +172,7 @@ export interface PlanSnapshot {
 export interface Session { setup: boolean; authed: boolean }
 export interface Memory { id: string; bot_id: string; text: string; source: string; created_at: number; updated_at: number }
 /** last: the latest run (runtime/schedules.ts lastScheduledRun): when, how it ended, the first line of its reply. */
-export interface Schedule { id: string; bot_id: string; thread_id: string | null; spec: string; prompt: string; enabled: number; next_run: number | null; created_at: number; last?: { at: number; status: string; summary: string; threadId?: string } | null }
+export interface Schedule { id: string; bot_id: string; thread_id: string | null; spec: string; prompt: string; enabled: number; next_run: number | null; created_at: number; after_title?: string | null; last?: { at: number; status: string; summary: string; threadId?: string } | null }
 export interface Rule { id: string; bot_id: string; bot_name?: string; label: string; effect: string; created_at: number }
 export interface Learned { id: number; bot_id: string; bot_name?: string; label: string; effect: string; streak: number; need: number; approvals: number; denials: number }
 /** GET /api/bots/:id */
