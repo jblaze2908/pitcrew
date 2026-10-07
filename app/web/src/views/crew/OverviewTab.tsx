@@ -137,7 +137,7 @@ function ScheduleBlock({ d }: { d: BotDetail }) {
     <div className="blk">
       <p className="k">Schedule</p>
       {s ? <>
-        <p className="v">{specWords(s.spec)}</p>
+        <p className="v">{specWords(s.spec, s.after_title)}</p>
         <p className="clamp2">{`${s.prompt.split("\n")[0]}${s.enabled ? (s.next_run ? ` · next ${when(s.next_run)}` : "") : " · paused"}`}</p>
         {more > 0 && <p>{`and ${more} more`}</p>}
       </> : <p>Runs only when asked.</p>}

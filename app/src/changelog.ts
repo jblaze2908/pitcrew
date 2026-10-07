@@ -33,4 +33,5 @@ export const CHANGELOG: { date: string; note: string }[] = [
   { date: "2026-10-06", note: "set_done_criteria is for tasks that change something (files, orders, messages). Questions, lookups and summaries aren't graded any more, so don't set criteria for them or save evidence files just for the grader." },
   { date: "2026-10-06", note: "set_done_criteria takes 1-6 criteria as {text, check, expect}: check is a read-only shell command Pitcrew runs on your computer when you finish (exit 0 passes; expect adds text to find or a number test like >=6). No criteria, nothing is checked. A failed check sends you back once with its output, then the driver gets a note. Don't write evidence files for a grader. harness_help done." },
   { date: "2026-10-07", note: "Schedules can run in order: schedule_task / update_schedule with when \"after <schedule id>\" (one of yours) starts when that run finishes cleanly; the run arrives as \"[After …]\" with that run's reply. If the earlier run fails or is skipped, the later one is skipped too." },
+  { date: "2026-10-07", note: "\"after\" takes the earlier schedule's name, not its id: when \"after Pull the day's numbers\"." },
 ];

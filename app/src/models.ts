@@ -32,6 +32,8 @@ export interface ScheduleRow {
   next_run: number | null; last_run: number | null; enabled: number; created_at: number; hook_secret?: string | null; check_cmd?: string | null; check_last?: string | null; grade?: number;
   /** A short name for the Schedules page; backfilled from the prompt for older rows (runtime/schedules.ts). */
   title?: string | null;
+  /** For "after <id>" rows: the earlier schedule's name and member (runtime/schedules.ts withAfter). */
+  after_title?: string | null; after_member?: string | null;
 }
 export interface ScheduleRunRow {
   id: string; schedule_id: string; bot_id: string; thread_id: string | null; turn_id: string | null;

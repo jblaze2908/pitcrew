@@ -841,8 +841,15 @@ test("an 'after' schedule runs when its upstream run finishes, with its reply, a
   run("INSERT INTO bots(id,name,provider,created_at) VALUES('b_chB','Writer','openrouter',0)");
   run("INSERT INTO bots(id,name,provider,created_at,private) VALUES('b_chP','Diary','openrouter',0,1)");
   const a = R.addSchedule("b_chA", null, "daily 23:30", "Pull today's numbers", "Pull numbers");
-  const b = R.addSchedule("b_chA", null, `After ${a.id}`, "Tidy the numbers");
-  assert.equal(b.spec, `after ${a.id}`, "the id keeps its case"); assert.equal(b.next_run, null, "never fires on the clock");
+  const b = R.addSchedule("b_chA", null, "after Pull Numbers", "Tidy the numbers");
+  assert.equal(b.spec, `after ${a.id}`, "a name resolves to the id, which keeps its case"); assert.equal(b.next_run, null, "never fires on the clock");
+  assert.equal(b.after_title, "Pull numbers"); assert.equal(R.listSchedules("b_chA")[1].after_member, "Fetcher");
+  assert.throws(() => R.addSchedule("b_chA", null, "after Nightly backup", "x"), /No schedule named “Nightly backup”/);
+  const twin = R.addSchedule("b_chB", null, "daily 06:00", "Pull numbers for the morning", "Pull numbers");
+  assert.equal(R.addSchedule("b_chA", null, "after pull numbers", "x", null, "driver").spec, `after ${a.id}`, "the driver gets the member's own first");
+  assert.throws(() => R.addSchedule("b_chP", null, "after pull numbers", "x", null, "driver"), /More than one schedule matches/);
+  for (const x of R.listSchedules("b_chA").filter((x) => x.prompt === "x")) R.deleteSchedule(x.id, null, "driver");
+  R.deleteSchedule(twin.id, null, "driver");
   assert.throws(() => R.addSchedule("b_chB", null, `after ${a.id}`, "Write it up"), /your own/, "a member can't chain another member's schedule");
   const c = R.addSchedule("b_chB", null, `after ${a.id}`, "Write it up", null, "driver");
   const d = R.addSchedule("b_chA", null, `after ${b.id}`, "File it");

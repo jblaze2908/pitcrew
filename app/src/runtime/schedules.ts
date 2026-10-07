@@ -48,7 +48,7 @@ export function nextRun(spec: string, from = now()): number | null {
     if (t <= from) t += 7 * 86400000;
     return t;
   }
-  throw new Error(`Use "daily HH:MM", "weekdays HH:MM", "weekly mon HH:MM", "monthly 1 HH:MM" (day 1–28), "every N minutes|hours", "after <schedule id>" or "${EVENT_SPEC}"`);
+  throw new Error(`Use "daily HH:MM", "weekdays HH:MM", "weekly mon HH:MM", "monthly 1 HH:MM" (day 1–28), "every N minutes|hours", "after <schedule name>" or "${EVENT_SPEC}"`);
 }
 const firstLine = (prompt: string) => String(prompt || "").split("\n").map((l) => l.replace(/^\s*\[[^\]]{0,40}\]\s*/, "").trim()).find(Boolean) || "";
 // Prompts often open with their own timing ("Every day at 22:00 Asia/Kolkata, run …"); the schedule already says when.
@@ -71,7 +71,28 @@ export function backfillScheduleTitles() {
 
 // What any schedule read returns: never the webhook secret (scheduleHook gives the driver that) nor check_last.
 const COLS = "id,bot_id,thread_id,spec,prompt,next_run,last_run,enabled,created_at,check_cmd,title,grade";
-const shown = (id: string) => one<ScheduleRow>(`SELECT ${COLS} FROM schedules WHERE id=?`, id)!;
+const shown = (id: string) => withAfter([one<ScheduleRow>(`SELECT ${COLS} FROM schedules WHERE id=?`, id)!])[0];
+/** "after <name>" becomes "after <id>": nobody should have to look an id up. A member matches its own schedules by
+ * name; the driver matches any, its own member's first. Ambiguous names are refused with the choices. */
+function resolveAfter(spec: string, botId: string, who: "crew" | "driver") {
+  const m = /^after\s+(.+)$/i.exec(spec.trim());
+  if (!m || afterId(spec)) return spec;
+  const name = m[1].trim().replace(/^["“'](.*)["”']$/, "$1").toLowerCase();
+  const rows = all<{ id: string; bot_id: string; title: string | null; prompt: string; name: string }>(
+    `SELECT s.id,s.bot_id,s.title,s.prompt,b.name FROM schedules s JOIN bots b ON b.id=s.bot_id WHERE b.archived=0${who === "crew" ? " AND s.bot_id=?" : ""}`, ...(who === "crew" ? [botId] : []));
+  const named = (r: (typeof rows)[number]) => (r.title || scheduleTitle(r.prompt)).toLowerCase();
+  let hit = rows.filter((r) => named(r) === name);
+  if (!hit.length) hit = rows.filter((r) => named(r).includes(name));
+  if (hit.length > 1 && hit.some((r) => r.bot_id === botId)) hit = hit.filter((r) => r.bot_id === botId);
+  if (hit.length === 1) return `after ${hit[0].id}`;
+  if (!hit.length) throw new Error(`No schedule named “${m[1].trim()}” to run after.${who === "crew" ? " list_schedules shows yours." : ""}`);
+  throw new Error(`More than one schedule matches “${m[1].trim()}”: ${hit.slice(0, 5).map((r) => `“${r.title || scheduleTitle(r.prompt)}” (${r.name})`).join(", ")}. Use the full name.`);
+}
+/** The name of the schedule each chained row runs after, for lists and the Schedules page. One read per chained row. */
+const withAfter = <T extends { spec: string }>(rows: T[]) => rows.map((s) => {
+  const up = afterId(s.spec), u = up && one<{ title: string | null; prompt: string; name: string }>("SELECT s.title,s.prompt,b.name FROM schedules s JOIN bots b ON b.id=s.bot_id WHERE s.id=?", up);
+  return up ? { ...s, after_title: u ? `${u.title || scheduleTitle(u.prompt)}` : null, after_member: u ? u.name : null } : s;
+});
 // A member chains only its own schedules; the driver may link members, but a private one's output never reaches another.
 function checkAfter(self: string | null, botId: string, spec: string, who: "crew" | "driver") {
   const up = afterId(spec);
@@ -86,7 +107,7 @@ function checkAfter(self: string | null, botId: string, spec: string, who: "crew
     if (id === self || n >= 10) throw new Error(id === self ? "That would make the chain loop back to this schedule" : "A chain can be at most 10 schedules long");
 }
 export function addSchedule(botId: string, threadId: string | null, spec: string, prompt: string, title?: string | null, who: "crew" | "driver" = "crew") {
-  spec = normSpec(spec);
+  spec = normSpec(resolveAfter(spec, botId, who));
   if (!prompt.trim()) throw new Error("A schedule needs a prompt");
   const next = nextRun(spec);
   checkAfter(null, botId, spec, who);
@@ -96,7 +117,7 @@ export function addSchedule(botId: string, threadId: string | null, spec: string
   audit("crew", "schedule.added", { id, botId, spec });
   return shown(id);
 }
-export const listSchedules = (botId: string) => all<ScheduleRow>(`SELECT ${COLS} FROM schedules WHERE bot_id=? ORDER BY created_at`, botId);
+export const listSchedules = (botId: string) => withAfter(all<ScheduleRow>(`SELECT ${COLS} FROM schedules WHERE bot_id=? ORDER BY created_at`, botId));
 /** An event schedule's address and secret, for the driver to give the sender. */
 export function scheduleHook(id: string) {
   const s = one<ScheduleRow>("SELECT * FROM schedules WHERE id=?", id);
@@ -120,7 +141,7 @@ export function updateSchedule(id: string, botId: string | null, ch: { spec?: st
     run("UPDATE schedules SET check_cmd=?, check_last=NULL WHERE id=?", ch.check?.trim().slice(0, 500) || null, id);
   }
   if (ch.grade !== undefined) run("UPDATE schedules SET grade=? WHERE id=?", ch.grade ? 1 : 0, id);
-  const spec = ch.spec !== undefined ? normSpec(ch.spec) : s.spec, prompt = ch.prompt !== undefined ? ch.prompt.trim().slice(0, 2000) : s.prompt;
+  const spec = ch.spec !== undefined ? normSpec(resolveAfter(ch.spec, s.bot_id, who)) : s.spec, prompt = ch.prompt !== undefined ? ch.prompt.trim().slice(0, 2000) : s.prompt;
   if (!prompt) throw new Error("A schedule needs a prompt");
   const enabled = ch.enabled ?? !!s.enabled, next = spec !== s.spec || (enabled && !s.enabled) ? nextRun(spec) : s.next_run;
   if (spec !== s.spec) checkAfter(id, s.bot_id, spec, who);
@@ -281,7 +302,7 @@ export const scheduleRuns = (id: string, limit = 50) => all<ScheduleRunRow>("SEL
 /** Every schedule with its member, its last 14 runs and 7-day totals, for the Schedules page. One indexed read per schedule. */
 export function scheduleOverview() {
   const since = now() - 7 * 86400000;
-  return all<ScheduleRow & { bot_name: string }>(`SELECT ${COLS.split(",").map((c) => `s.${c}`).join(",")}, b.name bot_name FROM schedules s JOIN bots b ON b.id=s.bot_id WHERE b.archived=0 ORDER BY s.enabled DESC, s.next_run`).map((s) => {
+  return withAfter(all<ScheduleRow & { bot_name: string }>(`SELECT ${COLS.split(",").map((c) => `s.${c}`).join(",")}, b.name bot_name FROM schedules s JOIN bots b ON b.id=s.bot_id WHERE b.archived=0 ORDER BY s.enabled DESC, s.next_run`)).map((s) => {
     const runs = scheduleRuns(s.id, 14), week = runs.filter((r) => r.fired_at >= since && r.ended_at);
     const ok = week.filter((r) => r.status === "quiet" || r.status === "reported").length;
     return { ...s, runs, week: { runs: week.length, ok, tokens: week.reduce((n, r) => n + (r.input_tokens || 0), 0), cost: week.reduce((n, r) => n + (r.cost_usd || 0), 0) } };

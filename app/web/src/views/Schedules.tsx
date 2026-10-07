@@ -10,11 +10,12 @@ import { toast } from "../lib/toast";
 import { useFetch } from "../lib/useFetch";
 
 interface Run {
-  id: string; thread_id: string | null; kind: "time" | "manual" | "event"; due_at: number; fired_at: number; started_at: number | null; ended_at: number | null;
+  id: string; thread_id: string | null; kind: "time" | "manual" | "event" | "after"; due_at: number; fired_at: number; started_at: number | null; ended_at: number | null;
   status: "queued" | "running" | "quiet" | "reported" | "failed" | "interrupted" | "cancelled" | "skipped"; note: string | null; summary: string | null; input_tokens: number | null; cost_usd: number | null;
 }
 interface Sched {
   id: string; bot_id: string; bot_name: string; title: string | null; spec: string; prompt: string; next_run: number | null; enabled: number; check_cmd: string | null; grade: number;
+  after_title?: string | null; after_member?: string | null;
   runs: Run[]; week: { runs: number; ok: number; tokens: number; cost: number };
 }
 
@@ -22,10 +23,12 @@ const LATE_MS = 5 * 60000;
 const DOW: Record<string, string> = { mon: "Monday", tue: "Tuesday", wed: "Wednesday", thu: "Thursday", fri: "Friday", sat: "Saturday", sun: "Sunday" };
 const nth = (n: number) => `${n}${[, "st", "nd", "rd"][n % 10 > 3 || Math.floor(n / 10) === 1 ? 0 : n % 10] || "th"}`;
 const isEvent = (spec: string) => /^on event$/i.test(spec);
-/** The spec in words: "Every day at 22:00", "1st of the month, 08:30", "When its webhook fires". */
-export function specWords(spec: string) {
+const isAfter = (spec: string) => /^after sc_/i.test(spec);
+/** The spec in words: "Every day at 22:00", "1st of the month, 08:30", "When its webhook fires", "After “Pull numbers”". */
+export function specWords(spec: string, afterTitle?: string | null) {
   let m: RegExpExecArray | null;
   if (isEvent(spec)) return "When its webhook fires";
+  if (isAfter(spec)) return afterTitle ? `After “${afterTitle}”` : "After a deleted schedule";
   if ((m = /^daily (\S+)$/i.exec(spec))) return `Every day at ${m[1]}`;
   if ((m = /^weekdays (\S+)$/i.exec(spec))) return `Weekdays at ${m[1]}`;
   if ((m = /^weekly (\w+) (\S+)$/i.exec(spec))) return `Every ${DOW[m[1].toLowerCase()] || m[1]} at ${m[2]}`;
@@ -82,10 +85,10 @@ export function Schedules() {
         : <div className="sch2">
           <table className="tbl"><thead><tr><th>Schedule</th><th>Runs</th><th>Next</th><th>Last 14 runs</th><th>Result</th><th /></tr></thead>
             <tbody>
-              {adding && <tr className="sch2-open"><td colSpan={6}><Editor onDone={added} onCancel={() => setAdding(false)} /></td></tr>}
+              {adding && <tr className="sch2-open"><td colSpan={6}><Editor all={list} onDone={added} onCancel={() => setAdding(false)} /></td></tr>}
               {list.map((s) => <Fragment key={s.id}>
                 <Row s={s} open={open === s.id} onOpen={() => { setAdding(false); setOpen(open === s.id ? null : s.id); }} reload={f.reload} />
-                {open === s.id && <tr className="sch2-open"><td colSpan={6}><Editor s={s} onDone={() => { setOpen(null); f.reload(); }} onCancel={() => setOpen(null)} reload={f.reload} /></td></tr>}
+                {open === s.id && <tr className="sch2-open"><td colSpan={6}><Editor s={s} all={list} onDone={() => { setOpen(null); f.reload(); }} onCancel={() => setOpen(null)} reload={f.reload} /></td></tr>}
               </Fragment>)}
             </tbody></table>
         </div>}
@@ -104,8 +107,8 @@ function Row({ s, open, onOpen, reload }: { s: Sched; open: boolean; onOpen: () 
   return (
     <tr className={`sch2-row${open ? " on" : ""}${s.enabled ? "" : " off"}`} onClick={onOpen}>
       <td className="sch2-name"><b>{s.title || s.prompt.split("\n")[0]}</b><span className="sch2-who"><Face b={bot(s.bot_id)} size="xs" />{s.bot_name}</span></td>
-      <td className="nw">{specWords(s.spec)}</td>
-      <td className="nw">{!s.enabled ? <span className="faint">{isEvent(s.spec) ? "On the next event" : "When resumed"}</span> : next ? <>{`${next[0]} `}<span className="pc-m">{next[1]}</span></> : isEvent(s.spec) ? "On the next event" : ""}</td>
+      <td className="nw">{specWords(s.spec, s.after_title)}</td>
+      <td className="nw">{!s.enabled ? <span className="faint">{isEvent(s.spec) ? "On the next event" : "When resumed"}</span> : next ? <>{`${next[0]} `}<span className="pc-m">{next[1]}</span></> : isEvent(s.spec) ? "On the next event" : isAfter(s.spec) ? <span className="faint">After it finishes</span> : ""}</td>
       <td className="nw">{s.runs.length ? <span className="dots">{Array.from({ length: 14 }, (_, i) => { const r = oldestFirst[i - (14 - s.runs.length)]; return <i key={i} className={r ? result(r)[1] : "none"} title={r ? `${sinceLabel(r.fired_at)} · ${result(r)[0]}` : ""} />; })}</span>
         : <span className="faint">No runs yet</span>}</td>
       <td className={`nw${bad ? " badc" : ""}`}>{word}</td>
@@ -130,7 +133,7 @@ function parseSpec(spec: string): When {
   if ((m = /^weekly (\w{3}) (\d{1,2}:\d{2})$/i.exec(spec))) return { ...w, freq: "weekly", dow: m[1].toLowerCase(), time: pad(m[2]) };
   if ((m = /^monthly (\d{1,2}) (\d{1,2}:\d{2})$/i.exec(spec))) return { ...w, freq: "monthly", dom: m[1], time: pad(m[2]) };
   if ((m = /^every (\d+) hours?$/i.exec(spec))) return { ...w, freq: "hours", hours: m[1] };
-  return spec && !isEvent(spec) ? { ...w, freq: "custom", custom: spec } : w;
+  return spec && !isEvent(spec) && !isAfter(spec) ? { ...w, freq: "custom", custom: spec } : w;
 }
 function buildSpec(w: When) {
   if (w.freq === "daily") return `daily ${w.time}`;
@@ -141,24 +144,28 @@ function buildSpec(w: When) {
   return w.custom.trim();
 }
 
-function Editor({ s, onDone, onCancel, reload }: { s?: Sched; onDone: (id: string) => void; onCancel: () => void; reload?: () => void }) {
+function Editor({ s, all, onDone, onCancel, reload }: { s?: Sched; all: Sched[]; onDone: (id: string) => void; onCancel: () => void; reload?: () => void }) {
   const { S, bot } = useStore();
   const members = S.bots.filter((b) => !b.archived);
   const [botId, setBotId] = useState(s?.bot_id || "");
   const [title, setTitle] = useState(s?.title || ""), [prompt, setPrompt] = useState(s?.prompt || "");
-  const [mode, setMode] = useState<"time" | "event">(s && isEvent(s.spec) ? "event" : "time");
+  const [mode, setMode] = useState<"time" | "after" | "event">(s && isEvent(s.spec) ? "event" : s && isAfter(s.spec) ? "after" : "time");
+  const [after, setAfter] = useState(s && isAfter(s.spec) ? s.spec.slice(6) : "");
+  // Any other schedule can come first; the server refuses loops and private members with a reason.
+  const firsts = all.filter((x) => x.id !== s?.id), first0 = all.find((x) => x.id === after);
   const [w, setW] = useState<When>(() => parseSpec(s?.spec || "daily 09:00"));
   const [check, setCheck] = useState(s?.check_cmd || ""), [quiet, setQuiet] = useState(!!s?.check_cmd), [adv, setAdv] = useState(false);
   const [grade, setGrade] = useState(!!s?.grade);
   const [hook, setHook] = useState<{ path: string; secret: string } | null>(null);
   const set = (p: Partial<When>) => setW((o) => ({ ...o, ...p }));
-  const spec = mode === "event" ? "on event" : buildSpec(w);
+  const spec = mode === "event" ? "on event" : mode === "after" ? `after ${after}` : buildSpec(w);
   const first = useRef<HTMLInputElement>(null);
   useEffect(() => { if (!s) first.current?.focus(); }, [s]);
 
   const save = async () => {
     if (!s && !botId) return toast("Pick a member", true);
     if (!prompt.trim()) return toast("Say what to do", true);
+    if (mode === "after" && !after) return toast("Pick the schedule it runs after", true);
     if (mode === "time" && quiet && !check.trim()) { setAdv(true); return toast("Skip quiet days needs a check command", true); }
     const body = { title: title.trim() || null, spec, prompt, check: mode === "time" && quiet ? check.trim() : null, grade };
     if (s) { await api.patch(`/api/schedules/${s.id}`, body); toast("Saved"); onDone(s.id); }
@@ -168,6 +175,7 @@ function Editor({ s, onDone, onCancel, reload }: { s?: Sched; onDone: (id: strin
   const pause = async () => { await api.patch(`/api/schedules/${s!.id}`, { enabled: !s!.enabled }); reload?.(); };
   const event = !!s && isEvent(s.spec);
   const sentence = mode === "event" ? "Runs when a signed request reaches its address."
+    : mode === "after" ? (first0 ? `Runs when “${first0.title || first0.prompt.split("\n")[0]}” finishes, and starts with what it replied. If that run fails or is skipped, this one is skipped too.` : "Runs when the schedule you pick finishes, and starts with what it replied.")
     : `Runs ${specWords(spec).replace(/^Every/, "every").replace(/^Weekdays/, "on weekdays").replace(/^(\d)/, "on the $1")}.${s && spec === s.spec && s.enabled && s.next_run ? ` Next run ${nextWhen(s.next_run).join(" ").toLowerCase()}, in ${until(s.next_run)}.` : ""}`;
 
   return (
@@ -180,7 +188,7 @@ function Editor({ s, onDone, onCancel, reload }: { s?: Sched; onDone: (id: strin
         <div className="col sch2-r">
           <Field label="Member">{s ? <div className="sch2-member"><Face b={bot(s.bot_id)} size="xs" />{s.bot_name}</div>
             : <select value={botId} onChange={(e) => setBotId(e.target.value)}><option value="">Pick a member</option>{members.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>}</Field>
-          <Field label="Starts"><Seg options={[["time", "At a time"], ["event", "When something happens"]] as const} value={mode} onChange={setMode} /></Field>
+          <Field label="Starts"><Seg options={[["time", "At a time"], ["after", "After another schedule"], ["event", "When something happens"]] as const} value={mode} onChange={setMode} /></Field>
           {mode === "time" ? <>
             <Field label="How often">
               <div className="sch2-when">
@@ -203,6 +211,14 @@ function Editor({ s, onDone, onCancel, reload }: { s?: Sched; onDone: (id: strin
               {quiet && <button className="sch2-q small" onClick={() => setAdv(!adv)} aria-expanded={adv}>{adv ? "Hide the check" : "Show the check"}</button>}
               {quiet && adv && <Field label="Check command" help="Runs in their workspace. Same output as last time means nothing new."><input className="pc-m" placeholder="python3 skills/blinkit/order_count.py" value={check} maxLength={500} onChange={(e) => setCheck(e.target.value)} /></Field>}
             </div>
+          </> : mode === "after" ? <>
+            <Field label="After">
+              <select value={after} onChange={(e) => setAfter(e.target.value)} aria-label="Runs after">
+                <option value="">Pick a schedule</option>
+                {firsts.map((x) => <option key={x.id} value={x.id}>{`${x.title || x.prompt.split("\n")[0].slice(0, 60)} · ${x.bot_name}`}</option>)}
+              </select>
+            </Field>
+            <p className="small muted">{sentence}</p>
           </> : <div className="col" style={{ gap: 6 }}>
             <p className="small muted">The member wakes when a signed request reaches this schedule's address: an email forwarder, a bank alert, any service that sends webhooks. What it sends is read as information, never as instructions.</p>
             {event ? (hook ? <div className="col" style={{ gap: 4 }}><code className="small sch2-code">{`https://${location.host}${hook.path}`}</code><code className="small sch2-code">{hook.secret}</code><p className="small faint">Sign with Standard Webhooks (HMAC-SHA256), or send the secret as a Bearer token.</p></div>
@@ -237,7 +253,7 @@ function History({ s }: { s: Sched }) {
           <a key={r.id} className={`sch2-run${r.thread_id ? "" : " nolink"}`} href={r.thread_id ? `#/t/${r.thread_id}` : undefined}>
             <span className="pc-m">{`${dayLabel(r.fired_at)}, ${hm(r.fired_at)}`}</span>
             <span className="pc-m faint">{took(r)}</span>
-            <span className={`res ${cls}`}><i />{r.kind === "manual" ? `${word} · run now` : r.kind === "event" ? `${word} · event` : word}</span>
+            <span className={`res ${cls}`}><i />{r.kind === "manual" ? `${word} · run now` : r.kind === "event" ? `${word} · event` : r.kind === "after" && r.status !== "skipped" ? `${word} · after` : word}</span>
             <span className="muted ell"><Inline text={flat(r.summary || r.note)} /></span>
             {r.thread_id ? <Icon name="chev" size={12} /> : <span />}
           </a>); })}
