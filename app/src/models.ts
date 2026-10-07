@@ -35,7 +35,7 @@ export interface ScheduleRow {
 }
 export interface ScheduleRunRow {
   id: string; schedule_id: string; bot_id: string; thread_id: string | null; turn_id: string | null;
-  kind: "time" | "manual" | "event"; due_at: number; fired_at: number; started_at: number | null; ended_at: number | null;
+  kind: "time" | "manual" | "event" | "after"; due_at: number; fired_at: number; started_at: number | null; ended_at: number | null;
   status: "queued" | "running" | "quiet" | "reported" | "failed" | "interrupted" | "cancelled" | "skipped";
   note: string | null; summary: string | null; input_tokens: number | null; cost_usd: number | null;
 }
