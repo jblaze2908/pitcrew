@@ -88,10 +88,18 @@ function resolveAfter(spec: string, botId: string, who: "crew" | "driver") {
   if (!hit.length) throw new Error(`No schedule named “${m[1].trim()}” to run after.${who === "crew" ? " list_schedules shows yours." : ""}`);
   throw new Error(`More than one schedule matches “${m[1].trim()}”: ${hit.slice(0, 5).map((r) => `“${r.title || scheduleTitle(r.prompt)}” (${r.name})`).join(", ")}. Use the full name.`);
 }
-/** The name of the schedule each chained row runs after, for lists and the Schedules page. One read per chained row. */
+/** For each chained row: the earlier schedule's name and member, and when the chain's first step next runs (so the page
+ * can say "Tonight, after 23:00"). A few reads per chained row, at most the chain's length (10). */
 const withAfter = <T extends { spec: string }>(rows: T[]) => rows.map((s) => {
-  const up = afterId(s.spec), u = up && one<{ title: string | null; prompt: string; name: string }>("SELECT s.title,s.prompt,b.name FROM schedules s JOIN bots b ON b.id=s.bot_id WHERE s.id=?", up);
-  return up ? { ...s, after_title: u ? `${u.title || scheduleTitle(u.prompt)}` : null, after_member: u ? u.name : null } : s;
+  const up = afterId(s.spec);
+  if (!up) return s;
+  type Up = { id: string; spec: string; enabled: number; next_run: number | null; title: string | null; prompt: string; name: string };
+  const get = (id: string) => one<Up>("SELECT s.id,s.spec,s.enabled,s.next_run,s.title,s.prompt,b.name FROM schedules s JOIN bots b ON b.id=s.bot_id WHERE s.id=?", id);
+  const u = get(up);
+  let root = u, paused = !!u && !u.enabled;
+  for (let n = 0; root && afterId(root.spec) && n < 10; n++) { root = get(afterId(root.spec)!); paused ||= !!root && !root.enabled; }
+  return { ...s, after_title: u ? u.title || scheduleTitle(u.prompt) : null, after_member: u?.name ?? null,
+    after_next: !paused && root ? root.next_run : null, after_waits: !u ? "gone" : paused ? "paused" : root && isEventSpec(root.spec) ? "event" : null };
 });
 // A member chains only its own schedules; the driver may link members, but a private one's output never reaches another.
 function checkAfter(self: string | null, botId: string, spec: string, who: "crew" | "driver") {

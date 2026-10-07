@@ -844,6 +844,7 @@ test("an 'after' schedule runs when its upstream run finishes, with its reply, a
   const b = R.addSchedule("b_chA", null, "after Pull Numbers", "Tidy the numbers");
   assert.equal(b.spec, `after ${a.id}`, "a name resolves to the id, which keeps its case"); assert.equal(b.next_run, null, "never fires on the clock");
   assert.equal(b.after_title, "Pull numbers"); assert.equal(R.listSchedules("b_chA")[1].after_member, "Fetcher");
+  assert.equal(b.after_next, a.next_run, "a chained row knows when its first step next runs");
   assert.throws(() => R.addSchedule("b_chA", null, "after Nightly backup", "x"), /No schedule named “Nightly backup”/);
   const twin = R.addSchedule("b_chB", null, "daily 06:00", "Pull numbers for the morning", "Pull numbers");
   assert.equal(R.addSchedule("b_chA", null, "after pull numbers", "x", null, "driver").spec, `after ${a.id}`, "the driver gets the member's own first");
@@ -853,6 +854,10 @@ test("an 'after' schedule runs when its upstream run finishes, with its reply, a
   assert.throws(() => R.addSchedule("b_chB", null, `after ${a.id}`, "Write it up"), /your own/, "a member can't chain another member's schedule");
   const c = R.addSchedule("b_chB", null, `after ${a.id}`, "Write it up", null, "driver");
   const d = R.addSchedule("b_chA", null, `after ${b.id}`, "File it");
+  assert.equal(d.after_next, a.next_run, "two steps down, still the first step's time");
+  R.updateSchedule(a.id, null, { enabled: false }, "driver");
+  assert.equal(R.listSchedules("b_chA").find((x) => x.id === d.id).after_waits, "paused");
+  R.updateSchedule(a.id, null, { enabled: true }, "driver");
   assert.throws(() => R.addSchedule("b_chP", null, `after ${a.id}`, "Note it", null, "driver"), /private/);
   assert.throws(() => R.addSchedule("b_chA", null, "after sc_nope", "x"), /No schedule sc_nope/);
   assert.throws(() => R.updateSchedule(a.id, null, { spec: `after ${d.id}` }, "driver"), /loop/);

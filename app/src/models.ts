@@ -34,6 +34,8 @@ export interface ScheduleRow {
   title?: string | null;
   /** For "after <id>" rows: the earlier schedule's name and member (runtime/schedules.ts withAfter). */
   after_title?: string | null; after_member?: string | null;
+  /** When the chain's first step next runs, or why there's no time: "paused" (a step before is), "event", "gone". */
+  after_next?: number | null; after_waits?: "paused" | "event" | "gone" | null;
 }
 export interface ScheduleRunRow {
   id: string; schedule_id: string; bot_id: string; thread_id: string | null; turn_id: string | null;
