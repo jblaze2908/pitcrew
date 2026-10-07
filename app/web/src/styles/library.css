@@ -148,7 +148,7 @@
 .sch2{border:1px solid var(--line);border-radius:18px;background:var(--surface);overflow:hidden}
 .sch2 .tbl{table-layout:fixed}
 .sch2 .tbl th{padding:12px 14px}
-.sch2 .tbl th:nth-child(2){width:160px}.sch2 .tbl th:nth-child(3){width:130px}.sch2 .tbl th:nth-child(4){width:196px}.sch2 .tbl th:nth-child(5){width:170px}.sch2 .tbl th:nth-child(6){width:150px}
+.sch2 .tbl th:nth-child(2){width:160px}.sch2 .tbl th:nth-child(3){width:160px}.sch2 .tbl th:nth-child(4){width:196px}.sch2 .tbl th:nth-child(5){width:170px}.sch2 .tbl th:nth-child(6){width:150px}
 .sch2-row td{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sch2 .tbl td{padding:12px 14px;vertical-align:middle}
 .sch2 .tbl th:first-child,.sch2 .tbl td:first-child{padding-left:18px}
