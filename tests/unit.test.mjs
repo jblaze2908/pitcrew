@@ -91,7 +91,7 @@ test("a member lists, edits, pauses and cancels only its own schedules", () => {
 
 test("schedules carry a short title: given, backfilled from the prompt, or reset to it", () => {
   run("INSERT INTO bots(id,name,created_at) VALUES('b_ttl','Titler',0)");
-  assert.equal(R.scheduleTitle("Review today's spending in Tijori. Then compare it with the goals."), "Review today's spending in Tijori");
+  assert.equal(R.scheduleTitle("Review today's spending in the ledger. Then compare it with the goals."), "Review today's spending in the ledger");
   assert.equal(R.scheduleTitle("[Scheduled: daily 09:00]\n\nCheck the BESCOM portal"), "Check the BESCOM portal");
   const long = R.scheduleTitle("every day at 22:00 asia/kolkata run one pass over the grocery ledger and the bank feed and label whatever is new");
   assert.ok(long.length <= 60 && long.endsWith("…") && long.startsWith("One pass over"), long);
@@ -1144,7 +1144,7 @@ test("threads are named by the plan model once they have a topic, never over a t
   assert.equal(Tt.cleanTitle("Title: Goa trip in December"), "Goa trip in December");
   assert.equal(Tt.cleanTitle("NONE"), null);
   assert.equal(Tt.cleanTitle("Pitcrew latest changes source notes unavailable NONE"), null);
-  assert.equal(Tt.cleanTitle("Tijori tool availability уточification"), null);
+  assert.equal(Tt.cleanTitle("Ledger tool availability уточification"), null);
   assert.equal(Tt.cleanTitle("Поездка в Гоа"), "Поездка в Гоа");
   assert.equal(Tt.cleanTitle("Here is a long explanation of what this thread is about and why it matters a lot"), null);
   run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_name','b_quiet','New thread',0,0)");

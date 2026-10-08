@@ -102,8 +102,7 @@ Known: Codex's `aggregatedOutput` on remote commands can miss the first lines (t
 - **Delegation:** `ask_crew_member` (Chief only); private members can't be asked.
 - **Plans** (Settings → General → Crew plans, on by default): the Chief edits a living todo; Pitcrew runs items, hands
   results on, wakes the Chief per item, asks every contributor for alternatives before finish; limits ask the driver.
-  Gate 3 on the Goa scenario passed (117 s, 5 Chief runs, $0.24 on members' caps). Details: Obsidian
-  "Research - orchestration".
+  Gate 3 on the Goa scenario passed (117 s, 5 Chief runs, $0.24 on members' caps).
 - Designs: Draft canvas "Pitcrew — Screens", boards 20–22.
 
 ## 2026-10-02 — Engram link (Engram M3–M5, Pitcrew side)

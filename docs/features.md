@@ -14,7 +14,7 @@ They win on breadth: thousands of connectors, polished native apps, frontier mod
 6. **My data stays mine.** Nothing leaves the box except through flows I approved. No ads, no training on my data, no human contractors on my calls (Meta did exactly that with Muse, then rolled it back).
 7. **Memory I can see and fix.** Every fact has a source and can be edited or forgotten. Dots: "you cannot view, delete, or edit individual memories"; disconnecting an app doesn't make it forget.
 8. **Crew as code.** Crew members, rules and recipes are versioned files, tools are my own code, and the crew is reachable from Claude Code and the terminal. There is no marketplace to get malware from (341 malicious skills out of 2,857 audited on OpenClaw's ClawHub).
-9. **Plugged into my life.** Obsidian vault, Tijori ledger, brain later, and the Indian services I actually use via their real sites, not whatever connector catalogue a US company prioritised.
+9. **Plugged into my life.** Obsidian vault, a finance ledger, brain later, and the Indian services I actually use via their real sites, not whatever connector catalogue a US company prioritised.
 10. **Built for one.** No roles, no upsell, no "enterprise pilot". Every screen serves the driver.
 
 ## Signature features
@@ -124,7 +124,7 @@ Tiers:
 | Browser-first for anything without an API (netbanking, utilities, Blinkit, Airtel) | v1 |
 | MCP connectors; custom tools in my own code | v1 |
 | Obsidian vault: read and write notes under grants | v1.5 |
-| Tijori ledger: Bills reconciles payments against it | v1.5 |
+| Finance ledger (any MCP): Bills reconciles payments against it | v1.5 |
 | WhatsApp / Telegram messages as a channel to people (always a pit stop) | v2 |
 
 ### 8. Surfaces

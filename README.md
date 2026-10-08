@@ -56,6 +56,8 @@ systemctl start pitcrew.service           # the first build takes several minute
 
 The timer then keeps the host on the latest `main` of your clone, rolling back if a release fails its health check.
 
+Full guide (requirements, manual compose, reverse proxy examples, optional integrations, troubleshooting): [`docs/deploy.md`](docs/deploy.md).
+
 First run: open `https://<PITCREW_HOST>`, paste the setup token from `/srv/pitcrew/data/setup-token`, choose a password, then connect a provider in Settings.
 
 ## Develop

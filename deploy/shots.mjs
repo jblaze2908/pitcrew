@@ -1,5 +1,5 @@
 // UI review screenshots of the live site, taken on the server with a temporary session (deleted after).
-//   docker run --rm --network host -v /srv/pitcrew/data:/data -v /root/pitcrew-app/shots:/out --entrypoint node pitcrew-computer:1 /opt/shots.mjs
+//   docker run --rm --network host -v /srv/pitcrew/data:/data -v "$PWD/shots":/out --entrypoint node pitcrew-computer:1 /opt/shots.mjs
 import { createRequire } from "node:module";
 import { execSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
