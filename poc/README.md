@@ -53,7 +53,7 @@ These are single runs, so latency varies run to run. The Respan models let a Pay
 
 Measured: boot to desktop-ready ~1.7–1.8 s; idle ~273–321 MiB RAM each.
 
-the host has no `/dev/kvm` (it is a KVM guest without nested virt), so microVMs (Firecracker/Kata) are out. gVisor is the upgrade path for kernel-level isolation.
+The test host had no `/dev/kvm` (a KVM guest without nested virt), so microVMs (Firecracker/Kata) are out. gVisor is the upgrade path for kernel-level isolation.
 
 ### Browser engines (`bench-browsers.mjs`, headless, same 4 pages, each alone in its own container)
 

@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 
 import { tmpdir } from "node:os";
 
 const root = mkdtempSync(`${tmpdir()}/pitcrew-img-`);
-mkdirSync(`${root}/data`); Object.assign(process.env, { PITCREW_ROOT: root, PITCREW_DATA: `${root}/data` });
+mkdirSync(`${root}/data`); Object.assign(process.env, { PITCREW_TZ: "Asia/Kolkata", PITCREW_ROOT: root, PITCREW_DATA: `${root}/data` });
 const A = await import("../app/dist/src/auth.js");
 const I = await import("../app/dist/src/images.js");
 const C = await import("../app/dist/src/crew.js");

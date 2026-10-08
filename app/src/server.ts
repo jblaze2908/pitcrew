@@ -14,12 +14,12 @@ import { api } from "./api/index.js";
 import { serveRaw } from "./http/raw.js";
 import { liveView } from "./http/liveview.js";
 import { startEngram } from "./engram.js";
+import { PUBLIC_URL } from "./runtime/util.js";
 
 const PORT = Number(process.env.PORT || 8330);
 // dist/src/server.js → dist/web, the Vite build.
 const WEB = new URL("../web/", import.meta.url).pathname;
 const NOVNC = process.env.NOVNC_DIR || "/usr/share/novnc";
-const HOST = process.env.PITCREW_HOST || "pitcrew.example.com";
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
 const toApi = getRequestListener(api.fetch);
@@ -56,4 +56,4 @@ startIdleSweeper(R.isBusy, R.isThinking);
 startBootSocket(R.computerHooks);
 toolManifest().then((m) => console.log(`tool manifest: ${m.browser.length} browser, ${m.computer.length} pixel`)).catch((e) => console.error("tool manifest failed:", e.message));
 // Before a web build (local dev) there is nothing to warm, and static requests 404.
-server.listen(PORT, () => { console.log(`pitcrew control plane on :${PORT} (${HOST})`); if (existsSync(WEB)) for (const f of readdirSync(WEB, { recursive: true }) as string[]) warm(join(WEB, f)); });
+server.listen(PORT, () => { console.log(`pitcrew control plane on :${PORT} (${PUBLIC_URL})`); if (existsSync(WEB)) for (const f of readdirSync(WEB, { recursive: true }) as string[]) warm(join(WEB, f)); });

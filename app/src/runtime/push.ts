@@ -4,10 +4,10 @@
 // Skipped while the driver has Pitcrew open and visible (a presence beat every 60 s). Per pit stop: one HTTPS POST.
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { getSetting, setSetting, one, audit, now } from "../db.js";
+import { PUBLIC_URL } from "./util.js";
 import { getSecret, putSecret, deleteSecret, macKey, httpErr } from "../auth.js";
 import type { PitstopRow } from "../models.js";
 
-const HOST = process.env.PITCREW_HOST || "pitcrew.example.com";
 const PHONE_APPROVES = new Set(["command", "mcp", "file", "site", "secret", "mail"]);
 const NEVER_FROM_PHONE = new Set(["pay"]);
 const PRESENT_MS = 90000;
@@ -46,7 +46,7 @@ async function send(msg: { title: string; message: string; click: string; action
 /** A new pit stop on the phone. Engram proposals wait for the inbox; they're never urgent. */
 export function pushPitStop(p: PitstopRow, botName: string) {
   if (p.kind === "engram" || p.kind === "teach") return;  // teach: the driver is at the screen they just handed back
-  const open = `https://${HOST}/${p.thread_id ? `#/t/${p.thread_id}` : "#/pitstops"}`, act = (d: "approve" | "deny") => `https://${HOST}/api/push/act/${actToken(p.id, d, p.expires_at)}`;
+  const open = `${PUBLIC_URL}/${p.thread_id ? `#/t/${p.thread_id}` : "#/pitstops"}`, act = (d: "approve" | "deny") => `${PUBLIC_URL}/api/push/act/${actToken(p.id, d, p.expires_at)}`;
   const actions: Action[] = [
     ...(phoneMayApprove(p) ? [{ action: "http" as const, label: "Approve", url: act("approve"), method: "POST", clear: true }] : []),
     { action: "http", label: "Deny", url: act("deny"), method: "POST", clear: true },
@@ -55,9 +55,9 @@ export function pushPitStop(p: PitstopRow, botName: string) {
   send({ title: `${botName} needs you`, message: p.title, click: open, actions, priority: 4, tags: ["checkered_flag"] }).catch(() => {});
 }
 export function pushRunFailed(botName: string, spec: string, why: string, threadId: string | null) {
-  const open = `https://${HOST}/${threadId ? `#/t/${threadId}` : "#/schedules"}`;
+  const open = `${PUBLIC_URL}/${threadId ? `#/t/${threadId}` : "#/schedules"}`;
   send({ title: `${botName}'s scheduled run failed`, message: `${spec}: ${why || "no reason given"}`, click: open, actions: [{ action: "view", label: "Open", url: open }], priority: 3, tags: ["warning"] }).catch(() => {});
 }
 export const pushBalance = (message: string) => send({ title: "OpenRouter balance low", message, click: "https://openrouter.ai/settings/credits", priority: 3, tags: ["moneybag"] }).catch(() => {});
-export const pushTest = () => send({ title: "Pitcrew", message: "Phone notifications work. Pit stops will show up here with Approve and Deny.", click: `https://${HOST}/` });
+export const pushTest = () => send({ title: "Pitcrew", message: "Phone notifications work. Pit stops will show up here with Approve and Deny.", click: `${PUBLIC_URL}/` });
 export const pitForAct = (id: string) => one<PitstopRow>("SELECT * FROM pitstops WHERE id=?", id);

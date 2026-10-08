@@ -111,6 +111,7 @@ export const testLink = () => { const k = getSecret(LINK_SECRET); if (!k) throw 
 // Nothing is saved unless Engram accepts the token. A new address drops the old address's member tokens.
 export async function setLink(urlIn: unknown, tokenIn: unknown) {
   const url = normaliseUrl(urlIn || DEFAULT_URL);
+  if (!urlIn && !DEFAULT_URL) throw httpErr(400, "Paste your Engram address");
   if (!url) throw httpErr(400, "Use an https:// address for Engram");
   const given = typeof tokenIn === "string" ? tokenIn.trim() : "", key = given || (url === engramUrl() ? getSecret(LINK_SECRET) : null);
   if (!key) throw httpErr(400, "Paste the link token from Engram → Agents → Link Pitcrew");

@@ -9,7 +9,7 @@ import { domainToASCII } from "node:url";
 const root = mkdtempSync(`${tmpdir()}/pitcrew-sites-`);
 mkdirSync(`${root}/data`);
 writeFileSync(`${root}/chrome-policy.json`, JSON.stringify({ URLBlocklist: ["file://*"], SSLErrorOverrideAllowed: false }));
-Object.assign(process.env, { PITCREW_ROOT: root, PITCREW_DATA: `${root}/data`, PITCREW_CHROME_POLICY: `${root}/chrome-policy.json` });
+Object.assign(process.env, { PITCREW_TZ: "Asia/Kolkata", PITCREW_ROOT: root, PITCREW_DATA: `${root}/data`, PITCREW_CHROME_POLICY: `${root}/chrome-policy.json` });
 const S = await import("../app/dist/src/sites.js");
 const D = await import("../app/dist/src/domains.js");
 const J = await import("../app/dist/src/jev.js");

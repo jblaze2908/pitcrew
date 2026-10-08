@@ -1,6 +1,6 @@
 # Pitcrew member email (Cloudflare)
 
-Gives each crew member an address like `billkeeper@pitcrew.example.com`.
+Gives each crew member an address like `billkeeper@pitcrew.example.com`. Use a domain on Cloudflare; set `PITCREW_MAIL_DOMAIN` to the same subdomain.
 
 1. Cloudflare dashboard → `example.com` → Email → Email Routing → enable it for the subdomain `pitcrew.example.com` (Cloudflare adds the MX and SPF records).
 2. Deploy this worker: `npm install && npx wrangler deploy`, then `npx wrangler secret put PITCREW_MAIL_URL` and `npx wrangler secret put PITCREW_MAIL_SECRET` with the values from Pitcrew → Settings → Email → Show worker settings.

@@ -1,6 +1,6 @@
 # Pitcrew v1 — build plan and status
 
-Goal (Jai, 2026-10-01): complete v1 and deploy it on the host at `https://pitcrew.example.com`.
+Goal (2026-10-01): complete v1 and deploy it on one VPS.
 
 ## Shape
 
@@ -11,7 +11,7 @@ Goal (Jai, 2026-10-01): complete v1 and deploy it on the host at `https://pitcre
 | Web | Static SPA in the Pitcrew design system (theme + `pc-*` components exported from Draft). | `app/web/` |
 | Deploy | `deploy/deploy.sh`: rsync to the host, build both images, run the control plane on `172.17.0.1:8330`, Traefik file-provider router for the host. | `deploy/` |
 
-Host layout on the host: `/srv/pitcrew/data` (db, master key, setup token; root 0700), `/srv/pitcrew/bots/<id>/{work,profile,codex,run}` (uid 1500; the only thing a computer mounts), `/srv/pitcrew/chatgpt` (shared ChatGPT auth, mounted only into computers whose provider is ChatGPT).
+Host layout: `/srv/pitcrew/data` (db, master key, setup token; root 0700), `/srv/pitcrew/bots/<id>/{work,profile,codex,run}` (uid 1500; the only thing a computer mounts), `/srv/pitcrew/chatgpt` (shared ChatGPT auth, mounted only into computers whose provider is ChatGPT).
 
 ## Decisions taken to unblock v1 (defaults; revisit)
 
@@ -34,7 +34,7 @@ Pull-based, like Draft: `pitcrew.timer` on the host runs `deploy/pull-update.sh`
 
 ## v1.1 — brain / computer split (2026-10-01)
 
-Jai's direction: not every task needs a computer. Anything that needs a runtime (bash, code, browser) takes the computer; everything else must not boot one.
+The driver's direction: not every task needs a computer. Anything that needs a runtime (bash, code, browser) takes the computer; everything else must not boot one.
 
 | Part | What runs | When |
 |---|---|---|
@@ -108,7 +108,7 @@ Known: Codex's `aggregatedOutput` on remote commands can miss the first lines (t
 
 ## 2026-10-02 — Engram link (Engram M3–M5, Pitcrew side)
 
-Off until Settings → Engram has a URL (default `https://engram.example.com`) and a link token; the token is
+Off until Settings → Engram has a URL (pre-filled from `PITCREW_ENGRAM_URL`) and a link token; the token is
 tested (`GET /link/inbox`) before it is saved, encrypted like provider keys. Private members never join.
 
 - **Inbox mirror:** every 60 s, `/link/inbox` → pit stops of kind and effect `engram` (id `eg_<proposal id>`, so no
@@ -167,7 +167,7 @@ tested (`GET /link/inbox`) before it is saved, encrypted like provider keys. Pri
   asks for a public link, which Engram holds for the driver (a pit stop here). The instructions tell members to
   publish what the driver will read, keep or share, and leave working files alone. Library files are no longer sent
   on their own (not by the journal, not by "Move memories"); the journal links what a session published.
-  Live 2026-10-02 at https://artifacts.example.com: a Crew Chief turn wrote a file and published it with
+  Live 2026-10-02 on Engram's artifacts host: a Crew Chief turn wrote a file and published it with
   `public: true` in 16 s; it got a private `/a/<id>` link and the share request showed up as an `engram` pit stop.
   Approving that pit stop shows the public link on the card and posts it to the member's thread (Engram's decide answer carries `public_url`).
   The Library has three tabs: **Published** (default), **Surfaces** (shown once any exist) and **Files** (one folded row per
@@ -191,7 +191,7 @@ tested (`GET /link/inbox`) before it is saved, encrypted like provider keys. Pri
 
 ## Status — deployed 2026-10-01
 
-Live at https://pitcrew.example.com (Traefik file-provider router → `172.17.0.1:8330`, Let's Encrypt cert issued on first request). First-run setup (setup token → password) is left for Jai.
+Live at `https://$PITCREW_HOST` (Traefik file-provider router → `172.17.0.1:8330`, Let's Encrypt cert issued on first request). First-run setup (setup token → password) is left for the driver.
 
 Measured on the live instance (`deploy/e2e.mjs`, Crew Chief on OpenRouter `anthropic/claude-sonnet-5.5`):
 
@@ -206,7 +206,7 @@ Measured on the live instance (`deploy/e2e.mjs`, Crew Chief on OpenRouter `anthr
 | `remember` stores memory | pass |
 | Crew Chief `propose_crew_member` → HIRE pit stop → approve creates the member | pass |
 | Live view: WebSocket → x11vnc unix socket handshake | pass (`RFB 003.008`) |
-| Sign in with ChatGPT: device code from auth.openai.com | pass (flow cancelled before completion; Jai completes it) |
+| Sign in with ChatGPT: device code from auth.openai.com | pass (flow cancelled before completion; the driver completes it) |
 | Kill switch refuses new runs; resume clears it | pass |
 | Unauthenticated API refused; cross-site POST refused; file path traversal → 404 | pass |
 | Surface validator vs 10 seeded bad specs | 10/10 rejected |
@@ -224,4 +224,4 @@ Checklist:
 - [x] Crew Chief turn end to end (browser + pit stop)
 - [x] HIRE flow
 - [x] generative UI surface render + form round trip
-- [x] deployed at pitcrew.example.com with TLS
+- [x] deployed at `$PITCREW_HOST` with TLS

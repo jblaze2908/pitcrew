@@ -1,5 +1,5 @@
-// Formatting shared by every view. Times show in IST, the user's zone.
-const IST = "Asia/Kolkata";
+// Formatting shared by every view. Times show in the browser's zone, which is the driver's.
+const ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 export const usd = (n: number | null | undefined) => { const v = n || 0; return `$${v.toFixed(v > 0 && v < 0.1 ? 3 : 2)}`; };
 
@@ -9,25 +9,25 @@ export const ago = (t: number | null | undefined) => {
   return s < 60 ? "just now" : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`;
 };
 
-const whenFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: IST });
-const hourFmt = new Intl.DateTimeFormat("en-GB", { hour: "numeric", timeZone: IST });
+const whenFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: ZONE });
+const hourFmt = new Intl.DateTimeFormat("en-GB", { hour: "numeric", timeZone: ZONE });
 
 export const when = (t: number | null | undefined) => (t ? whenFmt.format(new Date(t)) : "");
 export const hourNow = () => +hourFmt.format(new Date());
 
-const hmFmt = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: IST });
-const keyFmt = new Intl.DateTimeFormat("en-CA", { timeZone: IST });
-const dayFmt = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: IST });
+const hmFmt = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: ZONE });
+const keyFmt = new Intl.DateTimeFormat("en-CA", { timeZone: ZONE });
+const dayFmt = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: ZONE });
 export const hm = (t: number) => hmFmt.format(new Date(t));
-/** "Today", "Yesterday" or "Thu 2 Oct", by the IST calendar day. */
+/** "Today", "Yesterday" or "Thu 2 Oct", by the local calendar day. */
 export const dayLabel = (t: number) => {
   const k = keyFmt.format(new Date(t));
   return k === keyFmt.format(new Date()) ? "Today" : k === keyFmt.format(new Date(Date.now() - 86400000)) ? "Yesterday" : dayFmt.format(new Date(t)).replace(",", "");
 };
 
-const wdFmt = new Intl.DateTimeFormat("en-GB", { weekday: "short", timeZone: IST });
-const dmFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: IST });
-/** "3 Oct" by the IST calendar; newer ICU writes September "Sept", the rest of the app says "Sep". */
+const wdFmt = new Intl.DateTimeFormat("en-GB", { weekday: "short", timeZone: ZONE });
+const dmFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: ZONE });
+/** "3 Oct" by the local calendar; newer ICU writes September "Sept", the rest of the app says "Sep". */
 export const dayMonth = (t: number | null | undefined) => (t ? dmFmt.format(new Date(t)).replace("Sept", "Sep") : "");
 /** A log time: "07:38" today, "Sun 23:31" within the week, "3 Oct" before that. */
 export const stamp = (t: number) => {

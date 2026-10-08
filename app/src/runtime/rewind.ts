@@ -11,7 +11,7 @@ import { active } from "./state.js";
 import { addEvent, getThread } from "./threads.js";
 import { brain } from "./machines.js";
 import { recap, forkThread, dropCodex } from "./turns.js";
-import { istClock } from "./util.js";
+import { localClock, tzLabel } from "./util.js";
 import { httpErr } from "../auth.js";
 
 export type RewindMode = "both" | "chat" | "files";
@@ -82,11 +82,11 @@ export async function rewind(turnId: string, mode: RewindMode) {
   if (mode !== "chat" && memberBusy(t.bot_id)) throw httpErr(409, `${getBot(t.bot_id)?.name || "This member"} is running something; rewind when it's idle`);
   const files = mode === "chat" ? { done: [] as string[], failed: [] as { path: string; why: string }[] } : restoreFiles(t.bot_id, planRestore(t.bot_id, restoreTargets(
     all<{ changes: string }>("SELECT changes FROM turns WHERE bot_id=? AND started_at>=? AND changes IS NOT NULL ORDER BY started_at", t.bot_id, t.started_at).map((r) => json<Change[]>(r.changes, [])))));
-  const driver = driverName(), when = istClock(t.started_at), list = (xs: string[]) => `${xs.slice(0, 12).join(", ")}${xs.length > 12 ? ` and ${xs.length - 12} more` : ""}`;
+  const driver = driverName(), when = localClock(t.started_at), list = (xs: string[]) => `${xs.slice(0, 12).join(", ")}${xs.length > 12 ? ` and ${xs.length - 12} more` : ""}`;
   const how = mode === "files" ? null : await rewindChat(t, p.boundary);
   // The member hears what changed under it: the chat it no longer remembers, or files it remembers differently.
-  if (mode === "files" && files.done.length) appendCarry(t.thread_id, `[Pitcrew] ${driver} rewound your workspace files to how they were before the run at ${when} IST. Changed back: ${list(files.done)}. Anything done to them since is gone; check before relying on it.`);
-  if (mode === "chat") appendCarry(t.thread_id, `[Pitcrew] ${driver} rewound this conversation to before a run at ${when} IST. The files that run changed in /bot/work were kept as they are now.`);
+  if (mode === "files" && files.done.length) appendCarry(t.thread_id, `[Pitcrew] ${driver} rewound your workspace files to how they were before the run at ${when} ${tzLabel}. Changed back: ${list(files.done)}. Anything done to them since is gone; check before relying on it.`);
+  if (mode === "chat") appendCarry(t.thread_id, `[Pitcrew] ${driver} rewound this conversation to before a run at ${when} ${tzLabel}. The files that run changed in /bot/work were kept as they are now.`);
   audit("driver", "run.rewound", { turnId, threadId: t.thread_id, botId: t.bot_id, mode, how, files: files.done.length, failed: files.failed.map((f) => f.path).slice(0, 50), messages: p.messages });
   const parts = [mode !== "files" ? `the chat went back to before ${when}` : "", mode !== "chat" ? `${files.done.length} file${files.done.length === 1 ? "" : "s"} changed back` : "",
     files.failed.length ? `${files.failed.length} couldn't be (${list(files.failed.map((f) => `${f.path}: ${f.why}`))})` : ""].filter(Boolean);

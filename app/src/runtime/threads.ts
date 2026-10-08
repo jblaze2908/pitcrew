@@ -1,6 +1,7 @@
 // Threads: their transcript events and live status, naming, finding past ones, and uploads into them.
 import { writeFileSync, chownSync } from "node:fs";
 import { one, all, run, now, json } from "../db.js";
+import { PUBLIC_URL } from "./util.js";
 import { botDir, ensureDirs } from "../computer.js";
 import { bus } from "./bus.js";
 import { folded } from "./state.js";
@@ -57,7 +58,6 @@ export function nameThread(t: ThreadRow, text: string, attachments: string[]) {
 // ---------- finding past threads ----------
 // Ranks a crew member's own threads by how many query terms appear in the title (weighted) and the transcript.
 // One indexed scan of that member's user/agent events per call; calls are rare (a tool call or a search box).
-const HOST = process.env.PITCREW_HOST || "pitcrew.example.com";
 type Found = Pick<ThreadRow, "id" | "title" | "archived" | "created_at" | "updated_at"> & { score: number; snippet: string; matched?: number; of?: number };
 export function findThreads(botId: string, query: unknown, { exclude = null, limit = 8 }: { exclude?: string | null; limit?: number } = {}): Found[] {
   const terms = [...new Set(String(query || "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((t) => t.length > 1))].slice(0, 8);
@@ -77,7 +77,7 @@ export function findThreads(botId: string, query: unknown, { exclude = null, lim
   return [...byId.values()].filter((t) => t.hits.size).sort((a, b) => b.hits.size - a.hits.size || b.score - a.score || b.updated_at - a.updated_at)
     .slice(0, limit).map(({ hits, ...t }) => ({ ...t, matched: hits.size, of: terms.length }));
 }
-export const threadLink = (id: string) => `https://${HOST}/#/t/${id}`;
+export const threadLink = (id: string) => `${PUBLIC_URL}/#/t/${id}`;
 
 export function saveUpload(threadId: string, name: string, buf: Buffer) {
   const t = getThread(threadId)!;

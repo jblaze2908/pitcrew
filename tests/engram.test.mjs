@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 
 const root = mkdtempSync(`${tmpdir()}/pitcrew-engram-`);
 mkdirSync(`${root}/data`);
-Object.assign(process.env, { PITCREW_ROOT: root, PITCREW_DATA: `${root}/data`, PITCREW_ENGRAM_INSECURE: "1", PITCREW_JEV_SHADOW: "0" });
+Object.assign(process.env, { PITCREW_TZ: "Asia/Kolkata", PITCREW_ROOT: root, PITCREW_DATA: `${root}/data`, PITCREW_ENGRAM_INSECURE: "1", PITCREW_JEV_SHADOW: "0" });
 
 // ---------- the stub ----------
 const LINK = "link-token-0123456789abcdef";

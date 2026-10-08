@@ -4,7 +4,8 @@ import { getSetting } from "./db.js";
 import { getSecret, secretMeta } from "./auth.js";
 import type { Bot } from "../shared/types.js";
 
-export const DEFAULT_URL = "https://engram.example.com";
+// Engram is optional: off until Settings → Engram has an address (PITCREW_ENGRAM_URL pre-fills it) and a link token.
+export const DEFAULT_URL = process.env.PITCREW_ENGRAM_URL || "";
 export const LINK_SECRET = "engram_link";
 export const memberSecret = (botId: string) => `engram_member:${botId}`;
 export const engramUrl = () => getSetting("engram_url") || DEFAULT_URL;

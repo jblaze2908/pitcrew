@@ -1,4 +1,4 @@
-// Cloudflare Email Worker for Pitcrew member addresses (<handle>@pitcrew.example.com). Email Routing hands each
+// Cloudflare Email Worker for Pitcrew member addresses (<handle>@PITCREW_MAIL_DOMAIN). Email Routing hands each
 // message here; it is parsed and POSTed to Pitcrew's /api/mail, signed Standard Webhooks style (HMAC-SHA256 over
 // "id.timestamp.body") with PITCREW_MAIL_SECRET, the value Settings → Email shows. Pitcrew decides who may wake whom.
 import PostalMime from "postal-mime";

@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, existsSync, readFil
 import { tmpdir } from "node:os";
 
 const root = mkdtempSync(`${tmpdir()}/pitcrew-test-`);
-mkdirSync(`${root}/data`); process.env.PITCREW_ROOT = root; process.env.PITCREW_DATA = `${root}/data`;
+mkdirSync(`${root}/data`); process.env.PITCREW_TZ = "Asia/Kolkata"; process.env.PITCREW_ROOT = root; process.env.PITCREW_DATA = `${root}/data`;
 const { validateSurface } = await import("../app/dist/src/surfaces.js");
 const { diffLines } = await import("../app/dist/shared/diff.js");
 const { nextRun } = await import("../app/dist/src/runtime/index.js");
@@ -31,7 +31,7 @@ test("line diff finds the minimal edit", () => {
   assert.deepEqual(ops.map((o) => o.t + o.text), [" a", "-b", "+B", " c", "+d"]);
 });
 
-test("schedules compute in Asia/Kolkata", () => {
+test("schedules compute in the driver's zone (Asia/Kolkata here)", () => {
   const IST = 330 * 60000, from = Date.UTC(2026, 9, 1, 3, 0) - IST; // Thu 1 Oct 03:00 IST
   const at = (s) => new Date(nextRun(s, from) + IST).toISOString().slice(0, 16);
   assert.equal(at("daily 09:00"), "2026-10-01T09:00");

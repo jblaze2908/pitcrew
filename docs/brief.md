@@ -1,6 +1,6 @@
 # Pitcrew — product brief
 
-Single user, self-hosted. Codename of the previous build: Nullframe.
+Single user, self-hosted.
 
 ## Purpose
 

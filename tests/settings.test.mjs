@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 
 const root = mkdtempSync(`${tmpdir()}/pitcrew-settings-`);
 mkdirSync(`${root}/data`);
-Object.assign(process.env, { PITCREW_ROOT: root, PITCREW_DATA: `${root}/data`, PITCREW_JEV_SHADOW: "0" });
+Object.assign(process.env, { PITCREW_TZ: "Asia/Kolkata", PITCREW_ROOT: root, PITCREW_DATA: `${root}/data`, PITCREW_JEV_SHADOW: "0" });
 
 const A = await import("../app/dist/src/auth.js");
 const { one } = await import("../app/dist/src/db.js");

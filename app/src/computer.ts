@@ -15,6 +15,7 @@ import { policyMount } from "./domains.js";
 import { brainMcp, type McpServer } from "./engramStore.js";
 import type { Bot } from "../shared/types.js";
 import type { ToolManifest, McpTool } from "./crewTools.js";
+import { TZ } from "./runtime/util.js";
 
 export const ROOT = process.env.PITCREW_ROOT || "/srv/pitcrew";
 export const IMAGE = process.env.PITCREW_COMPUTER_IMAGE || "pitcrew-computer:1";
@@ -317,7 +318,7 @@ export class Computer {
       "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--network", net, "-v", `${botDir(id)}:/bot`, ...policyMount(id),
       // Codex's image_gen saves in the brain and points the agent at that path; this makes the path real on the computer.
       "-v", `${brainDir(id)}/generated_images:/brains/${id}/generated_images:ro`,
-      "-e", `PITCREW_HUE=${HEX[b.hue] || HEX.c1}`, "-e", `PITCREW_NAME=${b.name.replace(/[^\w .'-]/g, "")}`,
+      "-e", `TZ=${TZ}`, "-e", `PITCREW_HUE=${HEX[b.hue] || HEX.c1}`, "-e", `PITCREW_NAME=${b.name.replace(/[^\w .'-]/g, "")}`,
       // Task folders are git repos (see crew.ts); commits carry the member as author, with no git config needed.
       ...gitIdentity(b), IMAGE]);
     if (!r.ok) throw new Error(`Couldn't start the computer: ${r.err.trim().slice(0, 200)}`);
@@ -385,7 +386,8 @@ export const allBrains = () => [...brains.values()];
 export function brainFor(bot: Bot, hooks: BrainHooks) { let x = brains.get(bot.id); if (!x) { x = new Brain(bot, hooks); brains.set(bot.id, x); } x.bot = bot; return x; }
 export function computerFor(bot: Bot, hooks: ComputerHooks) { let x = computers.get(bot.id); if (!x) { x = new Computer(bot, hooks); computers.set(bot.id, x); } x.bot = bot; return x; }
 
-// the host has ~7.7 GB; a computer idles at ~300 MiB with its desktop. Stop the stalest idle one to make room.
+// Host RAM caps the computers (one idles at ~300 MiB with its desktop, measured on an 8 GB VPS). Stop the
+// stalest idle one to make room.
 async function makeRoom(self: Computer) {
   const up = allComputers().filter((c) => c.up && c !== self);
   if (up.length < MAX_UP) return;

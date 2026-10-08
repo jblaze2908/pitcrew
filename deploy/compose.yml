@@ -1,4 +1,4 @@
-# Pitcrew on the host. Persistent: the control plane and the brain. Crew computers are started on demand by the app.
+# Pitcrew on one host. Persistent: the control plane and the brain. Crew computers are started on demand by the app.
 # Image tags come from the release env written by deploy/pull-update.sh (one tag per commit).
 name: pitcrew
 services:
@@ -13,8 +13,12 @@ services:
       # Same path inside and out, so bind mounts the app asks Docker for resolve on the host.
       - /srv/pitcrew:/srv/pitcrew
     environment:
-      PITCREW_HOST: pitcrew.example.com
-      PITCREW_MAX_COMPUTERS: "3"
+      PITCREW_HOST: ${PITCREW_HOST:?set PITCREW_HOST in /etc/pitcrew/pitcrew.env}
+      PITCREW_MAIL_DOMAIN: ${PITCREW_MAIL_DOMAIN:-}
+      PITCREW_ENGRAM_URL: ${PITCREW_ENGRAM_URL:-}
+      PITCREW_TZ: ${PITCREW_TZ:-UTC}
+      TZ: ${PITCREW_TZ:-UTC}
+      PITCREW_MAX_COMPUTERS: ${PITCREW_MAX_COMPUTERS:-3}
       PITCREW_COMPUTER_IMAGE: pitcrew-computer:${PITCREW_COMPUTER_TAG:-1}
       PITCREW_CODE_IMAGE: pitcrew-px0:${PITCREW_CODE_TAG:-1}
     logging:
@@ -42,7 +46,7 @@ services:
       - /srv/pitcrew/chatgpt:/auth
       - /srv/pitcrew/run:/run/pitcrew
     environment:
-      TZ: Asia/Kolkata
+      TZ: ${PITCREW_TZ:-UTC}
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
