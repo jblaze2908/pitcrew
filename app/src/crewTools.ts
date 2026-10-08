@@ -5,6 +5,7 @@ import { CATALOGUE } from "./surfaces.js";
 import { HELP_TOPICS } from "./manual.js";
 import { HUES, SHAPES, ENGRAM_SCOPES, plansOn } from "./crew.js";
 import type { Bot } from "../shared/types.js";
+import { TZ } from "./runtime/util.js";
 
 // Browser (Playwright over CDP) and pixel tools come from the computer image's own manifest, under their usual names.
 // Page JS, Playwright code, network and storage are offered and gated per call (jev reads the code; see gate.ts). HIDDEN
@@ -90,9 +91,9 @@ export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { br
       inputSchema: { type: "object", properties: { thread: { type: "string", description: "Thread id or link" }, after: { type: "integer" } }, required: ["thread"] } },
     { type: "function", name: "find_threads", description: "Search your own past threads (titles and transcripts) when the driver asks to find, reopen or resume an earlier conversation. Returns matching threads, best first, with links. Words, names and phrases from that conversation make good queries.",
       inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "integer" } }, required: ["query"] } },
-    { type: "function", name: "schedule_task", description: 'Run a prompt on a schedule; each run gets its own thread with the last three runs\' outcomes. when: "daily HH:MM", "weekdays HH:MM", "weekly mon HH:MM", "monthly 1 HH:MM" (day 1-28), "every N minutes|hours" (min 15 minutes), or "after <schedule name>" to run when that schedule\'s run finishes, with its reply. Times are Asia/Kolkata. Call list_schedules first: to change or extend an existing schedule, use update_schedule instead of adding a second one.',
+    { type: "function", name: "schedule_task", description: 'Run a prompt on a schedule; each run gets its own thread with the last three runs\' outcomes. when: "daily HH:MM", "weekdays HH:MM", "weekly mon HH:MM", "monthly 1 HH:MM" (day 1-28), "every N minutes|hours" (min 15 minutes), or "after <schedule name>" to run when that schedule\'s run finishes, with its reply. Times are ' + TZ + '. Call list_schedules first: to change or extend an existing schedule, use update_schedule instead of adding a second one.',
       inputSchema: { type: "object", properties: { when: { type: "string" }, prompt: { type: "string" }, title: { type: "string", description: "A short name the driver sees, e.g. Daily expense review" } }, required: ["when", "prompt"] } },
-    { type: "function", name: "list_schedules", description: "Your schedules: id, when, next run (Asia/Kolkata) or paused, and the prompt.", inputSchema: { type: "object", properties: {} } },
+    { type: "function", name: "list_schedules", description: `Your schedules: id, when, next run (${TZ}) or paused, and the prompt.`, inputSchema: { type: "object", properties: {} } },
     { type: "function", name: "update_schedule", description: "Change one of your schedules. Pass only what changes: when (same formats as schedule_task), prompt (replaces the whole prompt), title, paused.",
       inputSchema: { type: "object", properties: { id: { type: "string" }, when: { type: "string" }, prompt: { type: "string" }, title: { type: "string" }, paused: { type: "boolean" } }, required: ["id"] } },
     { type: "function", name: "cancel_schedule", description: "Delete one of your schedules for good. To stop it for a while, update_schedule with paused: true.",

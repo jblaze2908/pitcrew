@@ -20,7 +20,7 @@ import { isEventSpec } from "./hooks.js";
 import { askCrew } from "./delegation.js";
 import { planTool } from "./plans.js";
 import { runtimeTool, type ToolCall } from "./browser.js";
-import { istStamp, say } from "./util.js";
+import { localStamp, say, tzLabel } from "./util.js";
 import { remember, forget, publishFile } from "../engram.js";
 import { noteLearned } from "./learned.js";
 import { memberLinked } from "../engramStore.js";
@@ -29,7 +29,7 @@ import { startPainting, endPainting } from "./painting.js";
 import { weekSpend } from "./spend.js";
 import { setDoneCriteria } from "./donecheck.js";
 
-const ist = (t: number | null) => (t ? istStamp(t) : "—");
+const ist = (t: number | null) => (t ? localStamp(t) : "—");
 
 // Agent memory's cap (chars across a member's memories): small enough to sit in every thread's instructions (~750
 // tokens, estimate), so it gets rewritten instead of growing.
@@ -129,19 +129,19 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
         // An event trigger opens an address on the internet, so only the driver adds one (Schedules page).
         if (isEventSpec(String(a.when || ""))) return say("Only the driver can add an event trigger. Suggest it in your reply with what it should watch.", false);
         const s = addSchedule(b.id, threadId, String(a.when || ""), String(a.prompt || ""), a.title != null ? String(a.title) : null);
-        addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Scheduled “${s.title || s.prompt.slice(0, 80)}” ${s.after_title ? `after “${s.after_title}”` : s.spec}${s.next_run ? ` (next ${ist(s.next_run)} IST)` : ""}` });
+        addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Scheduled “${s.title || s.prompt.slice(0, 80)}” ${s.after_title ? `after “${s.after_title}”` : s.spec}${s.next_run ? ` (next ${ist(s.next_run)} ${tzLabel})` : ""}` });
         return say(`Scheduled ${s.id} “${s.title}”: ${s.after_title ? `after “${s.after_title}”` : s.spec}.`);
       } catch (e: any) { return say(e.message, false); }
     }
     case "list_schedules": {
       const list = listSchedules(b.id);
-      return say(list.length ? list.map((s) => { const l = lastScheduledRun(s); return `${s.id} · ${s.title ? `“${s.title}” · ` : ""}${s.after_title ? `after “${s.after_title}”` : s.spec}${!s.enabled ? " · paused" : s.next_run ? ` · next ${ist(s.next_run)} IST` : ""}${l ? ` · last run ${ist(l.at)} IST: ${l.status}${l.summary ? `, "${l.summary}"` : ""}` : " · not run yet"}\n  ${s.prompt}`; }).join("\n") : "No schedules.");
+      return say(list.length ? list.map((s) => { const l = lastScheduledRun(s); return `${s.id} · ${s.title ? `“${s.title}” · ` : ""}${s.after_title ? `after “${s.after_title}”` : s.spec}${!s.enabled ? " · paused" : s.next_run ? ` · next ${ist(s.next_run)} ${tzLabel}` : ""}${l ? ` · last run ${ist(l.at)} ${tzLabel}: ${l.status}${l.summary ? `, "${l.summary}"` : ""}` : " · not run yet"}\n  ${s.prompt}`; }).join("\n") : "No schedules.");
     }
     case "update_schedule": {
       try {
         const s = updateSchedule(String(a.id || ""), b.id, { ...(a.when != null ? { spec: String(a.when) } : {}), ...(a.prompt != null ? { prompt: String(a.prompt) } : {}), ...(a.title != null ? { title: String(a.title) } : {}),
           ...(typeof a.paused === "boolean" ? { enabled: !a.paused } : {}) }, "crew");
-        addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Changed schedule “${s.title || s.prompt.slice(0, 80)}”: ${s.after_title ? `after “${s.after_title}”` : s.spec}${!s.enabled ? ", paused" : s.next_run ? ` (next ${ist(s.next_run)} IST)` : ""}` });
+        addEvent(threadId, active.get(threadId)?.turnId, "system", { text: `Changed schedule “${s.title || s.prompt.slice(0, 80)}”: ${s.after_title ? `after “${s.after_title}”` : s.spec}${!s.enabled ? ", paused" : s.next_run ? ` (next ${ist(s.next_run)} ${tzLabel})` : ""}` });
         return say(`Updated ${s.id}: ${s.spec}${s.enabled ? "" : ", paused"}.`);
       } catch (e: any) { return say(e.message, false); }
     }
@@ -289,7 +289,7 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
     case "find_threads": {
       const found = findThreads(b.id, a.query, { exclude: threadId, limit: Math.min(Number(a.limit) || 8, 20) });
       if (!found.length) return say(`No other threads match "${String(a.query || "").slice(0, 80)}".`);
-      return say(found.map((t) => `- [${t.title}](${threadLink(t.id)}) · last active ${istStamp(t.updated_at)} IST${t.archived ? " · archived" : ""}${t.of ? ` · matched ${t.matched}/${t.of} terms` : ""}${t.snippet ? `\n  ${t.snippet}` : ""}`).join("\n")
+      return say(found.map((t) => `- [${t.title}](${threadLink(t.id)}) · last active ${localStamp(t.updated_at)} ${tzLabel}${t.archived ? " · archived" : ""}${t.of ? ` · matched ${t.matched}/${t.of} terms` : ""}${t.snippet ? `\n  ${t.snippet}` : ""}`).join("\n")
         + "\n\nGive the driver the matching thread as a markdown link exactly as written above.");
     }
     case "ask_crew_member": return askCrew(b, threadId, a);

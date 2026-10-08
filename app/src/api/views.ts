@@ -13,7 +13,7 @@ import type { PitstopRow, EventRow, LearnedRow, SurfaceRow } from "../models.js"
 import { liveCommands } from "../runtime/state.js";
 import { balanceAlerts } from "../runtime/balance.js";
 import { shownTitle } from "../runtime/threads.js";
-import { istDayAt } from "../runtime/util.js";
+import { localDayAt } from "../runtime/util.js";
 
 // An Engram proposal waits on the driver, not on the member it's filed under, so it doesn't make that member "needs".
 function mood(b: Bot, threads: ThreadSummary[], pending: { bot_id: string; kind?: string }[], up: boolean, last: string | null): Mood {
@@ -47,7 +47,7 @@ export function liveLearned(rows: LearnedRow[]) {
 }
 export function state(): State {
   const pending = all<PitstopRow>("SELECT * FROM pitstops WHERE status='pending' ORDER BY created_at").map(pitRow) as PitStop[];
-  const dayStart = istDayAt(now());
+  const dayStart = localDayAt(now());
   const stats = new Map(all<CardStats & { id: string }>(`${STATS} WHERE b.archived=0`, R.weekStart()).map((s) => [s.id, s]));
   return {
     driverName: driverName("Driver"), paused: getSetting("paused") === "1", defaultProvider: getSetting("default_provider", "openrouter") as ProviderId, plainVoice: getSetting("plain_voice") === "1", newThreadMode: newThreadAutonomy(),

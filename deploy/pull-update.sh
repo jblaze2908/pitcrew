@@ -17,7 +17,11 @@ exec 9>"$STATE_DIR/deploy.lock"
 flock -n 9 || exit 0
 
 RELEASE="$STATE_DIR/release.env"   # PITCREW_TAG / PITCREW_COMPUTER_TAG of the running release
-compose() { docker compose -p pitcrew -f deploy/compose.yml --env-file "$1" "${@:2}"; }
+# Host config (PITCREW_HOST, PITCREW_TZ, …; see .env.example) feeds compose.yml's ${…}; the release env adds the tags.
+compose() {
+  local host=(); [[ -f "$ENV_FILE" ]] && host=(--env-file "$ENV_FILE")
+  docker compose -p pitcrew -f deploy/compose.yml "${host[@]}" --env-file "$1" "${@:2}"
+}
 
 notify() {
   # Optional ops alerts; NTFY_* live in the root-only env file and are never echoed.

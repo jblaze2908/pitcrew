@@ -46,7 +46,7 @@ function Memory() {
         {s.linked && <Menu items={[{ label: "Unlink", danger: true, confirm: "Unlink?", run: async () => after(await api.del<EngramStatus>("/api/engram"), "Unlinked") }]} />}
       </Row>
       <Row label="Address" help={s.linked ? "A new address needs its own link token." : undefined} saved={urlSaved}>
-        <TextSave wide value={url ?? s.url} placeholder={s.defaultUrl} onSave={async (v) => {
+        <TextSave wide value={url ?? s.url} placeholder={s.defaultUrl || "https://engram.example.com"} onSave={async (v) => {
           if (!s.linked) return setUrl(v);
           if (after(await api.put<EngramStatus>("/api/engram", { url: v, token: "" }))) flashUrl();
         }} />

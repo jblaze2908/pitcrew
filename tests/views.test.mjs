@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 
 const root = mkdtempSync(`${tmpdir()}/pitcrew-views-`);
 mkdirSync(`${root}/data`);
-Object.assign(process.env, { PITCREW_ROOT: root, PITCREW_DATA: `${root}/data`, PITCREW_JEV_SHADOW: "0" });
+Object.assign(process.env, { PITCREW_TZ: "Asia/Kolkata", PITCREW_ROOT: root, PITCREW_DATA: `${root}/data`, PITCREW_JEV_SHADOW: "0" });
 
 const A = await import("../app/dist/src/auth.js");
 const { run, now } = await import("../app/dist/src/db.js");
@@ -71,12 +71,12 @@ test("/api/threads: each row's snippet is its last message, past later tool even
 test("India-time day and week starts the totals use, and the clock notes show", async () => {
   const U = await import("../app/dist/src/runtime/util.js"), Sp = await import("../app/dist/src/runtime/spend.js");
   const t = Date.parse("2026-10-07T20:00:00Z"); // Thu 8 Oct, 01:30 IST
-  assert.equal(U.istDayAt(t), Date.parse("2026-10-07T18:30:00Z"));
-  assert.equal(U.istDayAt(t, 9, 15), Date.parse("2026-10-08T03:45:00Z"));
+  assert.equal(U.localDayAt(t), Date.parse("2026-10-07T18:30:00Z"));
+  assert.equal(U.localDayAt(t, 9, 15), Date.parse("2026-10-08T03:45:00Z"));
   assert.equal(Sp.weekStart(t), Date.parse("2026-10-04T18:30:00Z"), "Monday 5 Oct, 00:00 IST");
   assert.equal(Sp.weekStart(Date.parse("2026-10-04T18:30:00Z")), Date.parse("2026-10-04T18:30:00Z"), "Monday midnight starts its own week");
-  assert.equal(U.istClock(t), "01:30");
-  assert.equal(U.istStamp(t), "2026-10-08 01:30");
+  assert.equal(U.localClock(t), "01:30");
+  assert.equal(U.localStamp(t), "2026-10-08 01:30");
 });
 
 test("creating or editing a schedule never returns its webhook secret; the hook route does", async () => {
@@ -110,4 +110,31 @@ test("a stored schedule whose spec no longer parses is switched off, not thrown 
   run("INSERT INTO schedules(id,bot_id,spec,prompt,next_run,enabled,created_at) VALUES(?,?,?,?,?,1,?)", "sc_stale", "chief", "every 5 minutes", "x", now() - 1000, now());
   assert.doesNotThrow(() => tickSchedules());
   assert.equal(one("SELECT enabled FROM schedules WHERE id=?", "sc_stale").enabled, 0);
+});
+
+test("schedules and day math follow a DST zone (America/New_York)", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const code = `
+    const U = await import("../app/dist/src/runtime/util.js");
+    const { nextRun } = await import("../app/dist/src/runtime/index.js");
+    const Sp = await import("../app/dist/src/runtime/spend.js");
+    const sat = Date.parse("2026-03-07T15:00:00Z"); // Sat 7 Mar 10:00 EST; DST starts Sun 8 Mar 02:00
+    console.log(JSON.stringify({
+      tz: U.TZ, label: U.tzLabel,
+      daily: new Date(nextRun("daily 09:00", sat)).toISOString(),
+      weekly: new Date(nextRun("weekly mon 09:00", sat)).toISOString(),
+      dayAt: new Date(U.localDayAt(Date.parse("2026-03-09T12:00:00Z"))).toISOString(),
+      week: new Date(Sp.weekStart(Date.parse("2026-03-09T12:00:00Z"))).toISOString(),
+      clock: U.localClock(Date.parse("2026-03-09T13:30:00Z")),
+    }));`;
+  const root = mkdtempSync(`${tmpdir()}/pitcrew-tz-`); mkdirSync(`${root}/data`);
+  const out = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", code], { cwd: new URL(".", import.meta.url).pathname,
+    env: { ...process.env, PITCREW_TZ: "America/New_York", PITCREW_ROOT: root, PITCREW_DATA: `${root}/data` } }).toString().trim().split("\n").pop());
+  assert.equal(out.tz, "America/New_York");
+  assert.match(out.label, /^E[SD]T$/, "short label, taken when the process starts");
+  assert.equal(out.daily, "2026-03-08T13:00:00.000Z", "Sun 09:00 EDT, after the spring-forward");
+  assert.equal(out.weekly, "2026-03-09T13:00:00.000Z", "Mon 09:00 EDT");
+  assert.equal(out.dayAt, "2026-03-09T04:00:00.000Z", "Mon midnight EDT");
+  assert.equal(out.week, "2026-03-09T04:00:00.000Z", "week starts Mon 00:00 EDT");
+  assert.equal(out.clock, "09:30");
 });

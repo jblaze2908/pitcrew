@@ -1,14 +1,45 @@
 // Small helpers the runtime modules share.
 import type { ToolResult } from "../shots.js";
 
-// Asia/Kolkata (UTC+5:30, no DST): the driver's clock for schedules, notes and day totals.
-export const IST = 330 * 60000;
-/** "HH:MM" in IST. */
-export const istClock = (t: number) => new Date(t + IST).toISOString().slice(11, 16);
-/** "YYYY-MM-DD HH:MM" in IST. */
-export const istStamp = (t: number) => new Date(t + IST).toISOString().slice(0, 16).replace("T", " ");
-/** hh:mm IST on t's IST day (midnight by default), as epoch ms. */
-export const istDayAt = (t: number, hh = 0, mm = 0) => { const d = new Date(t + IST); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), hh, mm) - IST; };
+// Where the driver opens Pitcrew, for links in pushes and crew replies: https://PITCREW_HOST, else the local port.
+export const HOST = process.env.PITCREW_HOST || `localhost:${process.env.PORT || 8330}`;
+export const PUBLIC_URL = process.env.PITCREW_HOST ? `https://${HOST}` : `http://${HOST}`;
+// The driver's clock for schedules, notes and day totals: PITCREW_TZ (IANA name), else the process TZ, else UTC.
+// The brain must run in the same zone: Codex renders "try again at 4:54 AM" in its own clock (see resume.ts).
+export const TZ = (() => {
+  const z = process.env.PITCREW_TZ || process.env.TZ || "UTC";
+  try { new Intl.DateTimeFormat("en-US", { timeZone: z }); return z; } catch { return "UTC"; }
+})();
+const partsFmt = new Intl.DateTimeFormat("en-US", { timeZone: TZ, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric", weekday: "short" });
+const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+/** Wall-clock parts of t in TZ. m is 0-based; dow 0 = Sunday. */
+export function localParts(t: number) {
+  const p: Record<string, string> = {}; for (const x of partsFmt.formatToParts(t)) p[x.type] = x.value;
+  return { y: +p.year, m: +p.month - 1, d: +p.day, hh: +p.hour, mm: +p.minute, ss: +p.second, dow: WD.indexOf(p.weekday) };
+}
+const offsetAt = (t: number) => { const p = localParts(t); return Date.UTC(p.y, p.m, p.d, p.hh, p.mm, p.ss) - Math.floor(t / 1000) * 1000; };
+/** Epoch ms of a wall-clock time in TZ. Fields overflow like Date.UTC (d + 1 is tomorrow). */
+export function localAt(y: number, m: number, d: number, hh = 0, mm = 0) {
+  const guess = Date.UTC(y, m, d, hh, mm);
+  const t = guess - offsetAt(guess);
+  return guess - offsetAt(t);
+}
+const pad = (n: number) => String(n).padStart(2, "0");
+/** "HH:MM" in TZ. */
+export const localClock = (t: number) => { const p = localParts(t); return `${pad(p.hh)}:${pad(p.mm)}`; };
+/** "YYYY-MM-DD HH:MM" in TZ. */
+export const localStamp = (t: number) => { const p = localParts(t); return `${p.y}-${pad(p.m + 1)}-${pad(p.d)} ${pad(p.hh)}:${pad(p.mm)}`; };
+/** hh:mm on t's day in TZ (midnight by default), as epoch ms. */
+export const localDayAt = (t: number, hh = 0, mm = 0) => { const p = localParts(t); return localAt(p.y, p.m, p.d, hh, mm); };
+/** t's day in TZ shifted by `days`, at hh:mm. DST-safe, unlike adding 86 400 000. */
+export const dayAtPlus = (t: number, days: number, hh = 0, mm = 0) => { const p = localParts(t); return localAt(p.y, p.m, p.d + days, hh, mm); };
+/** Short zone label for messages: "IST", "EDT", "CET"; the IANA name when the locale only offers "GMT+5:30". */
+export const tzLabel = (() => {
+  const short = (loc: string) => new Intl.DateTimeFormat(loc, { timeZone: TZ, timeZoneName: "short" }).formatToParts(Date.now()).find((x) => x.type === "timeZoneName")?.value || "";
+  if (TZ === "UTC") return "UTC";
+  for (const loc of ["en-US", "en-IN", "en-GB"]) { const s = short(loc); if (s && !/^(GMT|UTC)[+-]/.test(s)) return s; }
+  return TZ;
+})();
 export function short(s: unknown, n = 160) { const t: string = typeof s === "string" ? s : JSON.stringify(s ?? ""); return t.length > n ? t.slice(0, n - 1) + "…" : t; }
 export function summariseArgs(a: any) {
   if (!a || typeof a !== "object") return "";

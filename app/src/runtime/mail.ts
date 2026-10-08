@@ -10,7 +10,7 @@ import { taint } from "./taint.js";
 import { sendMessage } from "./turns.js";
 import { pitStop } from "./pitstops.js";
 
-export const MAIL_DOMAIN = process.env.PITCREW_MAIL_DOMAIN || "pitcrew.example.com";
+export const MAIL_DOMAIN = process.env.PITCREW_MAIL_DOMAIN || process.env.PITCREW_HOST || "localhost";
 export interface Mailbox { bot_id: string; handle: string; senders: string[]; others: "hold" | "drop" }
 export interface Mail { to: string; from: string; subject: string; text: string; attachments?: { name: string; size: number }[] }
 

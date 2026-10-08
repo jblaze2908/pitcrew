@@ -10,8 +10,8 @@ import { useLiveReload } from "../../lib/live";
 import { useStore } from "../../lib/store";
 import { useFetch } from "../../lib/useFetch";
 
-// Days follow IST like the rest of the app (lib/format); IST has no DST, so a day starts at a fixed offset from UTC.
-const DAY = 86400000, IST = 19800000;
+// Days follow the browser's calendar like the rest of the app (lib/format).
+const DAY = 86400000;
 const ACTIONS_SHOWN = 6, ACTIVITY_PAGE = 40, READ_KEEP = 8; // READ_KEEP: runtime/inbox.ts keeps that many read runs
 
 interface Ev { key: string; at: number; b?: BotCard; mood?: string; text: ReactNode; quote?: string; unread?: boolean; failed?: boolean; quiet?: boolean; live?: boolean; href?: string; action?: boolean }
@@ -24,7 +24,7 @@ export function Today() {
   const acts = useFetch(() => api.get<ActivityPage>(`/api/activity?limit=${ACTIVITY_PAGE}`, { quiet: true }), [], { keep: true });
   useLiveReload((e) => e.type === "turn" || e.type === "pitstop", () => { box.reload(); acts.reload(); }, 1000);
 
-  const midnight = Math.floor((Date.now() + IST) / DAY) * DAY - IST, yesterday = midnight - DAY;
+  const midnight = new Date().setHours(0, 0, 0, 0), yesterday = new Date(midnight - DAY / 2).setHours(0, 0, 0, 0);
   const runEv = (i: InboxItem): Ev => {
     // A scheduled run's thread title ends in its date ("… · 5 Oct"); the row's time already says when.
     const who = name(i.botId), title = (i.sub || threadTitle(i.threadId) || "a thread").replace(/ · \d{1,2} [A-Z][a-z]{2}$/, "").replace(/\.$/, "");

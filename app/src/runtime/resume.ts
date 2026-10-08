@@ -1,21 +1,21 @@
 // Picking a thread back up when a provider's usage limit resets. A run that failed on "usage limit … try again at 4:54
-// AM" (Codex renders that in the brain's clock, Asia/Kolkata) arms a resume; the schedule tick (30 s) sends it when due.
+// AM" (Codex renders that in the brain's clock, which runs in util.TZ) arms a resume; the schedule tick (30 s) sends it when due.
 // Stored in settings, so a restart keeps it. At most RESUME_TRIES in a row, so a limit that won't lift can't loop.
 import { all, run, now, getSetting, setSetting } from "../db.js";
 import { getThread, addEvent } from "./threads.js";
-import { istClock, istDayAt } from "./util.js";
+import { localClock, localDayAt, dayAtPlus, tzLabel } from "./util.js";
 
 const KEY = "resume_at:", RESUME_TRIES = 3, GRACE_MS = 90000;
 export const isUsageLimit = (error: string | null | undefined) => /usage limit|rate limit reached|quota exceeded/i.test(error || "");
 
-// When to try again, as epoch ms, or null. "try again at 4:54 AM" is the next 4:54 IST after `at`; "in 2 hours" is
+// When to try again, as epoch ms, or null. "try again at 4:54 AM" is the next 4:54 local time after `at`; "in 2 hours" is
 // relative. A grace period lets the provider's window actually close.
 export function retryAt(error: string, at = now()): number | null {
   const clock = /try again at (\d{1,2}):(\d{2})\s*([AP]M)/i.exec(error);
   if (clock) {
     let h = Number(clock[1]) % 12; if (/pm/i.test(clock[3])) h += 12;
-    let t = istDayAt(at, h, Number(clock[2]));
-    if (t <= at) t += 86400000;
+    let t = localDayAt(at, h, Number(clock[2]));
+    if (t <= at) t = dayAtPlus(at, 1, h, Number(clock[2]));
     return t + GRACE_MS;
   }
   const rel = /try again in (\d+)\s*(second|minute|hour|day)s?/i.exec(error);
@@ -29,7 +29,7 @@ export function armResume(threadId: string, error: string, at = now()) {
   const prev = getSetting(`${KEY}${threadId}`), tries = prev ? Number(prev.split("|")[1] || 0) + 1 : 1;
   if (t == null || tries > RESUME_TRIES) { run("DELETE FROM settings WHERE key=?", `${KEY}${threadId}`); return null; }
   setSetting(`${KEY}${threadId}`, `${t}|${tries}`);
-  addEvent(threadId, null, "system", { text: `Usage limit reached. ${getThread(threadId)?.title ? "This thread" : "It"} picks up again at ${istClock(t)} IST on its own.` });
+  addEvent(threadId, null, "system", { text: `Usage limit reached. ${getThread(threadId)?.title ? "This thread" : "It"} picks up again at ${localClock(t)} ${tzLabel} on its own.` });
   return t;
 }
 // A run that got going again clears the counter, so a later limit gets its full tries.

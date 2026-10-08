@@ -34,5 +34,5 @@ RUN chmod 755 /usr/local/bin/pitcrew-computer /usr/local/bin/pitcrew-desktop && 
  && test -x /usr/local/bin/apply_patch
 USER crew
 WORKDIR /bot/work
-ENV DISPLAY=:1 CODEX_HOME=/bot/codex TZ=Asia/Kolkata
+ENV DISPLAY=:1 CODEX_HOME=/bot/codex TZ=UTC
 ENTRYPOINT ["/usr/local/bin/pitcrew-computer"]

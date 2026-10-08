@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { randomBytes, createHash } from "node:crypto";
 
 const pw = createRequire(`${execSync("npm root -g").toString().trim()}/@playwright/mcp/`)("playwright");
-const BASE = process.env.BASE || "https://pitcrew.example.com";
+const BASE = process.env.BASE || `https://${process.env.PITCREW_HOST}`;
 const db = new DatabaseSync("/data/pitcrew.db");
 const token = randomBytes(32).toString("base64url");
 const hash = createHash("sha256").update(token).digest("hex");

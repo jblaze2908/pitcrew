@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 BOT=$1; shift
-KEY_SRC=/var/lib/docker/volumes/nullframe_hermes-data/_data/.env
+KEY_SRC=${KEY_SRC:?set KEY_SRC to a root-only env file with the provider keys}
 PORT=${LIVE_PORT:-6080}
 mkdir -p logs work .codex-home && chown -R 1500 logs work .codex-home && chmod 700 .codex-home
 cp "${CODEX_CONFIG:-config-cu.toml}" .codex-home/config.toml && chown 1500 .codex-home/config.toml

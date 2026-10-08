@@ -3,12 +3,12 @@ import { statSync, openSync, fstatSync, readSync, closeSync } from "node:fs";
 import { one, now } from "../db.js";
 import { usageLog, readPlanLimits } from "../computer.js";
 import { providerReady, recordChatgptLimits, chatgptLimits } from "../providers.js";
-import { IST, istDayAt } from "./util.js";
+import { localParts, dayAtPlus } from "./util.js";
 import type { TokenUsage } from "./state.js";
 
-// Monday 00:00 in Asia/Kolkata.
+// Monday 00:00 in the driver's time zone.
 export function weekStart(t = now()) {
-  return istDayAt(t) - ((new Date(t + IST).getUTCDay() + 6) % 7) * 86400000;
+  return dayAtPlus(t, -((localParts(t).dow + 6) % 7));
 }
 export const weekSpend = (botId: string) => one<{ s: number }>("SELECT COALESCE(SUM(cost_usd),0) s FROM turns WHERE bot_id=? AND started_at>=?", botId, weekStart())!.s;
 
