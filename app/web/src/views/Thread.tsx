@@ -7,7 +7,7 @@ import { indexImages, imgName, imgSrc, type Img } from "../lib/images";
 import type { BotCard, Origin, PitStop, PlanSnapshot, Surface as SurfaceRow, ThreadEvent, ThreadView } from "../../../shared/types";
 import { Icon } from "../components/Icon";
 import { Surface } from "../components/Surface";
-import { Face, hueStyle, Loader } from "../components/ui";
+import { Face, hueStyle, Loader, Md } from "../components/ui";
 import { api } from "../lib/api";
 import { plural } from "../lib/format";
 import { useLive, useResync } from "../lib/live";
@@ -192,6 +192,7 @@ function LiveThread({ d }: { d: ThreadView }) {
   }, [events, running]);
   const folds = useMemo(() => noteFolds(events), [events]);
   // Memoised so a streaming frame (a delta, a terminal chunk) redraws only the live parts, not every message's markdown.
+  // The live reply itself re-renders its whole markdown per delta: O(reply length), a few regex passes.
   const evCtx = useMemo<EventCtx>(() => ({
     b, fromName, pits, latest, images, hide: folds.hide, modeNote: folds.modeNote, autonomy,
     rewind: { ids: rewindIds, onRewound: async () => { const fresh = await api.get<ThreadView>(`/api/threads/${id}`, { quiet: true }).catch(() => null); if (fresh) setEvents(fresh.events); } },
@@ -241,7 +242,7 @@ function LiveThread({ d }: { d: ThreadView }) {
         </header>
         <div ref={stream} className="stream">
           {drawn}
-          {streaming && <div className={`msg bot${afterAgent ? " cont" : ""}`}>{afterAgent ? <span /> : <Face b={b} size="sm" mood="working" />}<div className="md">{streaming.text}</div></div>}
+          {streaming && <div className={`msg bot${afterAgent ? " cont" : ""}`}>{afterAgent ? <span /> : <Face b={b} size="sm" mood="working" />}<Md text={streaming.text} botId={b.id} /></div>}
           {painting.map((p) => <CatchThePaint key={p.id} p={p} b={b} />)}
           <div className={`live ${running ? "" : "hidden"}`}><Loader /><span>{activity}</span></div>
         </div>
