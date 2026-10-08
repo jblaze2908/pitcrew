@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 KEY_SRC=${KEY_SRC:?set KEY_SRC to a root-only env file with the provider keys}
-TS_SRC=${TS_SRC:-/root/pitcrew-poc-secrets/typesafe.env}
+TS_SRC=${TS_SRC:-}
 mkdir -p logs work .codex-home && chmod 700 .codex-home && chown -R 1500 logs work .codex-home
 cp config.toml .codex-home/config.toml && chown 1500 .codex-home/config.toml
 TS_ARGS=(); [ -f "$TS_SRC" ] && TS_ARGS=(--env-file <(grep -m1 '^TYPESAFE_API_KEY=' "$TS_SRC"))
