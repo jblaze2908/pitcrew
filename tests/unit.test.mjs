@@ -1311,6 +1311,34 @@ test("a member's skills are indexed from their frontmatter, loaded with skill_vi
   assert.deepEqual(K.listSkills("b_none"), []);
 });
 
+test("on a done-check retry a member may fix a broken check, never reword the criteria", async () => {
+  const D = await import("../app/dist/src/runtime/donecheck.js");
+  const { active } = await import("../app/dist/src/runtime/state.js");
+  run("INSERT INTO bots(id,name,provider,created_at) VALUES('b_dcfix','DC','openai',0)");
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_dcfix','b_dcfix','d',0,0)");
+  const crit = [{ text: "Every item has a category", check: "python3 -c 'bad'" }];
+  run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,started_at,criteria,grade) VALUES('tu_dcfix0','th_dcfix','b_dcfix','completed','driver',1,?,?)", JSON.stringify(crit), JSON.stringify({ status: "retrying", attempt: 1 }));
+  run("INSERT INTO turns(id,thread_id,bot_id,status,trigger,started_at) VALUES('tu_dcfix1','th_dcfix','b_dcfix','running','check',2)");
+  active.set("th_dcfix", { turnId: "tu_dcfix1" });
+  try {
+    assert.equal(D.setDoneCriteria("th_dcfix", [{ text: "Most items have a category", check: "true" }]).ok, false, "the goalpost stays");
+    assert.equal(D.setDoneCriteria("th_dcfix", crit).ok, false, "nothing changed");
+    const r = D.setDoneCriteria("th_dcfix", [{ text: "Every item has a category", check: "python3 /bot/work/check.py" }]);
+    assert.equal(r.ok, true, r.text);
+    assert.equal(JSON.parse(one("SELECT criteria FROM turns WHERE id='tu_dcfix0'").criteria)[0].check, "python3 /bot/work/check.py");
+    assert.match(json(one("SELECT data FROM events WHERE thread_id='th_dcfix' AND kind='system' ORDER BY id DESC").data).text, /Corrected its done-check: .*bad.*check\.py/);
+  } finally { active.delete("th_dcfix"); }
+});
+
+test("the Chief can propose its own SOUL; retirement still never reaches it", async () => {
+  const M = await import("../app/dist/src/runtime/manage.js");
+  const { ensureChief } = await import("../app/dist/src/crew.js");
+  ensureChief();
+  const p = M.soulProposal("Crew Chief", "You run the crew.", "Jai asked");
+  assert.equal(p.error, undefined, p.error); assert.equal(p.bot.kind, "chief");
+  assert.match(M.retireProposal("Crew Chief", "no longer needed").error, /No crew member/);
+});
+
 test("a run that stands out is measured and gets a retro; suggestions deduplicate by title", async () => {
   const Rt = await import("../app/dist/src/runtime/retro.js");
   const { active } = await import("../app/dist/src/runtime/state.js");
@@ -1323,7 +1351,10 @@ test("a run that stands out is measured and gets a retro; suggestions deduplicat
   for (let i = 0; i < 25; i++) ev({ type: "browser", tool: "browser_snapshot", status: "completed" });
   ev({ type: "browser", tool: "browser_network_request", status: "completed", output: "HTTP 429 Too Many Requests" });
   ev({ type: "commandExecution", status: "failed" }); ev({ type: "script", status: "inProgress" });
+  ev({ type: "mcpToolCall", server: "engram", tool: "tijori__record_orders", status: "completed", output: '{"received":1,"orders":["403-1059470-5296334"]}' });
   const rep = Rt.runReport("tu_big");
+  assert.equal(rep.limitedBy.length, 1, "an Amazon order number isn't a rate limit");
+  assert.match(Rt.reportText(rep), /Rate-limited: .*429 Too Many Requests/);
   assert.deepEqual([rep.input, rep.tools.browser_snapshot, rep.failed, rep.limits, rep.baseline.runs, rep.baseline.input], [500000, 25, 1, 1, 4, 100000]);
   assert.equal(Rt.retroReason(rep), "it used 5.0× the usual input tokens");
   assert.equal(Rt.retroReason({ ...rep, input: 100000, limits: 0, repeated: [] }), null);

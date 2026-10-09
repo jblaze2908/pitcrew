@@ -38,7 +38,9 @@ export function crewOverview(memberName?: string) {
 
 // A SOUL rewrite for the driver to approve (pit stop kind "soul"); approving applies it (pitstops.ts).
 export function soulProposal(memberName: string, soul: string, why: string) {
-  const b = findMember(memberName);
+  // The Chief may propose its own SOUL too; the driver approves it like any other (retirement still never applies to it).
+  const n = memberName.trim().toLowerCase();
+  const b = findMember(memberName) || listBots().find((x) => x.kind === "chief" && (x.id === n || x.name.toLowerCase() === n || n === "crew chief" || n === "chief"));
   if (!b) return { error: `No crew member called "${memberName}".` };
   const text = soul.trim();
   if (!text) return { error: "The SOUL is empty." };

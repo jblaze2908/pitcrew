@@ -6,29 +6,33 @@ import { one, all, run, now, uid, json, audit } from "../db.js";
 
 export interface RunReport {
   turnId: string; status: string; secs: number; input: number; cached: number; output: number;
-  tools: Record<string, number>; failed: number; declined: number; repeated: string[]; pitstops: number; blocks: number; limits: number;
+  tools: Record<string, number>; failed: number; declined: number; repeated: string[]; pitstops: number; blocks: number; limits: number; limitedBy: string[];
   baseline: { runs: number; input: number | null; secs: number | null };
 }
 const median = (xs: number[]) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); return s[Math.floor(s.length / 2)]; };
 const toolKey = (d: Record<string, any>) => (d.type === "browser" || d.type === "computer" || d.type === "mcpToolCall" ? String(d.tool || d.type) : String(d.type));
 
+const RATE_LIMIT = /\bHTTP\/?[\d.]*\s+429\b|\bstatus\W{0,3}429\b|rate.?limit|too many requests/i;
 export function runReport(turnId: string): RunReport | null {
   const t = one<{ id: string; thread_id: string; status: string; started_at: number; ended_at: number | null; input_tokens: number; cached_tokens: number; output_tokens: number }>("SELECT * FROM turns WHERE id=?", turnId);
   if (!t) return null;
-  const tools: Record<string, number> = {}; let failed = 0, declined = 0, blocks = 0, limits = 0;
+  const tools: Record<string, number> = {}, limitedBy: string[] = []; let failed = 0, declined = 0, blocks = 0, limits = 0;
   for (const e of all<{ kind: string; data: string }>("SELECT kind, data FROM events WHERE turn_id=? AND kind IN ('tool','system','error')", turnId)) {
     const d = json<Record<string, any>>(e.data, {});
     if (e.kind === "tool") {
       if (d.type === "script" || d.type === "scriptResult") continue;
       const k = toolKey(d); tools[k] = (tools[k] || 0) + 1;
       if (d.status === "failed") failed++; if (d.status === "declined") declined++;
-      if (/\b(429|403)\b|rate.?limit/i.test(String(d.output || d.error || "").slice(0, 2000))) limits++;
+      // A rate limit says so ("HTTP 429", "status: 429", "Too Many Requests"); a bare number in good output isn't one
+      // (Amazon order numbers start 403-, which used to count). A failed call's plain 429 counts too.
+      const why = String(d.error || d.output || "").slice(0, 2000), hit = RATE_LIMIT.exec(why) || (d.status === "failed" || d.error ? /\b429\b/.exec(why) : null);
+      if (hit) { limits++; if (limitedBy.length < 5) limitedBy.push(`${k}: ${why.slice(Math.max(0, hit.index - 40), hit.index + 60).replace(/\s+/g, " ").trim()}`); }
     } else if (/^Blocked by jev/.test(String(d.text || ""))) blocks++;
   }
   const prev = all<{ input_tokens: number; started_at: number; ended_at: number }>("SELECT input_tokens, started_at, ended_at FROM turns WHERE thread_id=? AND id<>? AND status='completed' AND trigger<>'retro' AND ended_at IS NOT NULL ORDER BY started_at DESC LIMIT 10", t.thread_id, turnId);
   const pitstops = one<{ n: number }>("SELECT COUNT(*) n FROM pitstops WHERE turn_id=?", turnId)!.n;
   return { turnId, status: t.status, secs: Math.round(((t.ended_at ?? now()) - t.started_at) / 1000), input: t.input_tokens, cached: t.cached_tokens, output: t.output_tokens,
-    tools, failed, declined, repeated: Object.entries(tools).filter(([, n]) => n >= 20).map(([k, n]) => `${k} ×${n}`), pitstops, blocks, limits,
+    tools, failed, declined, repeated: Object.entries(tools).filter(([, n]) => n >= 20).map(([k, n]) => `${k} ×${n}`), pitstops, blocks, limits, limitedBy,
     baseline: { runs: prev.length, input: median(prev.map((p) => p.input_tokens)), secs: median(prev.map((p) => Math.round((p.ended_at - p.started_at) / 1000))) } };
 }
 
@@ -59,6 +63,7 @@ export function reportText(r: RunReport) {
   return [`Run ${r.turnId}: ${r.status}, ${r.secs}s, ${k(r.input)} input tokens (${r.input ? Math.round((r.cached / r.input) * 100) : 0}% cached), ${k(r.output)} output.`,
     r.baseline.runs ? `Usual for this thread (median of ${r.baseline.runs}): ${r.baseline.input != null ? k(r.baseline.input) : "?"} input, ${r.baseline.secs ?? "?"}s.` : "No earlier runs to compare.",
     `Tool calls: ${tools}.`, `Failed ${r.failed}, declined ${r.declined}, blocked ${r.blocks}, pit stops ${r.pitstops}, rate-limited ${r.limits}.`,
+    r.limitedBy?.length ? `Rate-limited: ${r.limitedBy.join("; ")}.` : "",
     r.repeated.length ? `Repeated: ${r.repeated.join(", ")}.` : ""].filter(Boolean).join("\n");
 }
 // A retro runs on a Codex fork (turns.ts startTurn), so none of it rides in the thread's later turns; the fork may miss

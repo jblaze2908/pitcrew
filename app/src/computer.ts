@@ -326,6 +326,9 @@ export class Computer {
     const c = await docker(["network", "connect", net, BRAIN]);
     if (!c.ok && !/already exists/.test(c.err)) throw new Error(`Couldn't connect the brain: ${c.err.trim().slice(0, 200)}`);
     for (let i = 0; i < 40; i++) { if ((await docker(["exec", this.name, "node", "-e", "require('net').connect(7700,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"])).ok) break; await new Promise((r) => setTimeout(r, 250)); }
+    // The skill library is one git repo (harness core says commit each change); a member that never wrote a skill had
+    // none, so retros asking for a skill fix failed. One exec per computer start, as the crew user.
+    await docker(["exec", "-u", String(CREW_UID), this.name, "sh", "-c", "[ -d /bot/work/skills/.git ] || { mkdir -p /bot/work/skills && git -C /bot/work/skills init -q; }"]);
     this.up = true; this.startedAt = Date.now();
     this.hooks.onState?.(this);
     this.#watch();
@@ -380,11 +383,21 @@ export class Computer {
   async stop() { if (this.up) await docker(["stop", "-t", "5", this.name]); }
 }
 
-/** The member's own bridge network: its computer, the brain while that computer is up, and Claude Code runs. */
+/** The member's own bridge network: its computer, the brain while that computer is up, and Claude Code runs. Each gets a
+ *  /24 from 10.77.0.0/16: Docker's default pools hand out a /16 or /20 per network and ran out at 31 on the host, so a
+ *  new member's computer couldn't start. The slot starts from a hash of the id and walks on past ones in use. */
 export async function ensureNet(id: string) {
   const net = `pc-net-${id}`;
-  if (!(await docker(["network", "inspect", net])).ok) await docker(["network", "create", "--label", "pitcrew=computer", net]);
-  return net;
+  if ((await docker(["network", "inspect", net])).ok) return net;
+  const start = parseInt(createHash("sha1").update(id).digest("hex").slice(0, 4), 16) % 256;
+  let err = "";
+  for (let k = 0; k < 256; k++) {
+    const r = await docker(["network", "create", "--label", "pitcrew=computer", "--subnet", `10.77.${(start + k) % 256}.0/24`, net]);
+    if (r.ok || /already exists/.test(r.err)) return net;
+    err = r.err;
+    if (!/overlap/i.test(r.err)) break;
+  }
+  throw new Error(`Couldn't create the computer's network: ${err.trim().slice(0, 200)}`);
 }
 
 const brains = new Map<string, Brain>(), computers = new Map<string, Computer>();
@@ -443,11 +456,20 @@ async function bootOp(hooks: ComputerHooks, msg: any): Promise<Record<string, un
   catch (e: any) { return { ok: false, error: e.message }; }
 }
 
-// Containers from a previous control-plane process lost their sessions; remove them at boot.
-export async function reapOrphans() {
+// Containers from a previous control-plane process lost their sessions; remove them at boot. So do the networks of
+// members that are gone (retired, or e2e probes), which otherwise hold address space until the pools run out.
+export async function reapOrphans(members: string[] = []) {
   const r = await docker(["ps", "-aq", "--filter", "label=pitcrew=computer"]);
   const ids = r.out.split(/\s+/).filter(Boolean);
   if (ids.length) await docker(["rm", "-f", ...ids]);
+  // A live member's network made before the 10.77 range goes too; ensureNet remakes it as a /24 on the next start.
+  const keep = new Set(members.map((id) => `pc-net-${id}`));
+  const nets = (await docker(["network", "ls", "--format", "{{.Name}}", "--filter", "name=pc-net-"])).out.split(/\s+/).filter((n) => n.startsWith("pc-net-"));
+  for (const n of nets) {
+    const subnet = keep.has(n) ? (await docker(["network", "inspect", "-f", "{{range .IPAM.Config}}{{.Subnet}}{{end}}", n])).out.trim() : "";
+    if (keep.has(n) && subnet.startsWith("10.77.")) continue;
+    await docker(["network", "disconnect", "-f", n, BRAIN]); await docker(["network", "rm", n]);
+  }
   await docker(["restart", "-t", "3", BRAIN]);
 }
 
