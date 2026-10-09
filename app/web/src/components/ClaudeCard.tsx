@@ -6,6 +6,8 @@ import { plural } from "../lib/format";
 import { Md } from "./ui";
 
 const LIVE = new Set(["queued", "working", "asking"]);
+// "claude-sonnet-5-5" → "Sonnet 5.5"
+const modelName = (id: string) => { const m = /^claude-([a-z]+)-(\d+)-(\d+)$/.exec(id || ""); return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}.${m[3]}` : id; };
 const mins = (ms: number) => (ms < 60000 ? "under a minute" : `${Math.round(ms / 60000)} min`);
 
 export function ClaudeCard({ c }: { c: Card }) {
@@ -19,7 +21,7 @@ export function ClaudeCard({ c }: { c: Card }) {
     c.questions ? `asked you ${plural(c.questions, "question")}` : ""].filter(Boolean).join(", ");
   return (
     <div className="cc pc-card col">
-      <div className="row"><span className="cc-mark">CC</span><b>Claude Code</b><span className={`small ${c.status === "failed" ? "bad" : "faint"}`}>{`· ${state}`}</span>
+      <div className="row"><span className="cc-mark">CC</span><b>Claude Code</b><span className={`small ${c.status === "failed" ? "bad" : "faint"}`}>{`· ${c.model ? `${modelName(c.model)} · ${c.effort} · ` : ""}${state}`}</span>
         {live && <button className="small faint cc-stop" onClick={() => api.post(`/api/claude-code/${c.id}/stop`)}>Stop</button>}</div>
       <p className="small muted">{c.task}</p>
       {live ? c.steps.length > 0 && <div className="cc-steps small faint">{c.steps.map((s, i) => <span key={i}>{s}</span>)}</div>

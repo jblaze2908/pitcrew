@@ -63,7 +63,8 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
     : p.kind === "files" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><pre>{(d.paths || []).map((x: { path: string; dir: boolean; size: number }) => `${x.path}${x.dir ? "/ (folder and everything in it)" : ` · ${kb(x.size)}`}`).join("\n")}</pre></div>
     : p.kind === "check" ? <CheckSummary d={d} who={who} />
     : p.kind === "teach" ? <TeachSummary d={d} who={who} />
-    : p.kind === "question" ? <QuestionBody p={p} onDecided={(r) => { setP(r); onDone?.(r); }} /> : null;
+    : p.kind === "question" ? <QuestionBody p={p} onDecided={(r) => { setP(r); onDone?.(r); }} />
+    : p.kind === "claude_run" ? <ClaudeRunBody p={p} who={who} onDecided={(r) => { setP(r); onDone?.(r); }} /> : null;
 
   const outcome = `${p.kind === "engram" && p.note ? p.note : p.status} ${ago(p.decided_at)}`;
   const card = d.secret?.kind === "card";
@@ -121,7 +122,7 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
     {btn("Try again", () => decide("approve", "retry"))}</div>;
   else if (p.kind === "teach") actions = <div className="acts">{btn("Save as skill", () => decide("approve", "once"), true)}{btn("Not now", () => decide("deny"))}</div>;
   // Claude Code's question carries its own Answer button (QuestionBody).
-  else if (p.kind === "question") actions = null;
+  else if (p.kind === "question" || p.kind === "claude_run") actions = null;
   else if (p.kind === "plan") actions = <div className="acts">
     {btn(p.effect === "browse" ? "Allow for this plan" : "Allow", () => decide("approve", "once"), true)}
     {btn(p.effect === "browse" ? "Use what they know" : "Finish with what it has", () => decide("deny"))}
@@ -259,6 +260,43 @@ function QuestionBody({ p, onDecided }: { p: PitStop; onDecided: (r: PitStop) =>
         <button className="pc-pill s" disabled={Object.keys(answers).length < qs.length} onClick={() => send(true)}>Answer</button>
         <button className="pc-pill o s" onClick={() => send(false)}>Let it decide</button>
         <span className="small faint" style={{ marginLeft: "auto" }}>Claude Code is paused until you answer</span>
+      </div>
+    </div>
+  );
+}
+
+/** Starting Claude Code: one tap runs the member's recommended model and effort; Change… opens both pickers. */
+function ClaudeRunBody({ p, who, onDecided }: { p: PitStop; who: string; onDecided: (r: PitStop) => void }) {
+  const d = p.detail || {}, models = (d.models || []) as { id: string; label: string }[], efforts = (d.efforts || []) as string[];
+  const rec = d.rec || {}, label = (id: string) => models.find((m) => m.id === id)?.label || id;
+  const [open, setOpen] = useState(false);
+  const [model, setModel] = useState<string>(rec.model);
+  const [effort, setEffort] = useState<string>(rec.effort);
+  const send = async (approve: boolean) => {
+    const r = await api.post<PitStop>(`/api/pitstops/${p.id}/decide`, approve ? { decision: "approve", answers: { model, effort } } : { decision: "deny" });
+    toast(approve ? `Starting Claude Code · ${label(model)} · ${effort}` : "Not run");
+    if (r?.id) onDecided(r);
+  };
+  const task = <p className="small muted">{d.task}</p>;
+  if (p.status !== "pending") {
+    const c = { ...rec, ...(d.choice || {}) };
+    return <div className="col" style={{ gap: 4 }}>{task}<p className="small faint">{p.status === "approved" ? `Started with ${label(c.model)} · ${c.effort}` : "Not run"}</p></div>;
+  }
+  const seg = (items: { id: string; label: string }[], on: string, set: (v: string) => void, recommended: string) => <div className="ccpick">{items.map((x) =>
+    <button key={x.id} className={x.id === on ? "on" : ""} onClick={() => set(x.id)}>{x.label}{x.id === recommended && <small>recommended</small>}</button>)}</div>;
+  return (
+    <div className="col" style={{ gap: 10 }}>
+      {task}
+      <p className="small faint">{`${who} recommends `}<b className="muted">{`${label(rec.model)} · ${rec.effort}`}</b>{d.why ? `: ${d.why}` : ""}</p>
+      {open && <div className="col" style={{ gap: 8 }}>
+        <div><p className="small faint">Model</p>{seg(models, model, setModel, rec.model)}</div>
+        <div><p className="small faint">Effort</p>{seg(efforts.map((e) => ({ id: e, label: e })), effort, setEffort, rec.effort)}</div>
+      </div>}
+      <div className="acts">
+        <button className="pc-pill s" onClick={() => send(true)}>{`Start with ${label(model)} · ${effort}`}</button>
+        {!open && <button className="pc-pill o s" onClick={() => setOpen(true)}>Change…</button>}
+        <button className="pc-pill o s" onClick={() => send(false)}>Don't run it</button>
+        <span className="small faint" style={{ marginLeft: "auto" }}>Runs on your Claude plan</span>
       </div>
     </div>
   );

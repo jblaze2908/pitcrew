@@ -1,6 +1,7 @@
 // The tools a crew member's brain is offered at thread start: browser and pixel tools from the computer image's manifest
 // (descriptions shortened, since every turn pays for them), then Pitcrew's own. Detail belongs in harness_help (manual.ts).
 import { DEFAULT_IMAGE_MODEL } from "./images.js";
+import { CLAUDE_MODELS, CLAUDE_EFFORTS } from "./providers.js";
 import { HELP_TOPICS } from "./manual.js";
 import { HUES, SHAPES, ENGRAM_SCOPES, plansOn } from "./crew.js";
 import type { Bot } from "../shared/types.js";
@@ -121,8 +122,11 @@ export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { br
     } } });
   // Only once the driver signed Claude Code in on the server (runtime/claude.ts).
   if (claude) tools.push({ type: "function", name: "delegate_to_claude_code",
-    description: "Hand a coding task in /bot/work to Claude Code, on the driver's Claude plan. It edits files and runs commands there; its commands pass your safety check and its questions go to the driver. Waits up to 10 minutes, then reports back as a message. harness_help claude_code.",
-    inputSchema: { type: "object", properties: { task: { type: "string", description: "Self-contained: the folder, what to change, how to check it. Claude Code can't see this thread." } }, required: ["task"] } });
+    description: "Hand a coding task in /bot/work to Claude Code, on the driver's Claude plan. The driver picks model and effort before it starts; recommend both by how hard the task is (harness_help claude_code). Its commands pass your safety check and its questions go to the driver. Waits up to 10 minutes once started, then reports back as a message.",
+    inputSchema: { type: "object", properties: { task: { type: "string", description: "Self-contained: the folder, what to change, how to check it. Claude Code can't see this thread." },
+      model: { type: "string", enum: CLAUDE_MODELS.map((m) => m.id), description: "Your recommendation" },
+      effort: { type: "string", enum: [...CLAUDE_EFFORTS], description: "Your recommendation" },
+      why: { type: "string", description: "One line on the task's size that justifies the pick, for the driver" } }, required: ["task", "model", "effort", "why"] } });
   if (b.kind === "chief") tools.push({ type: "function", name: "ask_crew_member",
     description: "Ask another crew member a question, or give them a task in their job, and wait up to 10 minutes for their answer. They work in their own thread with their own memory, logins, computer, cap and permissions; any pit stop they hit still goes to the driver.",
     inputSchema: { type: "object", properties: { member: { type: "string", description: "The member's name" }, question: { type: "string", description: "Self-contained: they can't see this thread. Say what you need back." } }, required: ["member", "question"] } });

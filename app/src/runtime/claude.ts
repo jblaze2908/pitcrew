@@ -4,7 +4,7 @@
 import { spawn } from "node:child_process";
 import { query, type CanUseTool, type PermissionResult, type SDKMessage, type SpawnOptions } from "@anthropic-ai/claude-agent-sdk";
 import { all, audit, driverName, getSetting, json, now, one, uid } from "../db.js";
-import { claudeDir, claudeStatus } from "../providers.js";
+import { claudeDir, claudeStatus, CLAUDE_MODELS, CLAUDE_EFFORTS } from "../providers.js";
 import { IMAGE, CREW_UID, botDir, docker, ensureNet, gitIdentity, type Brain } from "../computer.js";
 import type { Bot, ClaudeCard } from "../../shared/types.js";
 import type { ToolResult } from "../shots.js";
@@ -15,6 +15,9 @@ import { sendMessage } from "./turns.js";
 import { hostOf, say, short, TZ } from "./util.js";
 
 const WAIT_MS = 10 * 60000, RUN_MS = 60 * 60000, FLUSH_MS = 4000;
+type Effort = (typeof CLAUDE_EFFORTS)[number];
+const pickModel = (v: unknown) => CLAUDE_MODELS.find((m) => m.id === v)?.id;
+const pickEffort = (v: unknown) => CLAUDE_EFFORTS.find((e) => e === v);
 interface Run { card: ClaudeCard; botId: string; threadId: string; abort: AbortController; pits: Set<string>; flushed: number; timer: NodeJS.Timeout | null }
 const runs = new Map<string, Run>();
 // One run at a time: one login, one usage window.
@@ -25,7 +28,14 @@ export async function delegateToClaude(c: Brain, b: Bot, threadId: string, a: Re
   if (!claudeStatus().connected) return say(`Claude Code isn't signed in on this server. Tell ${driverName()}: Settings → Models → Claude Code.`, false);
   const task = String(a.task || "").trim().slice(0, 8000);
   if (!task) return say("Pass the task.", false);
-  const r: Run = { card: { id: uid("cc"), task, status: "queued", steps: [], read: 0, edited: [], commands: 0, questions: 0, startedAt: now() }, botId: b.id, threadId, abort: new AbortController(), pits: new Set(), flushed: 0, timer: null };
+  // The driver picks the model and effort every time; the member's recommendation is the one-tap default.
+  const rec = { model: pickModel(a.model) || "claude-sonnet-5-5", effort: pickEffort(a.effort) || "medium" }, ps = uid("ps");
+  const decision = await pitStop({ id: ps, botId: b.id, threadId, kind: "claude_run", effect: "ask", title: `Start Claude Code: ${short(task, 140)}`,
+    detail: { task, rec, why: short(a.why || "", 300), models: CLAUDE_MODELS, efforts: CLAUDE_EFFORTS } });
+  if (decision !== "approved") return say(decision === "expired" ? `${driverName()} didn't answer the Claude Code pit stop within 30 minutes, so it didn't run. Say it's waiting on them.` : `${driverName()} chose not to run Claude Code on this. Don't start it again for the same task unless they ask.`, false);
+  const choice = json(one<{ detail: string }>("SELECT detail FROM pitstops WHERE id=?", ps)?.detail, {}).choice || {};
+  const model = pickModel(choice.model) || rec.model, effort: Effort = pickEffort(choice.effort) || rec.effort;
+  const r: Run = { card: { id: uid("cc"), task, model, effort, status: "queued", steps: [], read: 0, edited: [], commands: 0, questions: 0, startedAt: now() }, botId: b.id, threadId, abort: new AbortController(), pits: new Set(), flushed: 0, timer: null };
   runs.set(r.card.id, r);
   flush(r, true);
   audit(b.id, "claude.started", { id: r.card.id, threadId });
@@ -66,7 +76,7 @@ async function execute(c: Brain, b: Bot, r: Run) {
     let result: Extract<SDKMessage, { type: "result" }> | null = null;
     // settingSources [] keeps settings and hooks a task folder may carry (or a web page planted) from running with the login.
     const q = query({ prompt: r.card.task, options: {
-      cwd: "/bot/work", pathToClaudeCodeExecutable: "claude", spawnClaudeCodeProcess: inContainer(b, net, r.card.id),
+      cwd: "/bot/work", model: r.card.model, effort: r.card.effort as Effort, pathToClaudeCodeExecutable: "claude", spawnClaudeCodeProcess: inContainer(b, net, r.card.id),
       settingSources: [], strictMcpConfig: true, mcpServers: {}, persistSession: false, permissionMode: "acceptEdits",
       abortController: r.abort, canUseTool: canUse(c, r),
       systemPrompt: { type: "preset", preset: "claude_code", append: `You work for ${b.name}, a Pitcrew crew member, in its workspace /bot/work; it handed you this task and will check your work. Use AskUserQuestion only for a real choice the code can't settle: it goes to ${driverName()}, who may take a while. End with a short summary: what you changed, how you checked it, what's left.` },
@@ -154,6 +164,6 @@ function end(r: Run, status: ClaudeCard["status"]) {
 
 function outcome(r: Run) {
   const k = r.card, did = `${k.edited.length} file${k.edited.length === 1 ? "" : "s"} edited, ${k.commands} command${k.commands === 1 ? "" : "s"} run`;
-  if (k.status === "done") return `Claude Code finished (${did}). Its summary:\n\n${k.answer || "(no summary)"}\n\nCheck its work yourself before you call the task done.`;
+  if (k.status === "done") return `Claude Code (${k.model}, ${k.effort} effort) finished (${did}). Its summary:\n\n${k.answer || "(no summary)"}\n\nCheck its work yourself before you call the task done.`;
   return `Claude Code ${k.status === "stopped" ? "was stopped" : "didn't finish"}${k.error ? `: ${k.error}` : ""} (${did}${k.edited.length ? `: ${k.edited.join(", ")}` : ""}).`;
 }

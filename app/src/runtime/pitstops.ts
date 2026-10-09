@@ -66,6 +66,11 @@ export async function decide(id: string, decision: string, { scope = "once", not
   if (ps.kind === "files" && status === "approved") applyFileDeletion(detail);
   if (ps.kind === "check") applyCheckDecision(ps, status, scope);
   // Claude Code's question: the driver's picks, label per question text, read back by runtime/claude.ts.
+  // Starting Claude Code: the driver's model and effort, only from the lists the pit stop offered.
+  if (ps.kind === "claude_run" && status === "approved" && answers) {
+    const d = json(ps.detail, {}), model = (d.models || []).find((m: { id: string }) => m.id === answers.model)?.id, effort = (d.efforts || []).find((e: string) => e === answers.effort);
+    run("UPDATE pitstops SET detail=? WHERE id=?", JSON.stringify({ ...d, choice: { ...(model ? { model } : {}), ...(effort ? { effort } : {}) } }), id);
+  }
   if (ps.kind === "question" && status === "approved" && answers) run("UPDATE pitstops SET detail=? WHERE id=?", JSON.stringify({ ...json(ps.detail, {}), answers: cleanAnswers(json(ps.detail, {}).questions, answers) }), id);
   if (detail.pattern && ps.kind !== "hire" && (status === "approved" || status === "denied") && note !== "Kill switch" && learnable(getBot(ps.bot_id)?.policy, ps.effect, json(ps.jev, {}).by)) learn(ps, detail, status);
   run("UPDATE pitstops SET status=?, scope=?, note=?, decided_at=? WHERE id=?", status, scope, String(note).slice(0, 500), now(), id);
