@@ -91,8 +91,10 @@ function inContainer(b: Bot, net: string, name: string) {
     "--tmpfs", `/home/crew:size=128m,uid=${CREW_UID},gid=${CREW_UID},mode=700`, "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
     "--network", net, "-v", `${botDir(b.id)}/work:/bot/work`, "-v", `${claudeDir()}:/claude`, "-w", "/bot/work",
     "-e", "CLAUDE_CONFIG_DIR=/claude", "-e", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "-e", "DISABLE_AUTOUPDATER=1", "-e", `TZ=${TZ}`,
+    // Every member's workspace is /bot/work: without these, all members would share one projects/ folder and its auto memory.
+    "-e", "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1", "-e", `CLAUDE_CODE_PROJECT_DIR_NAME=${b.id}`,
     // The SDK's own CLAUDE_* markers; nothing else from the control plane's environment goes in.
-    ...Object.entries(o.env).filter(([k, v]) => /^CLAUDE_/.test(k) && k !== "CLAUDE_CONFIG_DIR" && v != null).flatMap(([k, v]) => ["-e", `${k}=${v}`]),
+    ...Object.entries(o.env).filter(([k, v]) => /^CLAUDE_/.test(k) && !["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_DISABLE_AUTO_MEMORY", "CLAUDE_CODE_PROJECT_DIR_NAME"].includes(k) && v != null).flatMap(([k, v]) => ["-e", `${k}=${v}`]),
     ...gitIdentity(b), "--entrypoint", "claude", IMAGE, ...o.args], { stdio: ["pipe", "pipe", "pipe"], signal: o.signal });
 }
 
