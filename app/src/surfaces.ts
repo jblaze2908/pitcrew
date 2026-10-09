@@ -1,6 +1,7 @@
 // Generative UI: the crew emits a declarative surface; Pitcrew renders it with its own components. A surface may also
 // name a ledger and carry queries; components with `bind` get their data from those at view time (ledger.ts).
-import { BOUND, LEDGER_EXT, MAX_QUERIES, sqlProblem } from "./ledger.js";
+import { BOUND, LEDGER_EXT, MAX_QUERIES, paramsOf, sqlProblem } from "./ledger.js";
+import { CONTROLS } from "../shared/pui.js";
 // The catalogue is the allowlist: unknown components or props, raw colours and oversized data are rejected, never degraded.
 
 // A prop or field spec: what checkValue accepts for one value.
@@ -53,10 +54,17 @@ const CATALOGUE_LITERAL: Record<string, Component> = {
   Checkbox: field({ value: bool }),
   Toggle: field({ value: bool }),
   Choice: { props: { action: { t: "name" }, prompt: str(300), options: arr(obj({ id: { t: "name" }, label: str(200), detail: str(400) }, ["id", "label"]), 12) }, req: ["action", "options"] },
+  // Controls: the driver changes them in place; their values feed queries as :name and decide each component's when.
+  Picker: { props: { name: { t: "name" }, label: str(120), options: arr(OPTION, 50), value: str(200) }, req: ["name", "options"] },
+  Tabs: { props: { name: { t: "name" }, label: str(120), options: arr(OPTION, 8), value: str(200) }, req: ["name", "options"] },
+  Slider: { props: { name: { t: "name" }, label: str(120), min: num, max: num, step: num, value: num, unit: str(20) }, req: ["name", "min", "max"] },
+  Switch: { props: { name: { t: "name" }, label: str(120), value: bool }, req: ["name", "label"] },
 };
 
 // Bindable components also take `bind`: the name of one of the surface's queries.
-export const CATALOGUE: Record<string, Component> = Object.fromEntries(Object.entries(CATALOGUE_LITERAL).map(([k, d]) => [k, BOUND[k] ? { ...d, props: { ...d.props, bind: { t: "name" } } } : d]));
+// Every component also takes `when`: shown only while the surface's controls match it.
+export const CATALOGUE: Record<string, Component> = Object.fromEntries(Object.entries(CATALOGUE_LITERAL).map(([k, d]) => [k, { ...d, props: { ...d.props, when: str(120), ...(BOUND[k] ? { bind: { t: "name" } } : {}) } }]));
+const CONTROL_NAME = /^[A-Za-z]\w{0,39}$/;
 
 const MAX_NODES = 400, MAX_DEPTH = 8;
 
@@ -85,7 +93,7 @@ function checkValue(spec: Spec, v: any, path: string, errs: string[]): void {
 export function validateSurface(surface: any): { ok: boolean; errors: string[]; actions?: string[] } {
   const errs: string[] = [];
   let nodes = 0;
-  const actions = new Set<string>(), binds = new Set<string>();
+  const actions = new Set<string>(), binds = new Set<string>(), controls = new Set<string>(), whens: [string, string][] = [];
   const walk = (n: any, path: string, depth: number, inForm: boolean): unknown => {
     if (++nodes > MAX_NODES) { if (nodes === MAX_NODES + 1) errs.push(`surface has more than ${MAX_NODES} components`); return; }
     if (depth > MAX_DEPTH) return errs.push(`${path}: nested deeper than ${MAX_DEPTH}`);
@@ -98,6 +106,14 @@ export function validateSurface(surface: any): { ok: boolean; errors: string[]; 
     for (const r of def.req || []) if (n[r] === undefined && !(n.bind !== undefined && BOUND[n.type]?.includes(r))) errs.push(`${path}: ${n.type} needs "${r}"`);
     for (const [k, s] of Object.entries(def.props)) if (n[k] !== undefined) checkValue(s, n[k], `${path}.${k}`, errs);
     if (n.action) actions.add(n.action);
+    if (CONTROLS.includes(n.type) && typeof n.name === "string") {
+      if (!CONTROL_NAME.test(n.name)) errs.push(`${path}.name: a control's name is a word (letters, digits, _)`);
+      else if (controls.has(n.name)) errs.push(`${path}.name: two controls are called "${n.name}"`);
+      controls.add(n.name);
+      // The server queries with the control's value before the options are known, so a bound one names its start.
+      if ((n.type === "Picker" || n.type === "Tabs") && n.bind !== undefined && n.value === undefined) errs.push(`${path}: a bound ${n.type} needs a value to start from`);
+    }
+    if (typeof n.when === "string") whens.push([path, n.when]);
     if (n.children !== undefined) {
       if (!def.children) return errs.push(`${path}: ${n.type} takes no children`);
       if (!Array.isArray(n.children)) return errs.push(`${path}.children must be an array`);
@@ -108,21 +124,24 @@ export function validateSurface(surface: any): { ok: boolean; errors: string[]; 
   if (typeof surface.title !== "string" || !surface.title.trim() || surface.title.length > 200) errs.push("title: required, up to 200 chars");
   for (const k of Object.keys(surface)) if (!["title", "root", "source", "queries"].includes(k)) errs.push(`unknown field "${k}"`);
   walk(surface.root, "root", 0, false);
+  for (const [path, w] of whens) for (const name of whenNames(w)) if (!controls.has(name)) errs.push(`${path}.when: no control called "${name}"`);
   const q = surface.queries;
   if (q !== undefined || surface.source !== undefined || binds.size) {
-    if (typeof surface.source !== "string" || !LEDGER_EXT.test(surface.source)) errs.push("source: a SQLite ledger under /bot/work (.db, .sqlite or .sqlite3)");
+    // Without a source, queries run on an empty in-memory database: arithmetic on control values, no tables.
+    if (surface.source !== undefined && (typeof surface.source !== "string" || !LEDGER_EXT.test(surface.source))) errs.push("source: a SQLite ledger under /bot/work (.db, .sqlite or .sqlite3)");
     if (!q || typeof q !== "object" || Array.isArray(q)) errs.push("queries: an object of name → SQL");
     else {
       if (Object.keys(q).length > MAX_QUERIES) errs.push(`queries: at most ${MAX_QUERIES}`);
-      for (const [name, sql] of Object.entries(q)) { if (!/^[a-z][\w]{0,39}$/i.test(name)) errs.push(`queries.${name}: name must be a word`); const why = sqlProblem(sql); if (why) errs.push(`queries.${name}: ${why}`); }
+      for (const [name, sql] of Object.entries(q)) {
+        if (!/^[a-z][\w]{0,39}$/i.test(name)) errs.push(`queries.${name}: name must be a word`);
+        const why = sqlProblem(sql); if (why) errs.push(`queries.${name}: ${why}`);
+        else for (const p of paramsOf(String(sql))) if (!controls.has(p)) errs.push(`queries.${name}: :${p} names no control`);
+      }
       for (const b of binds) if (!(b in q)) errs.push(`bind "${b}" names no query`);
     }
   }
   return { ok: errs.length === 0, errors: errs.slice(0, 25), actions: [...actions] };
 }
 
-// Stable text for the tool description, so the catalogue stays in cached instructions, not in per-turn state.
-export function catalogueDoc() {
-  const fmt = (s: Spec): string => s.t === "enum" ? s.v.join("|") : s.t === "array" ? `[${fmt(s.of)}]` : s.t === "object" ? `{${Object.entries(s.props).map(([k, v]) => `${k}${s.req.includes(k) ? "" : "?"}:${fmt(v)}`).join(",")}}` : s.t;
-  return Object.entries(CATALOGUE_LITERAL).map(([name, d]) => `${name}(${Object.entries(d.props).map(([k, v]) => `${k}${(d.req || []).includes(k) ? "" : "?"}:${fmt(v)}`).join(", ")})${d.children ? " [children]" : ""}${d.field ? " [inside Form]" : ""}`).join("\n");
-}
+// The control names a when reads: "view=items and live" → view, live.
+const whenNames = (w: string) => w.split(/\s+and\s+|\s*&&\s*/).map((c) => (/^\s*(\w+)/.exec(c) || [])[1]).filter((x): x is string => !!x);

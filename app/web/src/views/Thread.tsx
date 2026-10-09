@@ -6,7 +6,8 @@ import { Viewer } from "./thread/Viewer";
 import { indexImages, imgName, imgSrc, type Img } from "../lib/images";
 import type { BotCard, Origin, PitStop, PlanSnapshot, Surface as SurfaceRow, ThreadEvent, ThreadView } from "../../../shared/types";
 import { Icon } from "../components/Icon";
-import { Surface } from "../components/Surface";
+import { Surface, SurfaceBoundary } from "../components/Surface";
+import { splitReply } from "../../../shared/pui";
 import { Face, hueStyle, Loader, Md } from "../components/ui";
 import { api } from "../lib/api";
 import { plural } from "../lib/format";
@@ -159,9 +160,10 @@ function LiveThread({ d }: { d: ThreadView }) {
         }
         if (x.kind === "surface") {
           if (x.surface) { const s = x.surface; setSurfaces((m) => ({ ...m, [s.id]: s })); }
-          else if (!surfaces[x.data.id]) {
-            const fresh = await api.get<ThreadView>(`/api/threads/${id}`, { quiet: true }).catch(() => null);
-            if (fresh) setSurfaces((m) => ({ ...m, ...Object.fromEntries(fresh.surfaces.map((s) => [s.id, s])) }));
+          else if (!surfaces[x.data.id] || x.data.updated) {
+            // A surface from a reply arrives as its id: the server runs its queries for this one fetch.
+            const s = await api.get<SurfaceRow>(`/api/surfaces/${x.data.id}`, { quiet: true }).catch(() => null);
+            if (s) setSurfaces((m) => ({ ...m, [s.id]: s }));
           }
         }
         liveIds.current.add(x.id);
@@ -242,7 +244,7 @@ function LiveThread({ d }: { d: ThreadView }) {
         </header>
         <div ref={stream} className="stream">
           {drawn}
-          {streaming && <div className={`msg bot${afterAgent ? " cont" : ""}`}>{afterAgent ? <span /> : <Face b={b} size="sm" mood="working" />}<Md text={streaming.text} botId={b.id} /></div>}
+          {streaming && <LiveReply text={streaming.text} b={b} cont={afterAgent} />}
           {painting.map((p) => <CatchThePaint key={p.id} p={p} b={b} />)}
           <div className={`live ${running ? "" : "hidden"}`}><Loader /><span>{activity}</span></div>
         </div>
@@ -259,10 +261,20 @@ function LiveThread({ d }: { d: ThreadView }) {
   );
 }
 
+// The reply as it streams: its prose, and each <Surface> drawn as soon as a component in it closes.
+function LiveReply({ text, b, cont }: { text: string; b: ThreadView["bot"]; cont: boolean }) {
+  const segs = useMemo(() => splitReply(text).segments, [text]);
+  if (!segs.some((x) => x.kind === "surface")) return <div className={`msg bot${cont ? " cont" : ""}`}>{cont ? <span /> : <Face b={b} size="sm" mood="working" />}<Md text={text} botId={b.id} /></div>;
+  return <>{segs.map((x, i) => x.kind === "md"
+    ? <div key={i} className={`msg bot${cont || i ? " cont" : ""}`}>{cont || i ? <span /> : <Face b={b} size="sm" mood="working" />}<Md text={x.text} botId={b.id} /></div>
+    // Keyed by the text length so a spec that threw mid-stream gets another try once more of it has arrived.
+    : <SurfaceBoundary key={`${i}:${text.length}`}><Surface live s={{ id: "", title: x.surface.title || "", spec: { title: x.surface.title, root: x.surface.root } }} /></SurfaceBoundary>)}</>;
+}
+
 function ThreadSurface({ s }: { s: SurfaceRow }) {
   const [saved, setSaved] = useState(!!s.saved);
   const toggle = async () => { const next = !saved; setSaved(next); await api.post(`/api/surfaces/${s.id}/save`, { saved: next }); };
   return (
-    <Surface s={s} lockOnAction extra={<button className="small faint" onClick={toggle}>{s.data ? (saved ? "On Home" : "Pin to Home") : saved ? "Saved to Library" : "Keep in Library"}</button>} />
+    <SurfaceBoundary><Surface s={s} lockOnAction extra={<button className="small faint" onClick={toggle}>{s.data?.source ? (saved ? "On Home" : "Pin to Home") : saved ? "Saved to Library" : "Keep in Library"}</button>} /></SurfaceBoundary>
   );
 }

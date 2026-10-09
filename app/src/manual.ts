@@ -1,9 +1,44 @@
 // The harness manual: detail a member reads on demand with harness_help(topic), so the instructions every thread carries
 // stay short (crew.ts HARNESS core). One page per topic; each a few hundred words at most.
-import { catalogueDoc } from "./surfaces.js";
 
 export const FILES_URL = "http://127.0.0.1:7780/";
-export const BOUND_DOC = `Dashboards over data you keep: store the data in a SQLite ledger under /bot/work (e.g. /bot/work/grocery/ledger.db) and pass source plus queries ({name: "SELECT …"}, read-only, one statement each). A component with bind: "<query name>" gets its data from that query every time the driver opens it, so a daily run only adds rows; never re-render to refresh numbers. Column names per component: Stat value (+delta, tone; format for money), Meter value, max; Text text; Table: the columns you list; List title, detail, meta; Timeline time, text, state; BarChart/Donut label, value; LineChart x, y (+series); Sparkline value. Re-render with id only to change the layout. The tool result lists any query that failed.`;
+// The inline surface format (shared/pui.ts parses it; surfaces.ts validates it). The groceries example is the one most
+// replies need: literal values, then a bound one.
+const SURFACES_DOC = (driver: string) => `Showing ${driver} a surface: write it inline in your reply, between prose, as tags. ${driver} sees each component the moment its tag closes, while you are still writing.
+
+<Surface title="Groceries · October">
+<Grid columns=2>
+  <Stat label="Spend" value="₹8,420" delta="+12% vs Sep" tone=down/>
+  <Stat label="Orders" value="14"/>
+</Grid>
+<BarChart title="Top items" format=money>
+  Milk: 1240
+  Rice: 980
+</BarChart>
+<Text tone=muted>Milk is up 18% since 3 Oct.</Text>
+</Surface>
+
+Rules: <Surface title="…"> starts on its own line and ends with </Surface>; inside it only tags, no markdown. Attribute values: "quoted text", a bare word or number, or a bare flag meaning true. Lists use | between items. Colours are hue tokens c1 c2 c3 c5 c6. Prose goes before or after, not inside. <Surface id=sf_… title="…"> replaces a surface of yours in place (its card redraws where it first appeared).
+
+Components (props; body):
+Layout: Section(title) Stack(direction=row|column, gap=s|m|l) Grid(columns 1-4) Card(title, hue) Divider.
+Text: Heading(level 2|3; body) Text(tone=default|muted|ok|bad|blue; body) Quote(body) Lab(body) Receipt(source url; body) Badge(tone; body).
+Numbers: Stat(label, value, delta, tone=up|down|flat|ok|bad, format) Meter(label, value, max, unit, hue).
+Charts: BarChart(title, unit, format, hue; body lines "Label: value") Donut(title, format; body lines "Label: value", at most 8) LineChart(title, unit, format; body <Series name="…" hue=c1> with lines "x: y", at most 5) Sparkline(values="3|5|4|8", hue).
+Tables: Table(columns="key:Label|key:Label:format"; body rows "a | b | c" in column order) Compare(columns="A|B|C"; body <Row label="…" winner=index>v1 | v2 | v3</Row>) List(body <Item title="…" meta="…">detail</Item>) Timeline(body <Event time="…" state=done|running|needs|failed>text</Event>).
+Input: Form(action, submit="label", title; body fields) with fields TextField(name, label, required, placeholder, multiline) Number(name, label, min, max) Money(name, label) Date(name, label) Select(name, label, options="value:Label|…") Radio(same) Checkbox(name, label) Toggle(name, label). Choice(action, prompt; body <Option id=… label="…">detail</Option>); ids and actions are words starting with a letter. Submitting comes back to you as a message with the values.
+format is text|number|money|date|percent; money is rupees.
+
+Data you keep: put it in a SQLite ledger under /bot/work and bind components to queries, so the numbers are current whenever ${driver} opens the surface and a daily run only adds rows:
+<Surface title="Groceries" source="/bot/work/grocery/ledger.db">
+<Query name=spend>SELECT sum(amount) AS value FROM orders WHERE month = :month</Query>
+<Picker name=month label="Month" options="2026-09:Sep|2026-10:Oct" value=2026-10/>
+<Stat label="Spend" format=money bind=spend/>
+</Surface>
+Queries are read-only, one SELECT each. Columns per component: Stat value (+delta, tone); Meter value, max; Text text; Table the listed keys; List title, detail, meta; Timeline time, text, state; BarChart/Donut label, value; LineChart x, y (+series); Sparkline value; Picker/Tabs value (+label). A bound component leaves out what its query fills.
+
+Controls ${driver} changes without asking you: Picker(name, label, options, value) Tabs(name, options, value) Slider(name, label, min, max, step, value, unit) Switch(name, label, value). A control's value feeds queries as :name, and any component shows only while its when matches: when="view=items", when="view!=items", when="live" (a Switch). Arithmetic on a control goes in a query, even with no ledger: <Query name=emi>SELECT round(:amount * 0.007 / (1 - pow(1.007, -:years * 12))) AS value</Query> (no source needed when no table is read; pow, exp, ln, round work). Nothing you write runs as code.
+If a surface has mistakes or a query fails, Pitcrew tells you in the next message; fix it with the same id.`;
 
 const PAGES = (driver: string): Record<string, string> => ({
   browser: [
@@ -16,7 +51,7 @@ const PAGES = (driver: string): Record<string, string> => ({
     "- browser_fill_form handles radios, checkboxes and selects too, several fields per call. computer_* pixel actions return a screenshot already.",
     `- file:// is blocked: open workspace files at ${FILES_URL}<path under /bot/work>.`,
   ].join("\n"),
-  dashboards: `render_surface shows ${driver} a visual surface: {title, root}, root a component tree ({type, ...props, children?}); colours are hue tokens only. Forms come back to you as a message with the submitted values; pass id to update a surface of yours in place.\n\nComponents:\n${catalogueDoc()}\n\n${BOUND_DOC}`,
+  dashboards: SURFACES_DOC(driver),
   schedules: [
     "Schedules: schedule_task(when, prompt, title) runs a prompt on a cadence (daily 09:00, weekly mon 08:30, every 6 hours); title is the short name the driver sees (left out, it comes from the prompt's first line); list_schedules shows each one's next and last run; update_schedule / cancel_schedule manage them. To run work in order, set a later step's when to \"after <name of one of your schedules>\": it starts when that run finishes cleanly and gets its reply; if that run fails or is skipped, this one is skipped too. Only the driver chains another member's schedule.",
     `- A run arrives as "[Scheduled: …]"; ${driver} isn't waiting on it. Stay quiet unless something needs them: an alert rule in the skill fired, something failed (a login expired), they must act, or the digest is due. Otherwise your whole reply is "QUIET: <what you checked>"; the thread folds it to one line.`,

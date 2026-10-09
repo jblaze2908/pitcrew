@@ -782,6 +782,74 @@ test("bound dashboards: one read-only SELECT per query, confined to the member's
   assert.equal(missing.data.asOf, null); assert.equal(missing.spec.root.children[0].type, "Text");
 });
 
+test("inline surfaces: tags parse while streaming, controls feed queries and when", async () => {
+  const { splitReply, whenHolds } = await import("../app/dist/shared/pui.js");
+  const L = await import("../app/dist/src/ledger.js");
+  const reply = `Here you go.
+
+<Surface title="Groceries" source="g/ledger.db">
+<Query name=spend>SELECT sum(paid) AS value FROM orders WHERE item = :item OR :all</Query>
+<Query name=emi>SELECT round(:years * 12) AS value</Query>
+<Picker name=item label="Item" options="Milk:Milk|Eggs:Eggs"/>
+<Switch name=all label="All items"/>
+<Slider name=years label="Years" min=5 max=30 value=20/>
+<Tabs name=view options="a:Spend|b:Months"/>
+<Stat label="Spend" format=money bind=spend when="view=a"/>
+<Stat label="Months" bind=emi when="view=b"/>
+<BarChart title="Top" format=money>
+  Milk: 1,240
+  Eggs: 980
+</BarChart>
+<Table columns="item:Item|paid:Paid:money">
+  Milk | 120
+</Table>
+</Surface>
+Anything else?`;
+  const { segments, errors } = splitReply(reply);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(segments.map((s) => s.kind), ["md", "surface", "md"]);
+  const sf = segments[1].surface;
+  assert.equal(segments[1].complete, true);
+  assert.deepEqual(Object.keys(sf.queries), ["spend", "emi"]);
+  const kids = sf.root.children;
+  assert.deepEqual(kids.map((k) => k.type), ["Picker", "Switch", "Slider", "Tabs", "Stat", "Stat", "BarChart", "Table"]);
+  assert.deepEqual(kids[0].options, [{ value: "Milk", label: "Milk" }, { value: "Eggs", label: "Eggs" }]);
+  assert.equal(kids[2].value, 20);
+  assert.deepEqual(kids[6].data, [{ label: "Milk", value: 1240 }, { label: "Eggs", value: 980 }]);
+  assert.deepEqual(kids[7].rows, [{ item: "Milk", paid: 120 }]);
+  assert.deepEqual(validateSurface({ title: sf.title, source: sf.source, queries: sf.queries, root: sf.root }).errors, []);
+
+  // Half-written: only closed components show; an open tag never does.
+  const half = splitReply(reply.slice(0, reply.indexOf("<BarChart") + 30)).segments[1];
+  assert.equal(half.complete, false);
+  assert.deepEqual(half.surface.root.children.map((k) => k.type), ["Picker", "Switch", "Slider", "Tabs", "Stat", "Stat"]);
+
+  // Queries bind the controls' values; the slider is clamped to its range, unknown names are dropped.
+  const spec = { title: sf.title, source: sf.source, queries: sf.queries, root: sf.root };
+  const at = async (state) => (await L.resolveSurface({ id: "sf_i", spec, bot_id: "b_led" }, undefined, state)).spec.root.children;
+  assert.equal((await at({}))[4].value, 122, "defaults: the first option, switch off");
+  assert.equal((await at({ item: "Eggs" }))[4].value, 90);
+  assert.equal((await at({ all: true }))[4].value, 212, "a switch binds as 1");
+  assert.equal((await at({ years: 99, nope: 1 }))[5].value, 360);
+  assert.deepEqual(L.controlState(spec.root, { years: 99, nope: 1, item: "Eggs" }), { item: "Eggs", all: false, years: 30, view: "a" });
+  assert.equal(whenHolds("view=a", { view: "a" }), true); assert.equal(whenHolds("view!=a", { view: "a" }), false);
+  assert.equal(whenHolds("all", { all: false }), false); assert.equal(whenHolds("ghost=1", {}), false);
+
+  // No source: arithmetic on an empty in-memory database.
+  const mem = await L.resolveSurface({ id: "sf_m", spec: { title: "EMI", queries: { emi: "SELECT round(2000000 * 0.007 / (1 - pow(1.007, -:years * 12))) AS value" }, root: { type: "Stack", children: [{ type: "Slider", name: "years", min: 5, max: 30, value: 20 }, { type: "Stat", label: "EMI", bind: "emi" }] } } }, "b_led");
+  assert.equal(mem.data.source, null); assert.deepEqual(mem.data.errors, []);
+  assert.ok(Number(mem.spec.root.children[1].value) > 15000);
+
+  // The validator names what's wrong.
+  const v = (root, queries) => validateSurface({ title: "t", ...(queries ? { queries } : {}), root }).errors.join();
+  assert.match(v({ type: "Stat", label: "x", value: "1", when: "ghost=1" }), /no control called "ghost"/);
+  assert.match(v({ type: "Stack", children: [{ type: "Stat", label: "x", bind: "q" }] }, { q: "SELECT :ghost AS value" }), /:ghost names no control/);
+  assert.match(v({ type: "Stack", children: [{ type: "Switch", name: "a", label: "A" }, { type: "Switch", name: "a", label: "B" }] }), /two controls/);
+  assert.match(v({ type: "Switch", name: "a-b", label: "A" }), /a word/);
+  assert.match(v({ type: "Picker", name: "m", bind: "q" }, { q: "SELECT 1 AS value" }), /bound Picker needs a value/);
+  assert.deepEqual(L.paramsOf("SELECT ':nope', x FROM t WHERE a = :a -- :c\n AND b = :b"), ["a", "b"]);
+});
+
 test("a scheduled run that ends QUIET keeps the thread's place; one with news moves it to the top", async () => {
   const { active } = await import("../app/dist/src/runtime/state.js");
   const T = await import("../app/dist/src/runtime/turns.js");

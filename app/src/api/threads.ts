@@ -177,9 +177,10 @@ export const threadRoutes = new Hono<Env>()
   })
   // Kept surfaces (Library); ?bound=1 only the dashboards bound to a ledger (the Wall).
   .get("/api/surfaces", signedIn, async (c) => c.json(await Promise.all(all<SurfaceRow & { bot_name: string; hue: string }>(`SELECT s.id,s.title,s.spec,s.thread_id,s.bot_id,s.created_at,b.name bot_name,b.hue FROM surfaces s JOIN bots b ON b.id=s.bot_id WHERE s.saved=1${c.req.query("bound") ? " AND json_extract(s.spec,'$.source') IS NOT NULL" : ""} ORDER BY s.created_at DESC`).map((s) => resolveSurface({ ...s, spec: json(s.spec) })))))
-  // One surface as the driver sees it now: a bound dashboard's refresh.
+  // One surface as the driver sees it now: a refresh, or its queries re-run for the controls' values (?state=JSON).
   .get("/api/surfaces/:id", signedIn, async (c) => {
     const s = one<SurfaceRow>("SELECT id,title,spec,saved,bot_id FROM surfaces WHERE id=?", c.req.param("id"));
     if (!s) throw httpErr(404, "No such surface");
-    return c.json(await resolveSurface({ ...s, spec: json(s.spec) }));
+    const state = json<Record<string, unknown>>(String(c.req.query("state") || "").slice(0, 4000), {});
+    return c.json(await resolveSurface({ ...s, spec: json(s.spec) }, undefined, state && typeof state === "object" && !Array.isArray(state) ? state : {}));
   });
