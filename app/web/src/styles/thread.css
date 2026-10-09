@@ -92,7 +92,8 @@
 .acts-row .act{height:26px;padding:0 8px;border-radius:7px;display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-3)}
 .acts-row .act:hover,.acts-row .act.on{background:var(--surface-2);color:var(--ink)}
 .rw-anchor{position:relative}
-.menu.rw-menu{left:0;top:calc(100% + 6px);width:290px}
+/* Opens downward: .menu.modes pins bottom for the composer's upward menu, and with both set this menu squashed to 14px. */
+.menu.rw-menu{left:0;top:calc(100% + 6px);bottom:auto;width:290px}
 .menu.rw-menu .op svg{margin-top:2px}
 .rw-shade{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.45);display:grid;place-items:center;padding:16px}
 .rw-sheet{width:min(560px,100%);max-height:calc(100vh - 32px);overflow:auto;border-radius:16px;background:var(--surface);border:1px solid var(--line-2);padding:20px 22px;display:flex;flex-direction:column;gap:14px}
