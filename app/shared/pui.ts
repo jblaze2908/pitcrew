@@ -78,8 +78,13 @@ const kids = (el: El, tag: string) => el.children.filter((c): c is El => typeof 
 const list = (v: unknown) => String(v).split("|").map((x) => x.trim()).filter((x) => x !== "");
 const numOf = (v: unknown) => (typeof v === "number" ? v : Number(String(v).replace(/[₹,%\s]/g, "")));
 const options = (v: unknown) => list(v).map((o) => { const k = o.indexOf(":"); return k < 0 ? { value: o, label: o } : { value: o.slice(0, k).trim(), label: o.slice(k + 1).trim() }; });
-// "Label: 12" lines; the last colon splits, so labels may hold colons.
-const pairs = (t: string) => t.split("\n").map((l) => l.trim()).filter(Boolean).flatMap((l) => { const k = l.lastIndexOf(":"); return k < 0 ? [] : [{ label: l.slice(0, k).trim(), value: numOf(l.slice(k + 1)) }]; });
+// "Label: 12" lines, optionally "Label: 12 teal" for that item's hue; "x:" with no number is a gap (null). The last
+// colon splits, so labels may hold colons.
+const pairs = (t: string) => t.split("\n").map((l) => l.trim()).filter(Boolean).flatMap((l) => {
+  const k = l.lastIndexOf(":"); if (k < 0) return [];
+  const [num, hue] = l.slice(k + 1).trim().split(/\s+/), v = num ? numOf(num) : NaN;
+  return [{ label: l.slice(0, k).trim(), value: Number.isFinite(v) ? v : null, ...(hue ? { hue } : {}) }];
+});
 
 function props(type: string, attrs: El["attrs"]) {
   const out: Record<string, unknown> = {};
@@ -98,7 +103,7 @@ function convert(el: El | string, warn: (w: string) => void): any {
     if (t === "Form" && n.submit !== undefined) { n.submitLabel = n.submit; delete n.submit; }
     n.children = el.children.map((c) => convert(c, warn)).filter(Boolean);
   } else if (BODY_TEXT.has(t)) { if (n.text === undefined) n.text = bodyText(el); }
-  else if (t === "BarChart" || t === "Donut") { if (n.data === undefined && !n.bind) n.data = pairs(bodyText(el)); }
+  else if (t === "BarChart" || t === "Donut") { if (n.data === undefined && !n.bind) n.data = pairs(bodyText(el)).map((p) => ({ ...p, value: p.value ?? 0 })); }
   else if (t === "LineChart") { if (!n.bind) n.series = kids(el, "Series").map((s) => ({ name: String(s.attrs.name ?? ""), ...(s.attrs.hue ? { hue: s.attrs.hue } : {}), points: pairs(bodyText(s)).map((p) => ({ x: p.label, y: p.value })) })); }
   else if (t === "Sparkline") { if (typeof n.values === "string") n.values = n.values.split(/[|,]/).map(numOf); }
   else if (t === "Table") {

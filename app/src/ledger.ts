@@ -137,6 +137,7 @@ const first = (r: Record<string, unknown>, k: string, i = 0) => (r[k] !== undefi
 const str = (v: unknown, max: number) => (v == null ? "" : String(v)).slice(0, max);
 const TONES = new Set(["default", "muted", "ok", "bad", "blue", "up", "down", "flat"]);
 const STATES = new Set(["done", "running", "needs", "failed"]);
+const HUES = new Set(["blue", "magenta", "violet", "teal", "amber", "grey", "bad"]);
 
 // The component with its bound props filled from rows (column names as documented in the catalogue), or a bad-tone Text
 // saying what went wrong. Pure; the caps match the catalogue's, so a bound surface renders like a literal one.
@@ -152,12 +153,12 @@ export function fill(n: Record<string, any>, r: QueryResult | undefined): Record
     case "Table": return { ...rest, rows: rows.slice(0, 200) };
     case "List": return { ...rest, items: rows.slice(0, 100).map((x) => ({ title: str(first(x, "title"), 200), ...(x.detail != null ? { detail: str(x.detail, 400) } : {}), ...(x.meta != null ? { meta: str(x.meta, 80) } : {}) })) };
     case "Timeline": return { ...rest, items: rows.slice(0, 100).map((x) => ({ text: str(first(x, "text"), 300), ...(x.time != null ? { time: str(x.time, 60) } : {}), ...(STATES.has(String(x.state)) ? { state: x.state } : {}) })) };
-    case "BarChart": case "Donut": return { ...rest, data: rows.slice(0, n.type === "Donut" ? 8 : 50).map((x) => ({ label: str(first(x, "label"), 80), value: num(first(x, "value", 1)) || 0 })) };
+    case "BarChart": case "Donut": return { ...rest, data: rows.slice(0, n.type === "Donut" ? 8 : 60).map((x) => ({ label: str(first(x, "label"), 80), value: num(first(x, "value", 1)) || 0, ...(HUES.has(String(x.hue)) ? { hue: x.hue } : {}) })) };
     case "Picker": case "Tabs": return { ...rest, options: rows.slice(0, n.type === "Tabs" ? 8 : 50).map((x) => { const v = str(first(x, "value"), 200); return { value: v, label: str(x.label ?? v, 200) }; }) };
     case "Sparkline": return { ...rest, values: rows.slice(0, 200).map((x) => num(first(x, "value")) || 0) };
     case "LineChart": {
-      const by = new Map<string, { x: string; y: number }[]>();
-      for (const x of rows) { const k = str(x.series ?? n.title ?? "value", 80); if (!by.has(k) && by.size >= 5) continue; (by.get(k) || by.set(k, []).get(k)!).push({ x: str(first(x, "x"), 40), y: num(x.y ?? Object.values(x)[1]) || 0 }); }
+      const by = new Map<string, { x: string; y: number | null }[]>();
+      for (const x of rows) { const k = str(x.series ?? n.title ?? "value", 80); if (!by.has(k) && by.size >= 5) continue; const y = x.y !== undefined ? x.y : Object.values(x)[1]; (by.get(k) || by.set(k, []).get(k)!).push({ x: str(first(x, "x"), 40), y: y == null || y === "" ? null : num(y) || 0 }); }
       return { ...rest, series: [...by].map(([name, points]) => ({ name, points: points.slice(0, 200) })) };
     }
     default: return rest;

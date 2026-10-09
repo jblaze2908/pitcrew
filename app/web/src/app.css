@@ -318,19 +318,11 @@ button.small.faint:hover,a.small.faint:hover{color:var(--ink)}
 .sf-card.hue{background:color-mix(in srgb,var(--hue) 12%,var(--surface-2))}
 .sf-stat .v{font:800 26px/1.05 var(--font-display);letter-spacing:-.02em}
 .sf-stat .d{font:500 12px var(--font-data)}
-.sf-bars{display:flex;flex-direction:column;gap:7px}
-.sf-bar{display:grid;grid-template-columns:minmax(80px,30%) 1fr 90px;gap:10px;align-items:center;font-size:12.5px}
-.sf-bar .track{height:10px;border-radius:4px;background:var(--surface-3);overflow:hidden}
-.sf-bar .track b{display:block;height:100%;background:var(--hue,var(--c1));border-radius:4px}
-.sf-bar .n{font:500 12px var(--font-data);text-align:right;color:var(--ink-2)}
-.sf-legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--ink-2)}
-.sf-legend i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:6px;background:var(--hue)}
 .sf-choice{display:flex;flex-direction:column;gap:8px}
 .sf-choice button{text-align:left;padding:12px 14px;border-radius:var(--radius-sm);background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--line)}
 .sf-choice button:hover{box-shadow:inset 0 0 0 1px var(--ink-3)}
 .sf-form{display:flex;flex-direction:column;gap:12px}
 .sf-win{color:var(--in);font-weight:600}
-svg text{fill:var(--ink-3);font:10px var(--font-data)}
 
 @media (max-width:900px){
   body{overflow:auto}
@@ -354,8 +346,8 @@ svg text{fill:var(--ink-3);font:10px var(--font-data)}
   .rail{position:static;max-height:45vh}
   .changes{margin-left:0}
   .surface,.tool,.live{margin-left:0}
-  .sf-bar{grid-template-columns:90px 1fr 70px}
-}
+  .cv-row{grid-template-columns:minmax(70px,28%) 1fr auto}
+  }
 
 /* thread list: the title takes the slack so the date columns sit at the right edge */
 .tbl.threads th:first-child,.tbl.threads td:first-child{width:100%}
@@ -706,3 +698,35 @@ svg text{fill:var(--ink-3);font:10px var(--font-data)}
 .chk>input{flex:none;margin-top:2px}
 .chk>span{flex:1;min-width:0}
 .diff .dl code,.diff .cell code{white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* Surface charts (Charts.tsx). The palette is checked for colour-blind separation on these surfaces in both themes;
+   green, orange and red stay out of it so they keep meaning ok, needs-you and failed. */
+:root{--v1:#3987e5;--v2:#d55181;--v3:#9085e9;--v4:#16a6a6;--v5:#c98500}
+[data-theme="light"]{--v1:#2a78d6;--v2:#d4407a;--v3:#6a55d6;--v4:#0a9a9a;--v5:#b07800}
+.cv-box{position:relative}
+.cv-svg{display:block;overflow:visible}
+.cv-grid{stroke:var(--line);stroke-width:1}
+.cv-ax{font:400 11px var(--font-data);fill:var(--ink-3)}
+.cv-lab{font:500 12px var(--font-data);fill:var(--ink-2)}
+.cv-cross{stroke:var(--ink-3);stroke-dasharray:2 3}
+.cv-total{font:700 17px var(--font-display);fill:var(--ink)}
+.cv-tip{position:absolute;pointer-events:none;z-index:5;min-width:110px;background:var(--surface-2);border:1px solid var(--line-2);border-radius:10px;padding:7px 10px;font:12px/1.5 var(--font-body);color:var(--ink-2);box-shadow:0 6px 20px rgba(0,0,0,.25);white-space:nowrap}
+.cv-tip p{color:var(--ink-3)}.cv-tip div{font:500 12px var(--font-data);color:var(--ink)}
+.cv-tip i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px}
+.cv-rows{display:flex;flex-direction:column;gap:4px}
+.cv-row{display:grid;grid-template-columns:minmax(80px,30%) 1fr auto;gap:12px;align-items:center;font-size:13px;padding:2px 0;border-radius:6px}
+.cv-row .l{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cv-row .t{position:relative;height:8px}
+.cv-rows:not(.neg) .cv-row .t{background:var(--surface-3);border-radius:9px;overflow:hidden}
+.cv-row .t b{position:absolute;top:0;left:0;height:100%;border-radius:9px}
+.cv-rows.neg .cv-row .t b{left:auto}
+.cv-row .t .z{position:absolute;left:50%;top:-4px;bottom:-4px;width:1px;background:var(--line-2)}
+.cv-row .v{font:500 12px var(--font-data);color:var(--ink-2);text-align:right;min-width:64px}
+.cv-row.on .l,.cv-row.on .v{color:var(--ink)}
+.cv-donut{display:flex;gap:24px;align-items:center;flex-wrap:wrap}
+.cv-legend{flex:1;min-width:200px;display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--ink-2)}
+.cv-legend div{display:grid;grid-template-columns:10px 1fr auto;gap:10px;align-items:center;cursor:default}
+.cv-legend i{width:9px;height:9px;border-radius:3px}
+.cv-legend .num{font:500 12px var(--font-data)}
+.cv-legend div.on{color:var(--ink)}
+.cv-spark{display:flex;align-items:center;gap:10px}
