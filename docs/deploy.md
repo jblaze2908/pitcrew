@@ -117,6 +117,8 @@ If your proxy runs in Docker on its own network, give it a route to the bridge a
 
 **Email for crew members.** Each member can get an address on a domain you control. With Cloudflare Email Routing, deploy the worker in [`integrations/cloudflare-email`](../integrations/cloudflare-email) and set `PITCREW_MAIL_DOMAIN` to the routed subdomain. Any mail service that can POST a signed webhook to `/api/mail` works the same way; see the worker for the format.
 
+**Claude Code for coding tasks.** With a Claude Pro, Max, Team or Enterprise plan, run `sudo bash deploy/claude-login.sh` once from your Pitcrew folder and sign in. Members then get `delegate_to_claude_code`: Pitcrew runs the unmodified Claude Code CLI in a throwaway container over that member's workspace, its commands pass the member's safety check, and its questions come to you as pit stops. The login stays in `/srv/pitcrew/claude`, which no member computer mounts; Pitcrew only checks that it exists. Usage counts against your plan's limits.
+
 **Shared memory (Engram).** If you run an [Engram](https://github.com/jblaze2908/engram) server, Settings → Shared memory takes its address and a link token; members then read and file memories there and its MCP gateway serves their connectors. `PITCREW_ENGRAM_URL` pre-fills the address. Without it, members keep per-member memory and MCP connections in Pitcrew.
 
 ## Updating

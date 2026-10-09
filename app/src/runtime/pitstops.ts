@@ -42,7 +42,7 @@ export function pitStop({ id = uid("ps"), botId, threadId, kind, effect, title, 
   });
 }
 
-export async function decide(id: string, decision: string, { scope = "once", note = "", spec = null }: { scope?: string; note?: string; spec?: Record<string, unknown> | null } = {}) {
+export async function decide(id: string, decision: string, { scope = "once", note = "", spec = null, answers = null }: { scope?: string; note?: string; spec?: Record<string, unknown> | null; answers?: Record<string, unknown> | null } = {}) {
   const ps = one<PitstopRow>("SELECT * FROM pitstops WHERE id=?", id);
   if (!ps || ps.status !== "pending") return ps;
   const status = decision === "approve" || decision === "approved" ? "approved" : decision === "expired" ? "expired" : "denied";
@@ -65,6 +65,8 @@ export async function decide(id: string, decision: string, { scope = "once", not
   if (ps.kind === "member" && status === "approved") applyMemberChange(detail);
   if (ps.kind === "files" && status === "approved") applyFileDeletion(detail);
   if (ps.kind === "check") applyCheckDecision(ps, status, scope);
+  // Claude Code's question: the driver's picks, label per question text, read back by runtime/claude.ts.
+  if (ps.kind === "question" && status === "approved" && answers) run("UPDATE pitstops SET detail=? WHERE id=?", JSON.stringify({ ...json(ps.detail, {}), answers: cleanAnswers(json(ps.detail, {}).questions, answers) }), id);
   if (detail.pattern && ps.kind !== "hire" && (status === "approved" || status === "denied") && note !== "Kill switch" && learnable(getBot(ps.bot_id)?.policy, ps.effect, json(ps.jev, {}).by)) learn(ps, detail, status);
   run("UPDATE pitstops SET status=?, scope=?, note=?, decided_at=? WHERE id=?", status, scope, String(note).slice(0, 500), now(), id);
   // A kill-switch denial judges nothing about the call, so it trains as no answer.
@@ -82,4 +84,15 @@ export async function decide(id: string, decision: string, { scope = "once", not
     import("./turns.js").then(async (T) => T.steerNote(ps.thread_id!, (await import("./gate.js")).EXPIRED_NOTE(ps.title))).catch(() => {});
   waits.get(id)?.(status); waits.delete(id);
   return row;
+}
+
+/** Only answers to questions that were asked, as short strings (a multi-select's labels joined). */
+export function cleanAnswers(questions: unknown, answers: Record<string, unknown>) {
+  const out: Record<string, string> = {};
+  for (const q of Array.isArray(questions) ? questions : []) {
+    const k = String(q?.question || ""), v = answers[k];
+    const text = (Array.isArray(v) ? v.map(String).join(", ") : typeof v === "string" ? v : "").trim().slice(0, 1000);
+    if (k && text) out[k] = text;
+  }
+  return out;
 }

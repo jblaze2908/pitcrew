@@ -88,9 +88,17 @@ const PAGES = (driver: string): Record<string, string> => ({
     "- For 30 minutes after a fill, results in that thread have the values replaced with «secret», and page JS that reads form fields, browser_run_code_unsafe and saving browser results to files are refused. Plan reads that need them before signing in, or after.",
     "- Never ask for a password or code in the chat, and never save one in memory or files.",
   ].join("\n"),
+  claude_code: [
+    `Claude Code: a coding agent on ${driver}'s Claude plan. delegate_to_claude_code(task) runs it in your /bot/work, in its own container.`,
+    "- Use it for code: building or changing an app or script, fixing failing tests, refactors. Not for browsing, shopping or messages.",
+    "- The task must stand alone: the folder, what to change, how to check it (the test command). It can't see this thread or your memory.",
+    `- Its file edits in /bot/work just happen; its commands pass your safety check, so risky ones wait for ${driver}. Its questions go to ${driver} as a pit stop; unanswered after 30 minutes, it picks itself.`,
+    "- One run at a time across the crew. Up to 10 minutes you get its summary as the tool result; longer, it arrives later as a \"[Claude Code finished]\" message.",
+    "- Read its summary, then check the work yourself (run the tests, look at the diff) before you call the task done. Its summary isn't proof.",
+  ].join("\n"),
 });
-// TOPICS are the ones harnessCore lists (crew.ts); vault is reached from browser_fill_secret's description instead, so
-// the core stays the same size.
+// TOPICS are the ones harnessCore lists (crew.ts); vault and claude_code are reached from their tools' descriptions
+// instead, so the core stays the same size.
 export const TOPICS = ["browser", "dashboards", "schedules", "memory", "skills", "approvals", "files", "images", "crew", "done"];
-export const HELP_TOPICS = [...TOPICS, "vault"];
+export const HELP_TOPICS = [...TOPICS, "vault", "claude_code"];
 export const harnessHelp = (topic: string, driver: string) => PAGES(driver)[topic] ?? null;

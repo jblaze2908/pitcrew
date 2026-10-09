@@ -18,6 +18,7 @@ import { pitStop } from "./pitstops.js";
 import { addSchedule, listSchedules, updateSchedule, deleteSchedule, lastScheduledRun } from "./schedules.js";
 import { isEventSpec } from "./hooks.js";
 import { askCrew } from "./delegation.js";
+import { delegateToClaude } from "./claude.js";
 import { planTool } from "./plans.js";
 import { runtimeTool, type ToolCall } from "./browser.js";
 import { localStamp, say, tzLabel } from "./util.js";
@@ -293,6 +294,7 @@ export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Prom
         + "\n\nGive the driver the matching thread as a markdown link exactly as written above.");
     }
     case "ask_crew_member": return askCrew(b, threadId, a);
+    case "delegate_to_claude_code": return delegateToClaude(c, b, threadId, a);
     case "plan": return planTool(b, threadId, a);
     case "propose_crew_member": {
       if (b.kind !== "chief") return say("Only the Crew Chief can propose crew members.", false);

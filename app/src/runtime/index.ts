@@ -22,6 +22,7 @@ export { activity } from "./activity.js";
 export { sideAsk, sidePrompt, NOT_CONNECTED } from "./side.js";
 export { nextRun, addSchedule, listSchedules, updateSchedule, deleteSchedule, scheduleTitle, backfillScheduleTitles } from "./schedules.js";
 export { takeControl, handBack, leaseHeld } from "./lease.js";
+export { stopClaude } from "./claude.js";
 export { killSwitch, resumeCrew, bootRuntime, settleCutTurns, resumable, resumeCut } from "./lifecycle.js";
 export { pushConfig, setPushConfig, pushTest, markPresent, readActToken, phoneMayApprove, pitForAct } from "./push.js";
 export { doneCheck, parseGrade, normCriteria, setDoneCriteria, sendBack, classifyCheck, meets, MAX_RETRIES } from "./donecheck.js";

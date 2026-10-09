@@ -32,7 +32,7 @@ export const botDir = (id: string) => `${ROOT}/bots/${id}`;
 export const PW_OUT = "/bot/run/playwright";
 // Playwright MCP waits this long after each action for triggered work (default 500 ms; click 589-620 → 196-226 ms, measured).
 export const PW_SETTLE_MS = 100;
-const gitIdentity = (b: { id: string; name: string }) => { const n = b.name.replace(/[^\w .'-]/g, "") || b.id, e = `${b.id}@crew.pitcrew`; return ["-e", `GIT_AUTHOR_NAME=${n}`, "-e", `GIT_AUTHOR_EMAIL=${e}`, "-e", `GIT_COMMITTER_NAME=${n}`, "-e", `GIT_COMMITTER_EMAIL=${e}`]; };
+export const gitIdentity = (b: { id: string; name: string }) => { const n = b.name.replace(/[^\w .'-]/g, "") || b.id, e = `${b.id}@crew.pitcrew`; return ["-e", `GIT_AUTHOR_NAME=${n}`, "-e", `GIT_AUTHOR_EMAIL=${e}`, "-e", `GIT_COMMITTER_NAME=${n}`, "-e", `GIT_COMMITTER_EMAIL=${e}`]; };
 // Opt-in Playwright MCP capabilities: storage (cookies, local/session storage). Network request reads are core; request
 // mocking (the network cap) is covered by browser_run_code_unsafe. Part of the manifest cache key, so a change re-lists.
 export const PW_CAPS = "storage";
@@ -308,9 +308,9 @@ export class Computer {
   }
   async #start() {
     await makeRoom(this);
-    const b = this.bot, id = b.id, net = `pc-net-${id}`;
+    const b = this.bot, id = b.id;
     ensureDirs(id); ensureBrainDir(b);
-    if (!(await docker(["network", "inspect", net])).ok) await docker(["network", "create", "--label", "pitcrew=computer", net]);
+    const net = await ensureNet(id);
     await docker(["rm", "-f", this.name]);
     const r = await docker(["run", "-d", "--rm", "--name", this.name, "--hostname", id.slice(0, 20).replace(/[^a-z0-9-]/gi, "-"), "--label", "pitcrew=computer",
       "--cpus", "1.5", "--memory", "2g", "--pids-limit", "768", "--shm-size", "512m",
@@ -378,6 +378,13 @@ export class Computer {
     return rpc;
   }
   async stop() { if (this.up) await docker(["stop", "-t", "5", this.name]); }
+}
+
+/** The member's own bridge network: its computer, the brain while that computer is up, and Claude Code runs. */
+export async function ensureNet(id: string) {
+  const net = `pc-net-${id}`;
+  if (!(await docker(["network", "inspect", net])).ok) await docker(["network", "create", "--label", "pitcrew=computer", net]);
+  return net;
 }
 
 const brains = new Map<string, Brain>(), computers = new Map<string, Computer>();

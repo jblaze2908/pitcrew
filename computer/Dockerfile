@@ -4,7 +4,10 @@ FROM node:22-bookworm-slim
 # Pinned to releases at least 7 days old (release-age cooldown). Codex verifies TLS against the OS CA store.
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN npm install -g @openai/codex@0.158.0 @playwright/mcp@0.0.82 \
+# Claude Code is the unmodified CLI that members hand coding tasks to (app/src/runtime/claude.ts), signed in with the
+# driver's own Claude plan; its native binary comes from its postinstall.
+RUN npm install -g @openai/codex@0.158.0 @playwright/mcp@0.0.82 @anthropic-ai/claude-code@2.1.287 \
+ && claude --version \
  && cd "$(npm root -g)/@playwright/mcp" \
  && npx playwright install-deps chromium \
  && npx @playwright/mcp install-browser chrome-for-testing \

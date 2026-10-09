@@ -171,10 +171,10 @@ function LiveThread({ d }: { d: ThreadView }) {
     }
   });
 
-  // Plans and delegations: the newest snapshot per id.
+  // Plans, delegations and Claude Code runs: the newest snapshot per id.
   const latest = useMemo(() => {
     const m = new Map<string, Record<string, any>>();
-    for (const e of events) if (e.kind === "plan" || e.kind === "delegation") m.set(e.data.id, e.data);
+    for (const e of events) if (e.kind === "plan" || e.kind === "delegation" || e.kind === "claude") m.set(e.data.id, e.data);
     return m;
   }, [events]);
   const scriptResults = useMemo(() => new Map(events.filter((e) => e.kind === "tool" && e.data.type === "scriptResult").map((e) => [e.data.callId as string, e.data])), [events]);

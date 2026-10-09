@@ -64,6 +64,8 @@ export const systemRoutes = new Hono<Env>()
 
   // Providers
   .get("/api/providers", signedIn, (c) => c.json(P.providerStatus()))
+  .get("/api/claude-code", signedIn, (c) => c.json(P.claudeStatus()))
+  .post("/api/claude-code/:id/stop", signedIn, (c) => c.json(R.stopClaude(c.req.param("id"))))
   .put("/api/providers/:p/key", signedIn, async (c) => { const b = await jsonBody(c, Key); return c.json(await P.setKey(c.req.param("p"), b.key)); })
   .delete("/api/providers/:p/key", signedIn, (c) => { P.removeKey(c.req.param("p")); return c.json(P.providerStatus()); })
   .post("/api/providers/:p/test", signedIn, async (c) => { const p = c.req.param("p"), k = getSecret(p); if (!k) throw httpErr(400, "No key saved"); return c.json(await P.testKey(p, k)); })

@@ -2312,3 +2312,24 @@ test("the in-flight tool kind rides the activity event and the member card, and 
   assert.deepEqual(global.map((g) => g.toolKind), ["shell", "browser", null], "every client hears each change once, not each call");
   byCodex.delete("cx_kind");
 });
+
+test("Claude Code: answers keep only asked questions, multi-select joined", async () => {
+  const { cleanAnswers } = await import("../app/dist/src/runtime/pitstops.js");
+  const qs = [{ question: "Currency?" }, { question: "Sections?" }];
+  assert.deepEqual(cleanAnswers(qs, { "Currency?": " Keep original ", "Sections?": ["Intro", "End"], "Injected?": "x" }), { "Currency?": "Keep original", "Sections?": "Intro, End" });
+  assert.deepEqual(cleanAnswers(qs, { "Currency?": "", "Sections?": 3 }), {});
+  assert.deepEqual(cleanAnswers(null, { a: "b" }), {});
+});
+
+test("Claude Code: the tool appears only once the server is signed in", async () => {
+  const { dynamicTools } = await import("../app/dist/src/crewTools.js");
+  const { claudeStatus } = await import("../app/dist/src/providers.js");
+  const { harnessHelp } = await import("../app/dist/src/manual.js");
+  const has = (o) => dynamicTools({ kind: "member" }, undefined, o).some((t) => t.name === "delegate_to_claude_code");
+  assert.equal(has({}), false);
+  assert.equal(has({ claude: true }), true);
+  assert.equal(claudeStatus().connected, false);
+  mkdirSync(`${root}/claude`, { recursive: true }); writeFileSync(`${root}/claude/.credentials.json`, "{}");
+  assert.equal(claudeStatus().connected, true);
+  assert.match(harnessHelp("claude_code", "Sam"), /delegate_to_claude_code/);
+});

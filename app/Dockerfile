@@ -9,7 +9,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY . .
-RUN npm run build && npm prune --omit=dev
+# Claude Code runs in the computer image (runtime/claude.ts spawns it there), so the SDK's bundled CLI binary isn't needed here.
+RUN npm run build && npm prune --omit=dev && rm -rf node_modules/@anthropic-ai/claude-agent-sdk-*
 
 FROM node:22-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata && rm -rf /var/lib/apt/lists/*
