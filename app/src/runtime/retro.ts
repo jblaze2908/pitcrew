@@ -83,7 +83,7 @@ export function retroOutcome(botId: string, since: number, changes: { path: stri
   if (status !== "completed") return "failed before changing anything";
   return /^\s*QUIET\b/.test(reply) ? `nothing to change${reply.replace(/^\s*QUIET:?\s*/, "").trim() ? `: ${reply.replace(/^\s*QUIET:?\s*/, "").trim().replace(/\s+/g, " ").slice(0, 140)}` : ""}` : "nothing changed";
 }
-export const retroPrompt = (r: RunReport, why: string) => `[Retro] Your last run stood out (${why}). How it went, measured by Pitcrew:\n${reportText(r)}\n\nImprove how you work, without redoing the task: fix the skill this task uses (commit with the evidence), rewrite agent memory if it was wrong, and for anything only Pitcrew can fix (a missing tool, a rule that got in the way) call suggest_improvement with the evidence. If nothing needs changing, reply "QUIET: <why not>".`;
+export const retroPrompt = (r: RunReport, why: string) => `[Retro] Your last run stood out (${why}). How it went, measured by Pitcrew:\n${reportText(r)}\n\nImprove how you work, without redoing the task: fix the skill this task uses (commit with the evidence), rewrite agent memory if it was wrong, and for anything only Pitcrew can fix (a missing tool, a rule that got in the way) call suggest_improvement with the evidence. A third-party service's limits (its API, paging, missing fields) are no suggestion: work around them in your skill. If nothing needs changing, reply "QUIET: <why not>".`;
 
 // ---------- suggestions ----------
 // Harness ideas from members, deduplicated by title; each repeat adds a vote and its evidence.
