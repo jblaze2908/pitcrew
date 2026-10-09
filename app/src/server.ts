@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { getRequestListener } from "@hono/node-server";
 import * as A from "./auth.js";
 import * as R from "./runtime/index.js";
-import { ensureChief } from "./crew.js";
+import { ensureChief, listBots } from "./crew.js";
 import { send, warm } from "./delivery.js";
 import { startCodeSweeper, reapCode } from "./code.js";
 import { reapOrphans, startIdleSweeper, startBootSocket, toolManifest } from "./computer.js";
@@ -45,7 +45,7 @@ server.on("upgrade", liveView);
 ensureChief();
 A.ensureSetupToken();
 const cut = R.bootRuntime();
-await reapOrphans();
+await reapOrphans(listBots().map((b) => b.id));
 // Only now: reapOrphans restarts the brain container, which kills any brain a resume had already started (exit 137).
 R.resumeCut(cut);
 R.startQueues(); // after resumeCut, so a resumed thread keeps its queue until that run ends

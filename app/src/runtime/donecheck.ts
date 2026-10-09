@@ -36,17 +36,29 @@ export function normCriteria(v: unknown): DoneCriterion[] | string {
 // Rows from before checks stored plain strings.
 const criteriaOf = (t: { criteria: string | null }): DoneCriterion[] => json<unknown[]>(t.criteria, []).map((c) => (typeof c === "string" ? { text: c } : c as DoneCriterion)).filter((c) => c?.text);
 
-/** set_done_criteria: fixed for the task once set, so a retry can't move the goalposts. */
+/** set_done_criteria: fixed for the task once set, so a retry can't move the goalposts. On a retry the member may only
+ *  correct a broken check command: every criterion's text must stay word for word, and the driver sees the change. */
 export function setDoneCriteria(threadId: string, raw: unknown) {
   const a = active.get(threadId);
   if (!a) return { ok: false, text: "No run in progress." };
   const t = one<{ trigger: string }>("SELECT trigger FROM turns WHERE id=?", a.turnId);
-  if (t?.trigger === "check") return { ok: false, text: "This task's criteria are already set; fix what the check found instead." };
   const c = normCriteria(raw);
   if (typeof c === "string") return { ok: false, text: c };
+  if (t?.trigger === "check") return correctChecks(threadId, a.turnId, c);
   run("UPDATE turns SET criteria=? WHERE id=?", JSON.stringify(c), a.turnId);
   const n = c.filter((x) => x.check).length;
   return { ok: true, text: `Noted ${c.length} criteria${n ? `, ${n} with a check` : ""}. When you finish, Pitcrew runs each check on your computer${n < c.length ? "; the rest are judged from the screenshot, last page and files you changed" : ""}. Nothing to prepare for it.` };
+}
+
+function correctChecks(threadId: string, turnId: string, c: DoneCriterion[]) {
+  const root = openRetry(threadId), given = root ? criteriaOf(root) : [];
+  if (!root || c.length !== given.length || c.some((x, i) => x.text !== given[i].text))
+    return { ok: false, text: "This task's criteria are already set. On a retry you may only fix a broken check: send the same criteria, same text word for word, with corrected check or expect." };
+  const changed = c.flatMap((x, i) => (x.check !== given[i].check || x.expect !== given[i].expect ? [`“${x.text}”: ${given[i].check || "no check"} → ${x.check || "no check"}`] : []));
+  if (!changed.length) return { ok: false, text: "Nothing changed: fix what the check found instead." };
+  run("UPDATE turns SET criteria=? WHERE id=?", JSON.stringify(c), root.id);
+  addEvent(threadId, turnId, "system", { text: `Corrected its done-check: ${changed.join("; ").slice(0, 600)}` });
+  return { ok: true, text: `Corrected ${changed.length} check${changed.length > 1 ? "s" : ""}; the driver can see what changed. Pitcrew runs them when you finish.` };
 }
 
 // ---------- checks ----------

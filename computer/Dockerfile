@@ -14,7 +14,7 @@ RUN npm install -g @openai/codex@0.158.0 @playwright/mcp@0.0.82 @anthropic-ai/cl
  && chmod -R a+rX /ms-playwright \
  && rm -rf /var/lib/apt/lists/* /root/.npm
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      xvfb openbox x11vnc novnc xdotool imagemagick fonts-dejavu-core fonts-noto-color-emoji tzdata git \
+      xvfb openbox x11vnc novnc xdotool imagemagick fonts-dejavu-core fonts-noto-color-emoji tzdata git ripgrep curl jq \
  && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -u 1500 crew && mkdir -p /bot /auth /opt/pitcrew && chown crew /bot
