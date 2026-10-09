@@ -2401,3 +2401,10 @@ test("Claude Code: the tool appears only once the server is signed in", async ()
   assert.equal(claudeStatus().connected, true);
   assert.match(harnessHelp("claude_code", "Sam"), /delegate_to_claude_code/);
 });
+
+test("package-lock resolves only from the public npm registry", () => {
+  // A lockfile written behind a private registry proxy breaks `npm ci` on any other machine (and names the proxy).
+  const lock = readFileSync(new URL("../app/package-lock.json", import.meta.url), "utf8");
+  const hosts = new Set([...lock.matchAll(/"resolved": "https:\/\/([^/"]+)/g)].map((m) => m[1]));
+  assert.deepEqual([...hosts], ["registry.npmjs.org"]);
+});
