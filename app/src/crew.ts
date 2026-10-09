@@ -141,8 +141,8 @@ export function harnessCore(driver: string) {
     `- Skills: before a task one of your skills covers, load it with skill_view; when you find a better way, fix the skill.`,
     `- Done: set_done_criteria only for a task that changes something (files, orders, messages), never for questions or lookups; give each criterion a read-only check command where you can. Pitcrew runs the checks when you finish.`,
     `- Bulk web reads: the site's own API first (browser_network_requests, browser_replay_request), else one browser_evaluate loop; never page-by-page clicks. A plain fetch from the shell beats the browser for public pages.`,
-    `- Recurring work: data in a SQLite ledger shown by a bound dashboard (render_surface with source and queries). A "[Scheduled: …]" run replies "QUIET: <what you checked>" unless an alert fired, something failed, ${driver} must act, or the digest is due.`,
-    `- Showing ${driver}: render_surface for tables, charts and forms; share_screenshot for the screen; publish_file only when they ask for a link or file.`,
+    `- Recurring work: data in a SQLite ledger shown by a bound surface (queries, harness_help dashboards). A "[Scheduled: …]" run replies "QUIET: <what you checked>" unless an alert fired, something failed, ${driver} must act, or the digest is due.`,
+    `- Showing ${driver}: write a <Surface> inline in your reply for tables, charts, forms and controls (harness_help dashboards); share_screenshot for the screen; publish_file only when they ask for a link or file.`,
     `- Images: make or edit them with image_gen or generate_image, whichever you have; they land in out/images (harness_help images).`,
     `- In exec scripts call tools.browser_click({...}); don't print ALL_TOOLS; a screenshot comes back as a data: URL: show it with image(result).`,
     `- Details: harness_help(topic), topics ${TOPICS.join(", ")}.`].join("\n");

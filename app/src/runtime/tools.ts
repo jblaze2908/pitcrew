@@ -2,7 +2,7 @@
 // Chief's delegation and plans. Browser and pixel tools go on to runtimeTool.
 import { one, run, now, uid, audit, driverName } from "../db.js";
 import { freeHue, getBot, listBots, normaliseSpec } from "../crew.js";
-import { validateSurface } from "../surfaces.js";
+import { saveSurface } from "./replies.js";
 import { resolveSurface, ledgerPath, listLedgers, mayRead, runQueries } from "../ledger.js";
 import { imageFrom, saveShot, type ToolResult } from "../shots.js";
 import type { Brain } from "../computer.js";
@@ -45,23 +45,16 @@ export function notGlobal(text: string) {
 export async function dynamicTool(c: Brain, threadId: string, p: ToolCall): Promise<ToolResult> {
   const b = getBot(c.bot.id)!, a = p.arguments || {};
   switch (p.tool) {
+    // Threads started before inline surfaces still have this tool; new ones write <Surface> in the reply (replies.ts).
     case "render_surface": {
       const { id: given, ...spec } = a;
-      const v = validateSurface(spec);
-      if (!v.ok) return say(`VALIDATION_FAILED. Fix these and call render_surface again:\n${v.errors.join("\n")}`, false);
-      // With an id, the member's own surface changes in place: its card redraws where it first appeared, and a kept
-      // dashboard stays kept. Without one, a new surface.
-      const prev = given ? one<{ id: string; saved: number }>("SELECT id, saved FROM surfaces WHERE id=? AND bot_id=?", String(given), b.id) : null;
-      if (given && !prev) return say(`No surface ${given} of yours to update; omit id to make a new one.`, false);
-      const id = prev?.id || uid("sf");
-      if (prev) run("UPDATE surfaces SET title=?, spec=? WHERE id=?", spec.title, JSON.stringify(spec), id);
-      else run("INSERT INTO surfaces(id,thread_id,bot_id,title,spec,created_at) VALUES(?,?,?,?,?,?)", id, threadId, b.id, spec.title, JSON.stringify(spec), now());
-      const shown = await resolveSurface({ id, title: spec.title, spec, saved: prev?.saved ?? 0 }, b.id);
-      addEvent(threadId, active.get(threadId)?.turnId, "surface", { id, title: spec.title, ...(prev ? { updated: true } : {}) }, { surface: shown });
+      const r = saveSurface(b.id, threadId, active.get(threadId)?.turnId, given, spec);
+      if (!r.ok) return say(`VALIDATION_FAILED. Fix these and call render_surface again:\n${r.errors.join("\n")}`, false);
       // A bound surface reports each query's outcome, so a bad column or an empty result gets fixed now, not seen later.
+      const shown = await resolveSurface({ id: r.id, title: spec.title, spec, saved: r.saved }, b.id);
       const errs = shown.data?.errors || [];
-      const checks = spec.queries ? `\nQueries against ${spec.source}: ${errs.length ? `${errs.length} failed:\n${errs.join("\n")}` : "all ran."}` : "";
-      return say(`${prev ? "Updated" : "Rendered"} surface ${id} for the driver.${checks}${v.actions!.length ? ` Its actions (${v.actions!.join(", ")}) will come back to you as a message.` : ""}`);
+      const checks = spec.queries ? `\nQueries${spec.source ? ` against ${spec.source}` : ""}: ${errs.length ? `${errs.length} failed:\n${errs.join("\n")}` : "all ran."}` : "";
+      return say(`${r.updated ? "Updated" : "Rendered"} surface ${r.id} for the driver.${checks}${r.actions.length ? ` Its actions (${r.actions.join(", ")}) will come back to you as a message.` : ""}`);
     }
     case "share_screenshot": {
       const caption = String(a.caption || "").trim().slice(0, 300);

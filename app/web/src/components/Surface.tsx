@@ -1,15 +1,17 @@
 // Renders a validated surface spec (generative UI) with Pitcrew components. Text renders as text only; colours are hue
 // tokens only. Specs are dynamic JSON from the crew, hence `any` for nodes.
-import { createContext, useContext, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Component, createContext, useContext, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { Surface as SurfaceRow } from "../../../shared/types";
+import { controlDefaults, whenHolds } from "../../../shared/pui";
 import { api } from "../lib/api";
 import { ago } from "../lib/format";
 import { toast } from "../lib/toast";
 import { HUES } from "./ui";
 
 type Values = Record<string, unknown>;
-interface Ctx { onAction: (action: string, values: Values) => Promise<void> | void; locked: boolean }
-const SurfaceCtx = createContext<Ctx>({ onAction: () => {}, locked: false });
+type State = Record<string, string | number | boolean>;
+interface Ctx { onAction: (action: string, values: Values) => Promise<void> | void; locked: boolean; state: State; setControl: (name: string, v: string | number | boolean) => void }
+const SurfaceCtx = createContext<Ctx>({ onAction: () => {}, locked: false, state: {}, setControl: () => {} });
 
 const hueVar = (hue?: string | null, i = 0) => `var(--${hue && (HUES as readonly string[]).includes(hue) ? hue : HUES[i % HUES.length]})`;
 const inr = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
@@ -27,24 +29,36 @@ const isNum = (f?: string) => ["number", "money", "percent"].includes(f || "");
 const hue = (h: string) => ({ "--hue": h }) as CSSProperties;
 
 /** `extra` sits in the header (Keep in Library, or a link back); `lockOnAction` disables the inputs once one is sent.
- *  An action goes to the crew as a message on the surface's thread. */
-export function Surface({ s: given, extra, lockOnAction = false }: { s: SurfaceRow; extra?: ReactNode; lockOnAction?: boolean }) {
+ *  An action goes to the crew as a message on the surface's thread. `live` is a surface still streaming in a reply:
+ *  drawn, but nothing is sent or fetched yet. Controls change `state`; a surface with queries re-runs them for it. */
+export function Surface({ s: given, extra, lockOnAction = false, live = false }: { s: SurfaceRow; extra?: ReactNode; lockOnAction?: boolean; live?: boolean }) {
   const [locked, setLocked] = useState(false);
-  // A bound dashboard re-reads its ledger on refresh; the server runs the queries (cached per ledger version).
+  // What the driver changed; every other control sits at its default (a live surface gains controls as it streams).
+  const [changed, setChanged] = useState<State>({});
+  // A bound dashboard re-reads its ledger on refresh; the server runs the queries (cached per ledger version and state).
   const [fresh, setFresh] = useState<SurfaceRow | null>(null);
   const s = fresh && fresh.id === given.id ? fresh : given;
-  const refresh = async () => setFresh(await api.get<SurfaceRow>(`/api/surfaces/${s.id}`));
+  const state: State = { ...controlDefaults(s.spec?.root), ...changed };
+  const timer = useRef(0);
+  const load = async (st: State) => setFresh(await api.get<SurfaceRow>(`/api/surfaces/${s.id}?state=${encodeURIComponent(JSON.stringify(st))}`));
+  const setControl = (name: string, v: string | number | boolean) => {
+    const next = { ...state, [name]: v };
+    setChanged((c) => ({ ...c, [name]: v }));
+    // Sliders fire per pixel: the queries run once the hand stops (150 ms).
+    if (s.data && !live) { clearTimeout(timer.current); timer.current = window.setTimeout(() => load(next).catch(() => {}), 150); }
+  };
   const act = async (action: string, values: Values) => {
+    if (live) return;
     await api.post(`/api/surfaces/${s.id}/action`, { action, values }); toast("Sent to the crew");
     if (lockOnAction) setLocked(true);
   };
   return (
-    <SurfaceCtx.Provider value={{ onAction: act, locked }}>
+    <SurfaceCtx.Provider value={{ onAction: act, locked: locked || live, state, setControl }}>
       <div className="surface">
-        <div className="head"><span className="pc-lab">{s.data ? "Dashboard" : "Surface"}</span><b className="pc-h3">{s.spec?.title}</b>{extra}</div>
-        {s.data && <p className="small faint row" style={{ gap: 8 }}>
+        <div className="head"><span className="pc-lab">{s.data?.source ? "Dashboard" : "Surface"}</span><b className="pc-h3">{s.spec?.title}</b>{extra}</div>
+        {s.data?.source && <p className="small faint row" style={{ gap: 8 }}>
           <span title={s.data.source}>{s.data.asOf ? `Data as of ${ago(s.data.asOf)}` : "Ledger not found"}</span>
-          <button className="small faint" onClick={refresh}>Refresh</button>
+          <button className="small faint" onClick={() => load(state)}>Refresh</button>
         </p>}
         <Node n={s.spec?.root} />
       </div>
@@ -52,10 +66,21 @@ export function Surface({ s: given, extra, lockOnAction = false }: { s: SurfaceR
   );
 }
 
+/** A surface that throws (a half-written spec in a live reply) draws one faint line instead of taking the thread down. */
+export class SurfaceBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() { return this.state.failed ? <p className="small faint" style={{ marginLeft: 40 }}>This surface couldn't be drawn.</p> : this.props.children; }
+}
+
 function Kids({ n }: { n: any }) { return <>{(n.children || []).map((c: any, i: number) => <Node key={i} n={c} />)}</>; }
 
 function Node({ n }: { n: any }): ReactNode {
+  const { state } = useContext(SurfaceCtx);
   if (!n) return null;
+  if (n.when !== undefined && !whenHolds(n.when, state)) return null;
+  // Still bound: a live reply's surface before the server has run its queries.
+  if (n.bind !== undefined) return <p className="small faint">{n.title || n.label ? `${n.title || n.label} · ` : ""}loading…</p>;
   switch (n.type) {
     case "Section": return <section className="col">{n.title && <h4 className="pc-h3">{n.title}</h4>}<Kids n={n} /></section>;
     case "Stack": return <div className={`sf-stack ${n.direction === "row" ? "row" : ""}`} style={{ gap: ({ s: 8, m: 12, l: 20 } as Record<string, number>)[n.gap] || 12 }}><Kids n={n} /></div>;
@@ -80,6 +105,7 @@ function Node({ n }: { n: any }): ReactNode {
     case "Sparkline": return <Sparkline n={n} />;
     case "Compare": return <div className="scrollx"><table className="tbl"><thead><tr><th />{n.columns.map((c: string, i: number) => <th key={i}>{c}</th>)}</tr></thead>
       <tbody>{n.rows.map((r: any, i: number) => <tr key={i}><td className="muted">{r.label}</td>{r.values.map((v: any, j: number) => <td key={j} className={r.winner === j ? "sf-win" : ""}>{v}</td>)}</tr>)}</tbody></table></div>;
+    case "Picker": case "Tabs": case "Slider": case "Switch": return <Control n={n} />;
     case "Form": return <Form n={n} />;
     case "Choice": return <Choice n={n} />;
     default: return <p className="badc small">Unknown component {String(n.type)}</p>;
@@ -147,6 +173,20 @@ function Sparkline({ n }: { n: any }) {
   const v: number[] = n.values, lo = Math.min(...v), hi = Math.max(...v), W = 160, H = 36;
   const d = v.map((y, i) => `${i ? "L" : "M"}${((i / Math.max(1, v.length - 1)) * W).toFixed(1)},${(H - 3 - ((y - lo) / (hi - lo || 1)) * (H - 6)).toFixed(1)}`).join(" ");
   return <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}><path d={d} fill="none" stroke={hueVar(n.hue)} strokeWidth={2} /></svg>;
+}
+
+// The driver's controls: plain inputs in the app's own styles; the value lives in the surface's state.
+function Control({ n }: { n: any }) {
+  const { state, setControl } = useContext(SurfaceCtx);
+  const id = useId(), v = state[n.name];
+  if (n.type === "Tabs") return <div className="seg" role="tablist" aria-label={n.label}>{(n.options || []).map((o: any) =>
+    <button key={o.value} type="button" role="tab" aria-selected={v === o.value} className={v === o.value ? "on" : ""} onClick={() => setControl(n.name, o.value)}>{o.label}</button>)}</div>;
+  if (n.type === "Switch") return <label className="row" style={{ gap: 8 }}><input type="checkbox" checked={v === true} onChange={(e) => setControl(n.name, e.target.checked)} />{n.label}</label>;
+  if (n.type === "Slider") return (
+    <div className="field"><label htmlFor={id} className="spread"><span>{n.label}</span><span className="num faint">{`${fmt(Number(v), "number")}${n.unit ? ` ${n.unit}` : ""}`}</span></label>
+      <input id={id} type="range" min={n.min} max={n.max} step={n.step ?? 1} value={Number(v)} onChange={(e) => setControl(n.name, Number(e.target.value))} /></div>);
+  return <div className="field">{n.label && <label htmlFor={id}>{n.label}</label>}
+    <select id={id} value={String(v ?? "")} onChange={(e) => setControl(n.name, e.target.value)}>{(n.options || []).map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></div>;
 }
 
 const FIELDS = ["TextField", "Number", "Money", "Date", "Select", "Radio", "Checkbox", "Toggle"];

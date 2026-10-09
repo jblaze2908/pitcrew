@@ -1,7 +1,6 @@
 // The tools a crew member's brain is offered at thread start: browser and pixel tools from the computer image's manifest
 // (descriptions shortened, since every turn pays for them), then Pitcrew's own. Detail belongs in harness_help (manual.ts).
 import { DEFAULT_IMAGE_MODEL } from "./images.js";
-import { CATALOGUE } from "./surfaces.js";
 import { HELP_TOPICS } from "./manual.js";
 import { HUES, SHAPES, ENGRAM_SCOPES, plansOn } from "./crew.js";
 import type { Bot } from "../shared/types.js";
@@ -66,8 +65,6 @@ export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { br
     ...manifest.computer.filter((x) => !HIDDEN.has(`computer_${x.name}`)).map((x) => ({ type: "function", name: `computer_${x.name}`, description: `${x.description || x.name} (${x.name === "screenshot" ? `pixel control of the computer's screen. ${SHOT_HINT}` : PIXEL})`, inputSchema: x.inputSchema || { type: "object", properties: {} } })),
   ];
   const tools: Record<string, any>[] = [...runtime,
-    { type: "function", name: "render_surface", description: `Show the driver a visual surface: tables, charts, comparisons, dashboards or forms. Pass {title, root}, root a component tree ({type, ...props, children?}); hue tokens only. Components: ${Object.keys(CATALOGUE).join(", ")}; their props and bound dashboards (source + queries + bind) are in harness_help("dashboards"). Validation errors name what's wrong.`,
-      inputSchema: { type: "object", properties: { id: { type: "string", description: "Update this surface of yours in place instead of making a new one." }, title: { type: "string" }, root: { type: "object" }, source: { type: "string", description: "SQLite ledger under /bot/work that bind queries read." }, queries: { type: "object", description: "name → one read-only SELECT against source." } }, required: ["title", "root"] } },
     { type: "function", name: "share_screenshot", description: "Post a screenshot into this chat for the driver, with a one-line caption. source: browser (the current page, default) or screen (the whole desktop). For one element, pass element and ref from the latest snapshot.",
       inputSchema: { type: "object", properties: { caption: { type: "string" }, source: { type: "string", enum: ["browser", "screen"] }, full_page: { type: "boolean" }, element: { type: "string" }, ref: { type: "string" } }, required: ["caption"] } },
     { type: "function", name: "remember", description: "Save one self-contained sentence. scope picks where: session = this thread only (decisions, what's pending; survives a restart); agent (default) = your own memory, yours alone, saved at once, capped at 3,000 chars so rewrite (pass id) rather than pile up: how your job works, site quirks, where things are; global = a fact about the driver for the whole crew (a preference, a rule, a stable detail), which waits for their review in Engram. Never put paths, files or task state in global.",

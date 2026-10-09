@@ -244,8 +244,9 @@ export interface PublishedArtifact {
 export interface ArtifactFilter { q?: string; member?: string; status?: "public" | "waiting" | "private"; kind?: "page" | "pdf" | "image" | "other"; imported?: "1"; cursor?: string; limit?: number }
 /** counts cover every member and filter: total (published from threads), waiting (a public link waits for you), imported. */
 export interface PublishedPage { items: PublishedArtifact[]; next: string | null; counts: { total: number; waiting: number; imported: number } }
-/** data: set for a dashboard bound to a ledger (ledger.ts): its file, when it last changed, and any query that failed. */
-export interface Surface { id: string; title: string; spec: any; saved?: number; data?: { source: string; asOf: number | null; errors: string[] } }
+/** data: set for a surface with queries (ledger.ts): its ledger (null for in-memory arithmetic), when it last changed,
+ *  and any query that failed. */
+export interface Surface { id: string; title: string; spec: any; saved?: number; data?: { source: string | null; asOf: number | null; errors: string[] } }
 export interface KeptSurface extends Surface { thread_id: string; bot_id: string; bot_name: string; hue: Hue; created_at: number }
 
 /** Server-sent events on /api/stream. The thread-only kinds (event, delta, activity, context, queue) arrive only with ?thread=. */

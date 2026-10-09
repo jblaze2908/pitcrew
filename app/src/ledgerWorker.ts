@@ -3,17 +3,17 @@
 import { parentPort, workerData } from "node:worker_threads";
 import { DatabaseSync } from "node:sqlite";
 
-interface Job { path: string; queries: { name: string; sql: string }[]; maxRows: number }
+interface Job { path: string; queries: { name: string; sql: string; params?: Record<string, string | number | null> }[]; maxRows: number }
 const { path, queries, maxRows } = workerData as Job;
 const out: Record<string, { columns: string[]; rows: Record<string, unknown>[]; truncated: boolean } | { error: string }> = {};
 let db: DatabaseSync | null = null;
 try {
-  db = new DatabaseSync(path, { readOnly: true });
+  db = new DatabaseSync(path, { readOnly: path !== ":memory:" });
   for (const q of queries) {
     try {
       const rows: Record<string, unknown>[] = [];
       let truncated = false;
-      for (const r of db.prepare(q.sql).iterate() as Iterable<Record<string, unknown>>) {
+      for (const r of db.prepare(q.sql).iterate(q.params || {}) as Iterable<Record<string, unknown>>) {
         if (rows.length >= maxRows) { truncated = true; break; }
         rows.push({ ...r });
       }

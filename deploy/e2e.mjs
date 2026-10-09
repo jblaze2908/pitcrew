@@ -103,7 +103,7 @@ try {
   }
   if (only === "browser") throw Object.assign(new Error("done"), { done: true });
   // 2. Generative UI: a surface with a comparison, a chart and a form; the form round-trips.
-  const r2 = await runAndWait(th, "Call render_surface to show me three made-up electricity plans (Basic, Saver, Green) side by side with a Compare table, a BarChart of monthly cost in rupees, and a Form (action 'meter') asking for my meter number. Then just say 'shown'.");
+  const r2 = await runAndWait(th, "Show me, as a surface in your reply, three made-up electricity plans (Basic, Saver, Green) side by side with a Compare table, a BarChart of monthly cost in rupees, a Slider for my monthly units, and a Form (action 'meter') asking for my meter number. Then say 'shown'.");
   const sf = r2.evs.find((e) => e.kind === "surface");
   const surface = sf && r2.view.surfaces.find((s) => s.id === sf.data.id);
   const types = new Set(); const walk = (n) => { if (!n) return; types.add(n.type); (n.children || []).forEach(walk); }; walk(surface?.spec?.root);
