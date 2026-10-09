@@ -29,6 +29,9 @@ export function providerStatus() {
 // Claude Code is a worker, not a model provider: members hand it tasks (runtime/claude.ts). Its login is written by
 // deploy/claude-login.sh and only stat'ed here: on every thread's tool-list build and on Settings → Models.
 export const claudeDir = () => `${ROOT}/claude`;
+// All four answered on the driver's plan in Claude Code 2.1.287, at low and at max effort (checked 2026-10-09).
+export const CLAUDE_MODELS = [{ id: "claude-fable-5-1", label: "Fable 5.1" }, { id: "claude-opus-5-5", label: "Opus 5.5" }, { id: "claude-sonnet-5-5", label: "Sonnet 5.5" }, { id: "claude-haiku-5-5", label: "Haiku 5.5" }];
+export const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 export function claudeStatus() {
   try { return { connected: true, updatedAt: statSync(`${claudeDir()}/.credentials.json`).mtimeMs }; } catch { return { connected: false, updatedAt: null as number | null }; }
 }

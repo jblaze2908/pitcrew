@@ -127,6 +127,7 @@ const PAGES = (driver: string): Record<string, string> => ({
     `Claude Code: a coding agent on ${driver}'s Claude plan. delegate_to_claude_code(task) runs it in your /bot/work, in its own container.`,
     "- Use it for code: building or changing an app or script, fixing failing tests, refactors. Not for browsing, shopping or messages.",
     "- The task must stand alone: the folder, what to change, how to check it (the test command). It can't see this thread or your memory.",
+    `- ${driver} picks the model and effort in a pit stop before it starts; your model, effort and why are the one-tap default. Recommend by size: claude-haiku-5-5 + low for a mechanical edit (rename, a config value, a typo); claude-sonnet-5-5 + medium for a usual feature or fix in a few files with tests to check (the default); claude-opus-5-5 + high for multi-file changes, unclear bugs, refactors or a new app; claude-fable-5-1 or xhigh/max only when ${driver} asks or an Opus/high run fell short. why names the size: \"one module and a button; tests exist\".`,
     `- Its file edits in /bot/work just happen; its commands pass your safety check, so risky ones wait for ${driver}. Its questions go to ${driver} as a pit stop; unanswered after 30 minutes, it picks itself.`,
     "- One run at a time across the crew. Up to 10 minutes you get its summary as the tool result; longer, it arrives later as a \"[Claude Code finished]\" message.",
     "- Read its summary, then check the work yourself (run the tests, look at the diff) before you call the task done. Its summary isn't proof.",

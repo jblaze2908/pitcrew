@@ -150,7 +150,7 @@ export interface Ask {
 // ---------- delegation and plans ----------
 /** A Claude Code run a member started (runtime/claude.ts); the newest "claude" event for an id is the card. */
 export interface ClaudeCard {
-  id: string; task: string; status: "queued" | "working" | "asking" | "done" | "failed" | "stopped";
+  id: string; task: string; model: string; effort: string; status: "queued" | "working" | "asking" | "done" | "failed" | "stopped";
   /** The last three step sentences; reads only count. */
   steps: string[]; read: number; edited: string[]; commands: number; questions: number;
   answer?: string; error?: string; startedAt: number; endedAt?: number;

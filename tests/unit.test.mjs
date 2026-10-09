@@ -2408,3 +2408,12 @@ test("package-lock resolves only from the public npm registry", () => {
   const hosts = new Set([...lock.matchAll(/"resolved": "https:\/\/([^/"]+)/g)].map((m) => m[1]));
   assert.deepEqual([...hosts], ["registry.npmjs.org"]);
 });
+
+test("Claude Code: the member must recommend a model and effort from the offered lists", async () => {
+  const { dynamicTools } = await import("../app/dist/src/crewTools.js");
+  const { CLAUDE_MODELS, CLAUDE_EFFORTS } = await import("../app/dist/src/providers.js");
+  const t = dynamicTools({ kind: "member" }, undefined, { claude: true }).find((x) => x.name === "delegate_to_claude_code");
+  assert.deepEqual(t.inputSchema.required, ["task", "model", "effort", "why"]);
+  assert.deepEqual(t.inputSchema.properties.model.enum, CLAUDE_MODELS.map((m) => m.id));
+  assert.deepEqual(t.inputSchema.properties.effort.enum, [...CLAUDE_EFFORTS]);
+});

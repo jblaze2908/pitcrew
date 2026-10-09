@@ -8,7 +8,8 @@ import { PUBLIC_URL } from "./util.js";
 import { getSecret, putSecret, deleteSecret, macKey, httpErr } from "../auth.js";
 import type { PitstopRow } from "../models.js";
 
-const PHONE_APPROVES = new Set(["command", "mcp", "file", "site", "secret", "mail"]);
+// claude_run: Approve from the phone starts Claude Code with the member's recommended model and effort.
+const PHONE_APPROVES = new Set(["command", "mcp", "file", "site", "secret", "mail", "claude_run"]);
 const NEVER_FROM_PHONE = new Set(["pay"]);
 const PRESENT_MS = 90000;
 let seenAt = 0;
