@@ -106,7 +106,7 @@ export const EXPIRED_NOTE = (title: string) => `Not done yet: the pit stop for "
 // The driver's last three messages in this thread (600 chars each, oldest first) and the member's house rules (20 lines).
 // One indexed query, only for calls the rules leave to jev.
 // Pitcrew's own notes ride as user messages; they aren't the driver's words ("Don't redo steps…" read as a prohibition).
-const NOT_DRIVER = new Set(["retro", "resume", "teach"]);
+const NOT_DRIVER = new Set(["retro", "resume", "teach", "claude"]);
 export function jevContext(threadId: string | null, houseRules = ""): JevContext {
   const said = threadId ? all<{ data: string }>("SELECT data FROM events WHERE thread_id=? AND kind='user' ORDER BY id DESC LIMIT 12", threadId).map((e) => json(e.data, {}) as { text?: string; via?: string })
     .filter((d) => !NOT_DRIVER.has(String(d.via))).slice(0, 3).map((d) => String(d.text || "").trim().slice(0, 600)).filter(Boolean).reverse() : [];

@@ -10,12 +10,14 @@ import { decide } from "./pitstops.js";
 import { tickSchedules, scheduleRunsCut, backfillScheduleTitles } from "./schedules.js";
 import { backfillTitles } from "./titles.js";
 import { startBalanceWatch } from "./balance.js";
+import { stopClaude, settleClaudeCards } from "./claude.js";
 
 export async function killSwitch() {
   setSetting("paused", "1");
   const inFlight = [...active.keys()].map((t) => ({ threadId: t, title: getThread(t)?.title }));
   // Hires, Engram proposals and done-checks hold no running work; the kill switch leaves them for the driver.
   for (const ps of all<{ id: string }>("SELECT id FROM pitstops WHERE status='pending' AND kind NOT IN ('hire','engram','check')")) await decide(ps.id, "deny", { note: "Kill switch" });
+  stopClaude();
   await Promise.all([...active.keys()].map((t) => interrupt(t)));
   await Promise.all([...allComputers().map((c) => c.stop()), ...allBrains().map((x) => x.stop())]);
   audit("driver", "killswitch", { inFlight });
@@ -30,6 +32,7 @@ export function bootRuntime() {
   // decision is applied in decide(), not by a waiting request, and a vault "update it" reminder waits on nothing, so both stay.
   for (const ps of all<{ id: string }>("SELECT id,thread_id FROM pitstops WHERE status='pending' AND kind NOT IN ('hire','engram','check','vault')")) run("UPDATE pitstops SET status='expired', note='Control plane restarted', decided_at=? WHERE id=?", now(), ps.id);
   const cut = settleCutTurns();
+  settleClaudeCards();
   run("UPDATE threads SET status='idle' WHERE status!='idle'"); // also clears pre-v1.2 'done'/'failed' thread states
   // Name threads left untitled (from before naming existed, or still on small talk) from their first real message.
   for (const t of all<{ id: string }>("SELECT id FROM threads WHERE title=?", UNTITLED)) {

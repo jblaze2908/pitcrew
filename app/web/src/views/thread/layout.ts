@@ -6,8 +6,8 @@ import { renderEvent, type EventCtx } from "./Events";
 
 export type Item = { key: string; el: ReactNode } | { key: string; steps: ThreadEvent[] } | { key: string; rewound: ThreadEvent[] };
 
-/** One run's tool calls and decided pit stops share a Steps group (a pending pit stop breaks it); a plan, delegation or
- *  surface draws once where it first appeared; rewound events fold into one item (inner: that fold's own contents). */
+/** One run's tool calls and decided pit stops share a Steps group (a pending pit stop breaks it); a plan, delegation,
+ *  Claude Code run or surface draws once where it first appeared; rewound events fold into one item (inner: that fold's own contents). */
 export function layout(events: ThreadEvent[], ctx: EventCtx, inner = false): Item[] {
   const items: Item[] = [];
   const drawn = new Set<string>();
@@ -33,12 +33,12 @@ export function layout(events: ThreadEvent[], ctx: EventCtx, inner = false): Ite
       return;
     }
     // A surface updated in place (render_surface with its id) draws where it first appeared, with its newest spec.
-    if ((e.kind === "plan" || e.kind === "delegation" || e.kind === "surface") && drawn.has(e.data.id)) return;
+    if ((e.kind === "plan" || e.kind === "delegation" || e.kind === "claude" || e.kind === "surface") && drawn.has(e.data.id)) return;
     const c = e.kind === "agent" && lastAgent ? { ...ctx, cont: true } : i < lastUser ? { ...ctx, onContinue: undefined } : ctx;
     const el = renderEvent(e, c);
     if (el == null) return;
     lastAgent = e.kind === "agent";
-    if (e.kind === "plan" || e.kind === "delegation" || e.kind === "surface") drawn.add(e.data.id);
+    if (e.kind === "plan" || e.kind === "delegation" || e.kind === "claude" || e.kind === "surface") drawn.add(e.data.id);
     group = null;
     items.push({ key: `e${e.id}`, el });
   });

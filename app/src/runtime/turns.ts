@@ -5,7 +5,7 @@ import { one, all, run, now, uid, json, getSetting, marks, driverName } from "..
 import { getBot, instructions, engramBlock } from "../crew.js";
 import { dynamicTools } from "../crewTools.js";
 import { botDir, toolManifest } from "../computer.js";
-import { providerReady, estimateCost } from "../providers.js";
+import { providerReady, estimateCost, claudeStatus } from "../providers.js";
 import { snapshot, changes, pruneShadow } from "../snapshot.js";
 import { doneCheck } from "./donecheck.js";
 import { bus, activityNow, setToolKind } from "./bus.js";
@@ -155,7 +155,7 @@ export async function startTurn(threadId: string, text: string, attachments: str
     if (!c.up) await ensureMemberToken(b);
     await c.ensure();
     let codexId = t.codex_id;
-    const tools = dynamicTools(b, await toolManifest(), { engram: memberLinked(b), images: providerReady("openrouter") }), sig = toolsSig(tools);
+    const tools = dynamicTools(b, await toolManifest(), { engram: memberLinked(b), images: providerReady("openrouter"), claude: claudeStatus().connected }), sig = toolsSig(tools);
     // Dynamic tools are fixed at thread/start: resume and fork keep the old set (codex 0.156.1; their params have no
     // dynamicTools). When the set changed since this Codex thread started, start a new one and carry a recap over.
     if (codexId && t.tools_sig !== sig) {

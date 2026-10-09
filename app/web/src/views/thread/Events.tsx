@@ -1,7 +1,8 @@
 // One transcript event as an element. layout.ts decides which events draw and groups tool calls into Steps.
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { editOf, type EditAsk } from "../../../../shared/edits";
-import type { Bot, DelegationCard as Deleg, PitStop, PlanSnapshot, ThreadEvent } from "../../../../shared/types";
+import type { Bot, ClaudeCard as CCard, DelegationCard as Deleg, PitStop, PlanSnapshot, ThreadEvent } from "../../../../shared/types";
+import { ClaudeCard } from "../../components/ClaudeCard";
 import { DelegationCard } from "../../components/DelegationCard";
 import { PitCard } from "../../components/PitCard";
 import { PlanCard, PlanChip } from "../../components/PlanCard";
@@ -15,7 +16,7 @@ import { Tool } from "./Steps";
 
 function UserMsg({ e, botId, fromName, images, onView }: { e: ThreadEvent; botId: string; fromName: string; images?: ImageIndex; onView?: (im: Img) => void }) {
   const d = e.data;
-  const via = d.via === "schedule" ? "Scheduled" : d.via === "delegation" ? `${fromName} asks` : d.via === "plan" ? "Plan step" : d.via === "resume" ? "Picked up again" : null;
+  const via = d.via === "schedule" ? "Scheduled" : d.via === "delegation" ? `${fromName} asks` : d.via === "plan" ? "Plan step" : d.via === "resume" ? "Picked up again" : d.via === "claude" ? "From Claude Code" : null;
   const ed = editOf(d.text), loose = (p: string): Img => ({ id: `a:${p}`, path: p, parentId: null, botId, caption: "", at: e.ts });
   const atts = ((d.attachments || []) as string[]).filter((p) => p !== ed?.marked);
   return (
@@ -139,6 +140,7 @@ export function renderEvent(e: ThreadEvent, c: EventCtx): ReactNode {
     case "changes": return null;
     case "learned": return <LearnedNotes d={d} />;
     case "delegation": return <DelegationCard d={(c.latest.get(d.id) || d) as Deleg} />;
+    case "claude": return <ClaudeCard c={(c.latest.get(d.id) || d) as CCard} />;
     case "plan": { const P = (c.latest.get(d.id) || d) as PlanSnapshot; return c.onPlan ? <PlanChip P={P} onOpen={c.onPlan} /> : <PlanCard P={P} />; }
     case "pitstop": { const p = c.pits[d.id]; return p ? <div style={{ marginLeft: 40, maxWidth: 760 }}><PitCard p={p} /></div> : null; }
     case "surface": return c.surface(d.id);

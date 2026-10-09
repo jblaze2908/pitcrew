@@ -112,7 +112,7 @@ export interface Thread {
   autonomy: string;
 }
 
-export type EventKind = "user" | "agent" | "tool" | "system" | "error" | "shot" | "image" | "changes" | "pitstop" | "surface" | "delegation" | "plan" | "learned" | "check";
+export type EventKind = "user" | "agent" | "tool" | "system" | "error" | "shot" | "image" | "changes" | "pitstop" | "surface" | "delegation" | "plan" | "learned" | "check" | "claude";
 /** rewound: when a rewind took this event out of the member's conversation (still drawn, under "Rewound"). */
 export interface ThreadEvent<D = Record<string, any>> { id: number; thread_id: string; turn_id: string | null; kind: EventKind; data: D; ts: number; rewound?: number | null }
 /** A member's done criterion (set_done_criteria): check is a read-only shell command, expect what its output must show. */
@@ -148,6 +148,13 @@ export interface Ask {
 }
 
 // ---------- delegation and plans ----------
+/** A Claude Code run a member started (runtime/claude.ts); the newest "claude" event for an id is the card. */
+export interface ClaudeCard {
+  id: string; task: string; status: "queued" | "working" | "asking" | "done" | "failed" | "stopped";
+  /** The last three step sentences; reads only count. */
+  steps: string[]; read: number; edited: string[]; commands: number; questions: number;
+  answer?: string; error?: string; startedAt: number; endedAt?: number;
+}
 export interface DelegationCard { id: string; toBot: string; toName: string; toThread: string; question: string; status: "asking" | "answered" | "failed"; answer?: string; cost?: number }
 
 export type PlanStatus = "running" | "done" | "stopped";

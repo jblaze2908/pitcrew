@@ -58,7 +58,7 @@ const BROWSER_FILL_SECRET = { type: "function", name: "browser_fill_secret", des
   inputSchema: { type: "object", properties: { secret: { type: "string", description: "The secret's name, e.g. BESCOM login" },
     fields: { type: "array", items: { type: "object", properties: { field: { type: "string", enum: ["username", "password", "totp", "card_number", "card_expiry", "card_cvc", "card_name"] }, target: { type: "string", description: "Ref of that box from the latest snapshot" } }, required: ["field", "target"] } },
     submit: { type: "string", description: "Ref of the sign-in or pay button; omit to press Enter (logins only)" } }, required: ["secret", "fields"] } };
-export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { browser: [], computer: [] }, { engram = false, images = false } = {}) {
+export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { browser: [], computer: [] }, { engram = false, images = false, claude = false } = {}) {
   const runtime = [
     ...manifest.browser.filter((x) => !HIDDEN.has(x.name)).map(browserTool),
     ...(manifest.browser.some((x) => x.name === "browser_snapshot") ? [BROWSER_READ] : []),
@@ -122,6 +122,10 @@ export function dynamicTools(b: Pick<Bot, "kind">, manifest: ToolManifest = { br
       cancel: { type: "array", items: { type: "string" } },
       finish: { type: "object", properties: { answer: { type: "string" }, constraints: { type: "array", items: { type: "object", properties: { text: { type: "string" }, status: { type: "string", enum: ["met", "unmet", "untested"] }, note: { type: "string" } }, required: ["text", "status"] } } }, required: ["answer", "constraints"] },
     } } });
+  // Only once the driver signed Claude Code in on the server (runtime/claude.ts).
+  if (claude) tools.push({ type: "function", name: "delegate_to_claude_code",
+    description: "Hand a coding task in /bot/work to Claude Code, on the driver's Claude plan. It edits files and runs commands there; its commands pass your safety check and its questions go to the driver. Waits up to 10 minutes, then reports back as a message. harness_help claude_code.",
+    inputSchema: { type: "object", properties: { task: { type: "string", description: "Self-contained: the folder, what to change, how to check it. Claude Code can't see this thread." } }, required: ["task"] } });
   if (b.kind === "chief") tools.push({ type: "function", name: "ask_crew_member",
     description: "Ask another crew member a question, or give them a task in their job, and wait up to 10 minutes for their answer. They work in their own thread with their own memory, logins, computer, cap and permissions; any pit stop they hit still goes to the driver.",
     inputSchema: { type: "object", properties: { member: { type: "string", description: "The member's name" }, question: { type: "string", description: "Self-contained: they can't see this thread. Say what you need back." } }, required: ["member", "question"] } });

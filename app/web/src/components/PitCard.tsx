@@ -62,7 +62,8 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
     : p.kind === "member" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p>{(d.diff || []).map((x: { field: string; before: string; after: string }) => <div key={x.field}><b className="small">{x.field}</b><pre>{`${x.before || "(empty)"}\n→ ${x.after || "(empty)"}`}</pre></div>)}</div>
     : p.kind === "files" ? <div className="col" style={{ gap: 4 }}><p className="small muted">{d.why}</p><pre>{(d.paths || []).map((x: { path: string; dir: boolean; size: number }) => `${x.path}${x.dir ? "/ (folder and everything in it)" : ` · ${kb(x.size)}`}`).join("\n")}</pre></div>
     : p.kind === "check" ? <CheckSummary d={d} who={who} />
-    : p.kind === "teach" ? <TeachSummary d={d} who={who} /> : null;
+    : p.kind === "teach" ? <TeachSummary d={d} who={who} />
+    : p.kind === "question" ? <QuestionBody p={p} onDecided={(r) => { setP(r); onDone?.(r); }} /> : null;
 
   const outcome = `${p.kind === "engram" && p.note ? p.note : p.status} ${ago(p.decided_at)}`;
   const card = d.secret?.kind === "card";
@@ -119,6 +120,8 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
     {btn("Accept as is", () => decide("approve", "once"), here)}
     {btn("Try again", () => decide("approve", "retry"))}</div>;
   else if (p.kind === "teach") actions = <div className="acts">{btn("Save as skill", () => decide("approve", "once"), true)}{btn("Not now", () => decide("deny"))}</div>;
+  // Claude Code's question carries its own Answer button (QuestionBody).
+  else if (p.kind === "question") actions = null;
   else if (p.kind === "plan") actions = <div className="acts">
     {btn(p.effect === "browse" ? "Allow for this plan" : "Allow", () => decide("approve", "once"), true)}
     {btn(p.effect === "browse" ? "Use what they know" : "Finish with what it has", () => decide("deny"))}
@@ -224,4 +227,39 @@ function TeachSummary({ d, who }: { d: Record<string, any>; who: string }) {
     <p className="small muted">{`${who} heard these steps. Save them and ${who} writes them up as a skill to do this itself next time.`}</p>
     {steps.length > 0 && <details><summary className="small faint">{`${plural(d.n, "step")}${d.full ? " (recording stopped there)" : ""} · typed text not recorded`}</summary><ol className="small">{steps.slice(0, 60).map((s, i) => <li key={i}>{s}</li>)}</ol>{steps.length > 60 && <p className="small faint">{`…and ${steps.length - 60} more`}</p>}</details>}
   </div>;
+}
+
+type Question = { question: string; header?: string; options: { label: string; description?: string }[]; multiSelect?: boolean };
+/** Claude Code's AskUserQuestion: pick per question (or type your own); deciding without answers leaves the choice to it. */
+function QuestionBody({ p, onDecided }: { p: PitStop; onDecided: (r: PitStop) => void }) {
+  const qs = ((p.detail?.questions || []) as Question[]).filter((q) => q?.question);
+  const [picks, setPicks] = useState<Record<string, string[]>>({});
+  const [other, setOther] = useState<Record<string, string>>({});
+  if (p.status !== "pending") {
+    const a = (p.detail?.answers || {}) as Record<string, string>;
+    return Object.keys(a).length ? <div className="col" style={{ gap: 4 }}>{qs.map((q) => a[q.question] && <p key={q.question} className="small"><span className="faint">{`${q.question} `}</span>{a[q.question]}</p>)}</div>
+      : <p className="small faint">Left to Claude Code to decide.</p>;
+  }
+  const toggle = (q: Question, label: string) => setPicks((x) => ({ ...x, [q.question]: q.multiSelect ? (x[q.question]?.includes(label) ? x[q.question].filter((l) => l !== label) : [...(x[q.question] || []), label]) : [label] }));
+  const answers = Object.fromEntries(qs.map((q) => [q.question, [...(picks[q.question] || []), other[q.question]?.trim()].filter(Boolean).join(", ")]).filter(([, v]) => v));
+  const send = async (approve: boolean) => {
+    const r = await api.post<PitStop>(`/api/pitstops/${p.id}/decide`, approve ? { decision: "approve", answers } : { decision: "deny" });
+    toast(approve ? "Answered" : "Left to Claude Code");
+    if (r?.id) onDecided(r);
+  };
+  return (
+    <div className="qs">
+      {qs.map((q) => <div key={q.question} className="q">
+        <p>{q.question}</p>
+        {q.options.map((o) => <button key={o.label} className={`opt${q.multiSelect ? " multi" : ""}${picks[q.question]?.includes(o.label) ? " on" : ""}`} onClick={() => toggle(q, o.label)}>
+          <i /><span>{o.label}{o.description && <small>{o.description}</small>}</span></button>)}
+        <input className="small" placeholder="Something else…" value={other[q.question] || ""} onChange={(e) => setOther((x) => ({ ...x, [q.question]: e.target.value }))} />
+      </div>)}
+      <div className="acts">
+        <button className="pc-pill s" disabled={Object.keys(answers).length < qs.length} onClick={() => send(true)}>Answer</button>
+        <button className="pc-pill o s" onClick={() => send(false)}>Let it decide</button>
+        <span className="small faint" style={{ marginLeft: "auto" }}>Claude Code is paused until you answer</span>
+      </div>
+    </div>
+  );
 }

@@ -14,7 +14,7 @@ import type { LearnedRow, PitstopRow } from "../models.js";
 
 // retry: a done-check pit stop's "Try again" (runtime/donecheck.ts).
 const SCOPES = ["once", "thread", "always", "site", "full", "block", "retry"] as const;
-const Decide = z.object({ decision: pick(["approve"], "deny"), scope: pick(SCOPES, "once"), note: field((v) => v || ""), spec: field((v) => v || null) });
+const Decide = z.object({ decision: pick(["approve"], "deny"), scope: pick(SCOPES, "once"), note: field((v) => v || ""), spec: field((v) => v || null), answers: field((v) => (v && typeof v === "object" && !Array.isArray(v) ? v : null)) });
 const Batch = z.object({ ids: field((v): unknown[] => (v || []).slice(0, 50)), decision: pick(["approve"], "deny") });
 
 // Sites: per-domain policy, global (scope=global) or per crew member (scope=<bot id>).
@@ -29,7 +29,7 @@ export const pitstopRoutes = new Hono<Env>()
     const id = c.req.param("id"), b = await jsonBody(c, Decide), kind = one<{ kind: string }>("SELECT kind FROM pitstops WHERE id=?", id)?.kind;
     // Engram proposals are decided in Engram: approve accepts, deny rejects.
     if (kind === "engram") return c.json(await E.decideProposal(id, b.decision === "approve" ? "accept" : "reject"));
-    const r = pitRow(await R.decide(id, b.decision, { scope: b.scope, note: b.note, spec: b.spec }));
+    const r = pitRow(await R.decide(id, b.decision, { scope: b.scope, note: b.note, spec: b.spec, answers: b.answers }));
     if (kind === "hire" && r?.status === "approved") E.linkMissing().catch(() => {});
     return c.json(r ?? { ok: true });
   })

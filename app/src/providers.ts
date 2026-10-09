@@ -26,6 +26,12 @@ export function providerStatus() {
   }
   return s;
 }
+// Claude Code is a worker, not a model provider: members hand it tasks (runtime/claude.ts). Its login is written by
+// deploy/claude-login.sh and only stat'ed here: on every thread's tool-list build and on Settings → Models.
+export const claudeDir = () => `${ROOT}/claude`;
+export function claudeStatus() {
+  try { return { connected: true, updatedAt: statSync(`${claudeDir()}/.credentials.json`).mtimeMs }; } catch { return { connected: false, updatedAt: null as number | null }; }
+}
 export const providerReady = (p: string) => { const x = known(p); return x?.secret ? !!secretMeta(x.secret) : existsSync(chatgptAuthPath()); };
 
 const lastTest: Partial<Record<string, { ok: boolean; detail: string; at: number }>> = {};

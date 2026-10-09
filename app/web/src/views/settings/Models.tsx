@@ -1,5 +1,6 @@
 // Models: the default service for new members, the write-only keys, and ChatGPT sign-in.
 import { useEffect } from "react";
+import { useFetch } from "../../lib/useFetch";
 import type { ProviderId, ProviderStatus } from "../../../../shared/types";
 import { Loader } from "../../components/ui";
 import { api } from "../../lib/api";
@@ -28,6 +29,7 @@ export function Models({ prov, reload }: { prov: Providers; reload: () => void }
       <Section title="Keys and sign-in">
         {(["openrouter", "aigateway"] as const).map((id) => <KeyRow key={id} id={id} p={prov[id]} reload={reload} />)}
         <ChatGpt p={prov.openai} reload={reload} />
+        <ClaudeCode />
       </Section>
     </>
   );
@@ -74,6 +76,19 @@ function ChatGpt({ p, reload }: { p: ProviderStatus; reload: () => void }) {
         : login.status === "waiting" ? <span className="st-val">Waiting</span>
         : p.connected ? <><span className="st-val">Signed in</span><Menu items={[{ label: "Sign in again", run: start }, { label: "Sign out", danger: true, confirm: "Sign out?", run: async () => { await api.post("/api/providers/openai/signout"); reload(); } }]} /></>
         : <button className="pc-pill o s" onClick={start}>Sign in with ChatGPT</button>}
+    </Row>
+  );
+}
+
+// Signed in on the server only (deploy/claude-login.sh): Pitcrew never handles the Claude login, it just sees that it's there.
+function ClaudeCode() {
+  const { data } = useFetch(() => api.get<{ connected: boolean; updatedAt: number | null }>("/api/claude-code", { quiet: true }), []);
+  if (!data) return null;
+  return (
+    <Row label="Claude Code" help={data.connected ? "Members can hand it coding work in their workspace. Runs count against your Claude plan's limits."
+      : "Sign in once on the server, from your Pitcrew folder. Pitcrew never sees your Claude login; Claude Code keeps it in its own folder."}
+      below={data.connected ? undefined : <pre className="small">sudo bash deploy/claude-login.sh</pre>}>
+      <span className="st-val">{data.connected ? "Signed in" : "Not signed in"}</span>
     </Row>
   );
 }
