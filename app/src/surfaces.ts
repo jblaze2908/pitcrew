@@ -6,7 +6,7 @@ import { CONTROLS } from "../shared/pui.js";
 
 // A prop or field spec: what checkValue accepts for one value.
 type Spec =
-  | { t: "string"; max: number } | { t: "number" } | { t: "boolean" } | { t: "enum"; v: string[] } | { t: "int"; min: number; max: number }
+  | { t: "string"; max: number } | { t: "number" } | { t: "numnull" } | { t: "boolean" } | { t: "enum"; v: string[] } | { t: "int"; min: number; max: number }
   | { t: "name" } | { t: "url" } | { t: "row" } | { t: "array"; of: Spec; max: number } | { t: "object"; props: Record<string, Spec>; req: string[] };
 interface Component { props: Record<string, Spec>; req?: string[]; children?: true | "fields"; field?: true }
 
@@ -16,7 +16,8 @@ const bool: Spec = { t: "boolean" };
 const oneOf = (...v: string[]): Spec => ({ t: "enum", v });
 const arr = (of: Spec, max: number): Spec => ({ t: "array", of, max });
 const obj = (props: Record<string, Spec>, req: string[] = []): Spec => ({ t: "object", props, req });
-const HUE = oneOf("c1", "c2", "c3", "c5", "c6");
+// Chart hues (web Charts.tsx): the palette names, grey, and bad for trouble; c1..c6 are the older names, still drawn.
+const HUE = oneOf("blue", "magenta", "violet", "teal", "amber", "grey", "bad", "c1", "c2", "c3", "c5", "c6");
 const TONE = oneOf("default", "muted", "ok", "bad", "blue", "up", "down", "flat");
 const FORMAT = oneOf("text", "number", "money", "date", "percent");
 const OPTION = obj({ value: str(200), label: str(200) }, ["value", "label"]);
@@ -39,9 +40,10 @@ const CATALOGUE_LITERAL: Record<string, Component> = {
   Table: { props: { columns: arr(obj({ key: { t: "name" }, label: str(120), format: FORMAT }, ["key", "label"]), 12), rows: arr({ t: "row" }, 200) }, req: ["columns", "rows"] },
   List: { props: { items: arr(obj({ title: str(200), detail: str(400), meta: str(80) }, ["title"]), 100) }, req: ["items"] },
   Timeline: { props: { items: arr(obj({ time: str(60), text: str(300), state: oneOf("done", "running", "needs", "failed") }, ["text"]), 100) }, req: ["items"] },
-  BarChart: { props: { title: str(200), unit: str(20), format: FORMAT, hue: HUE, data: arr(obj({ label: str(80), value: num }, ["label", "value"]), 50) }, req: ["data"] },
-  LineChart: { props: { title: str(200), unit: str(20), format: FORMAT, series: arr(obj({ name: str(80), hue: HUE, points: arr(obj({ x: str(40), y: num }, ["x", "y"]), 200) }, ["name", "points"]), 5) }, req: ["series"] },
-  Donut: { props: { title: str(200), format: FORMAT, data: arr(obj({ label: str(80), value: num }, ["label", "value"]), 8) }, req: ["data"] },
+  BarChart: { props: { title: str(200), unit: str(20), format: FORMAT, hue: HUE, data: arr(obj({ label: str(80), value: num, hue: HUE }, ["label", "value"]), 60) }, req: ["data"] },
+  // A point's y may be null: a gap in the line, not a zero.
+  LineChart: { props: { title: str(200), unit: str(20), format: FORMAT, series: arr(obj({ name: str(80), hue: HUE, points: arr(obj({ x: str(40), y: { t: "numnull" } }, ["x", "y"]), 200) }, ["name", "points"]), 5) }, req: ["series"] },
+  Donut: { props: { title: str(200), unit: str(20), format: FORMAT, data: arr(obj({ label: str(80), value: num, hue: HUE }, ["label", "value"]), 8) }, req: ["data"] },
   Sparkline: { props: { values: arr(num, 200), hue: HUE }, req: ["values"] },
   Compare: { props: { columns: arr(str(80), 5), rows: arr(obj({ label: str(120), values: arr(str(200), 5), winner: { t: "int", min: 0, max: 4 } }, ["label", "values"]), 40) }, req: ["columns", "rows"] },
   Form: { props: { action: { t: "name" }, submitLabel: str(40), title: str(200) }, req: ["action"], children: "fields" },
@@ -74,6 +76,7 @@ function checkValue(spec: Spec, v: any, path: string, errs: string[]): void {
     case "string": if (typeof v !== "string") return bad("must be a string"); if (v.length > spec.max) bad(`longer than ${spec.max} chars`);
       if (/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i.test(v) && /colou?r|background|style/i.test(path)) bad("raw colours are not allowed; use a hue token"); return;
     case "number": if (typeof v !== "number" || !Number.isFinite(v)) bad("must be a number"); return;
+    case "numnull": if (v !== null && (typeof v !== "number" || !Number.isFinite(v))) bad("must be a number, or null for a gap"); return;
     case "int": if (!Number.isInteger(v) || v < spec.min || v > spec.max) bad(`must be an integer ${spec.min}–${spec.max}`); return;
     case "boolean": if (typeof v !== "boolean") bad("must be true or false"); return;
     case "enum": if (!spec.v.includes(v)) bad(`must be one of ${spec.v.join(", ")}`); return;

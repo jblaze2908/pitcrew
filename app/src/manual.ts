@@ -18,13 +18,13 @@ const SURFACES_DOC = (driver: string) => `Showing ${driver} a surface: write it 
 <Text tone=muted>Milk is up 18% since 3 Oct.</Text>
 </Surface>
 
-Rules: <Surface title="…"> starts on its own line and ends with </Surface>; inside it only tags, no markdown. Attribute values: "quoted text", a bare word or number, or a bare flag meaning true. Lists use | between items. Colours are hue tokens c1 c2 c3 c5 c6. Prose goes before or after, not inside. <Surface id=sf_… title="…"> replaces a surface of yours in place (its card redraws where it first appeared).
+Rules: <Surface title="…"> starts on its own line and ends with </Surface>; inside it only tags, no markdown. Attribute values: "quoted text", a bare word or number, or a bare flag meaning true. Lists use | between items. Colours are hues: blue magenta violet teal amber grey, and bad for trouble only (over budget, failing). A one-series chart is grey unless you give it a hue, so give one when the colour means something; several series take the palette in order unless you pick. Prose goes before or after, not inside. <Surface id=sf_… title="…"> replaces a surface of yours in place (its card redraws where it first appeared).
 
 Components (props; body):
 Layout: Section(title) Stack(direction=row|column, gap=s|m|l) Grid(columns 1-4) Card(title, hue) Divider.
 Text: Heading(level 2|3; body) Text(tone=default|muted|ok|bad|blue; body) Quote(body) Lab(body) Receipt(source url; body) Badge(tone; body).
 Numbers: Stat(label, value, delta, tone=up|down|flat|ok|bad, format) Meter(label, value, max, unit, hue).
-Charts: BarChart(title, unit, format, hue; body lines "Label: value") Donut(title, format; body lines "Label: value", at most 8) LineChart(title, unit, format; body <Series name="…" hue=c1> with lines "x: y", at most 5) Sparkline(values="3|5|4|8", hue).
+Charts (every value shows on hover): BarChart(title, unit, format, hue; body lines "Label: value", or "Label: value bad" to colour one bar; negatives draw left of zero) Donut(title, format; body lines "Label: value", at most 8, past five fold into Other) LineChart(title, unit, format; body <Series name="…" hue=teal> with lines "x: y", at most 5; "x:" with no number is a gap, not zero) Sparkline(values="3|5|4|8", hue).
 Tables: Table(columns="key:Label|key:Label:format"; body rows "a | b | c" in column order) Compare(columns="A|B|C"; body <Row label="…" winner=index>v1 | v2 | v3</Row>) List(body <Item title="…" meta="…">detail</Item>) Timeline(body <Event time="…" state=done|running|needs|failed>text</Event>).
 Input: Form(action, submit="label", title; body fields) with fields TextField(name, label, required, placeholder, multiline) Number(name, label, min, max) Money(name, label) Date(name, label) Select(name, label, options="value:Label|…") Radio(same) Checkbox(name, label) Toggle(name, label). Choice(action, prompt; body <Option id=… label="…">detail</Option>); ids and actions are words starting with a letter. Submitting comes back to you as a message with the values.
 format is text|number|money|date|percent; money is rupees.
@@ -35,7 +35,7 @@ Data you keep: put it in a SQLite ledger under /bot/work and bind components to 
 <Picker name=month label="Month" options="2026-09:Sep|2026-10:Oct" value=2026-10/>
 <Stat label="Spend" format=money bind=spend/>
 </Surface>
-Queries are read-only, one SELECT each. Columns per component: Stat value (+delta, tone); Meter value, max; Text text; Table the listed keys; List title, detail, meta; Timeline time, text, state; BarChart/Donut label, value; LineChart x, y (+series); Sparkline value; Picker/Tabs value (+label). A bound component leaves out what its query fills.
+Queries are read-only, one SELECT each. Columns per component: Stat value (+delta, tone); Meter value, max; Text text; Table the listed keys; List title, detail, meta; Timeline time, text, state; BarChart/Donut label, value (+hue); LineChart x, y (+series; a null y is a gap); Sparkline value; Picker/Tabs value (+label). A bound component leaves out what its query fills.
 
 Controls ${driver} changes without asking you: Picker(name, label, options, value) Tabs(name, options, value) Slider(name, label, min, max, step, value, unit) Switch(name, label, value). A control's value feeds queries as :name, and any component shows only while its when matches: when="view=items", when="view!=items", when="live" (a Switch). Arithmetic on a control goes in a query, even with no ledger: <Query name=emi>SELECT round(:amount * 0.007 / (1 - pow(1.007, -:years * 12))) AS value</Query> (no source needed when no table is read; pow, exp, ln, round work). Nothing you write runs as code.
 If a surface has mistakes or a query fails, Pitcrew tells you in the next message; fix it with the same id.`;

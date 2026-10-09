@@ -6,14 +6,13 @@ import { controlDefaults, whenHolds } from "../../../shared/pui";
 import { api } from "../lib/api";
 import { ago } from "../lib/format";
 import { toast } from "../lib/toast";
-import { HUES } from "./ui";
+import { BarChart, Donut, LineChart, Sparkline, chartColor } from "./Charts";
 
 type Values = Record<string, unknown>;
 type State = Record<string, string | number | boolean>;
 interface Ctx { onAction: (action: string, values: Values) => Promise<void> | void; locked: boolean; state: State; setControl: (name: string, v: string | number | boolean) => void }
 const SurfaceCtx = createContext<Ctx>({ onAction: () => {}, locked: false, state: {}, setControl: () => {} });
 
-const hueVar = (hue?: string | null, i = 0) => `var(--${hue && (HUES as readonly string[]).includes(hue) ? hue : HUES[i % HUES.length]})`;
 const inr = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
 function fmt(v: unknown, f?: string): string {
   if (v == null || v === "") return "";
@@ -85,7 +84,7 @@ function Node({ n }: { n: any }): ReactNode {
     case "Section": return <section className="col">{n.title && <h4 className="pc-h3">{n.title}</h4>}<Kids n={n} /></section>;
     case "Stack": return <div className={`sf-stack ${n.direction === "row" ? "row" : ""}`} style={{ gap: ({ s: 8, m: 12, l: 20 } as Record<string, number>)[n.gap] || 12 }}><Kids n={n} /></div>;
     case "Grid": return <div className="sf-grid" style={{ gridTemplateColumns: `repeat(${n.columns || 2},minmax(0,1fr))` }}><Kids n={n} /></div>;
-    case "Card": return <div className={`sf-card ${n.hue ? "hue" : ""}`} style={n.hue ? hue(hueVar(n.hue)) : undefined}>{n.title && <b className="pc-h3">{n.title}</b>}<Kids n={n} /></div>;
+    case "Card": return <div className={`sf-card ${chartColor(n.hue) ? "hue" : ""}`} style={chartColor(n.hue) ? hue(chartColor(n.hue)!) : undefined}>{n.title && <b className="pc-h3">{n.title}</b>}<Kids n={n} /></div>;
     case "Divider": return <div className="divider" />;
     case "Heading": return n.level === 3 ? <h4 className="pc-h3">{n.text}</h4> : <h3 className="pc-h2">{n.text}</h3>;
     case "Text": { const t = toneClass(n.tone); return <p className={n.tone === "muted" ? "muted" : t === "ok" ? "okc" : t === "bad" ? "badc" : ""}>{n.text}</p>; }
@@ -93,7 +92,7 @@ function Node({ n }: { n: any }): ReactNode {
     case "Lab": return <p className="pc-lab">{n.text}</p>;
     case "Receipt": return <p className="small muted">[ok] {n.text}{n.source && <> · <a href={n.source} target="_blank" rel="noopener noreferrer" className="md">{hostOf(n.source)}</a></>}</p>;
     case "Stat": return <div className="sf-stat col" style={{ gap: 4 }}><p className="pc-lab">{n.label}</p><span className="v num">{n.format ? fmt(n.value, n.format) : n.value}</span>{n.delta && <span className={`d ${n.tone === "down" || n.tone === "bad" ? "down" : n.tone === "up" || n.tone === "ok" ? "up" : "faint"}`}>{n.delta}</span>}</div>;
-    case "Meter": return <div className="col" style={{ gap: 6 }}><div className="spread small"><span>{n.label}</span><span className="num faint">{`${fmt(n.value, "number")} / ${fmt(n.max, "number")}${n.unit ? " " + n.unit : ""}`}</span></div><div className="meter"><b style={{ width: `${Math.min(100, (n.value / (n.max || 1)) * 100)}%`, background: hueVar(n.hue) }} /></div></div>;
+    case "Meter": return <div className="col" style={{ gap: 6 }}><div className="spread small"><span>{n.label}</span><span className="num faint">{`${fmt(n.value, "number")} / ${fmt(n.max, "number")}${n.unit ? " " + n.unit : ""}`}</span></div><div className="meter"><b style={{ width: `${Math.min(100, (n.value / (n.max || 1)) * 100)}%`, background: chartColor(n.hue) || "var(--v1)" }} /></div></div>;
     case "Badge": return <span className={`pc-chip ${toneClass(n.tone)}`}>{n.text}</span>;
     case "Table": return <div className="scrollx"><table className="tbl"><thead><tr>{n.columns.map((c: any) => <th key={c.key} className={isNum(c.format) ? "num" : ""}>{c.label}</th>)}</tr></thead>
       <tbody>{n.rows.map((r: any, i: number) => <tr key={i}>{n.columns.map((c: any) => <td key={c.key} className={isNum(c.format) ? "num" : ""}>{fmt(r[c.key], c.format)}</td>)}</tr>)}</tbody></table></div>;
@@ -113,67 +112,6 @@ function Node({ n }: { n: any }): ReactNode {
 }
 
 const hostOf = (u: string) => { try { return new URL(u).hostname; } catch { return u; } };
-
-function BarChart({ n }: { n: any }) {
-  const max = Math.max(1e-9, ...n.data.map((d: any) => Math.abs(d.value)));
-  const unit = n.unit && !(n.format === "money" && /₹|inr|rupee|rs/i.test(n.unit)) ? ` ${n.unit}` : "";
-  return (
-    <div className="col">{n.title && <p className="pc-lab">{n.title}</p>}
-      <div className="sf-bars">{n.data.map((d: any, i: number) => (
-        <div key={i} className="sf-bar" style={hue(hueVar(n.hue))}>
-          <span className="muted">{d.label}</span>
-          <span className="track"><b style={{ width: `${Math.max(1, (Math.abs(d.value) / max) * 100)}%` }} /></span>
-          <span className="n">{fmt(d.value, n.format || "number") + unit}</span>
-        </div>))}
-      </div>
-    </div>
-  );
-}
-
-function LineChart({ n }: { n: any }) {
-  const W = 640, H = 200, P = 28;
-  const xs: string[] = [...new Set<string>(n.series.flatMap((s: any) => s.points.map((p: any) => p.x)))];
-  const ys: number[] = n.series.flatMap((s: any) => s.points.map((p: any) => p.y));
-  const lo = Math.min(0, ...ys), hi = Math.max(1e-9, ...ys);
-  const X = (x: string) => P + (xs.indexOf(x) / Math.max(1, xs.length - 1)) * (W - P * 2);
-  const Y = (y: number) => H - P - ((y - lo) / (hi - lo || 1)) * (H - P * 2);
-  const ends = [xs[0], xs[xs.length - 1]];
-  return (
-    <div className="col">{n.title && <p className="pc-lab">{n.title}</p>}
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%">
-        <line x1={P} x2={W - P} y1={H - P} y2={H - P} stroke="var(--line-2)" />
-        <text x={2} y={Y(hi) + 4}>{fmt(hi, n.format || "number")}</text>
-        <text x={2} y={H - P + 4}>{fmt(lo, n.format || "number")}</text>
-        {ends.map((x, i) => x != null && <text key={i} x={i ? W - P - 30 : P} y={H - 8}>{x}</text>)}
-        {n.series.map((s: any, i: number) => (
-          <path key={i} d={s.points.map((p: any, j: number) => `${j ? "L" : "M"}${X(p.x).toFixed(1)},${Y(p.y).toFixed(1)}`).join(" ")}
-            fill="none" stroke={hueVar(s.hue, i)} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />))}
-      </svg>
-      {n.series.length > 1 && <div className="sf-legend">{n.series.map((s: any, i: number) => <span key={i} style={hue(hueVar(s.hue, i))}><i />{s.name}</span>)}</div>}
-    </div>
-  );
-}
-
-function Donut({ n }: { n: any }) {
-  const total = n.data.reduce((a: number, d: any) => a + Math.max(0, d.value), 0) || 1;
-  let acc = 0;
-  const stops = n.data.map((d: any, i: number) => { const a = acc; acc += (Math.max(0, d.value) / total) * 100; return `${hueVar(null, i)} ${a}% ${acc}%`; }).join(",");
-  const mask = "radial-gradient(circle,transparent 42%,#000 43%)";
-  return (
-    <div className="row" style={{ gap: 20, alignItems: "center" }}>
-      <div style={{ width: 132, height: 132, borderRadius: "50%", background: `conic-gradient(${stops})`, WebkitMask: mask, mask }} />
-      <div className="col" style={{ gap: 6 }}>{n.title && <p className="pc-lab">{n.title}</p>}
-        {n.data.map((d: any, i: number) => <div key={i} className="sf-legend" style={hue(hueVar(null, i))}><span><i />{`${d.label} · ${fmt(d.value, n.format || "number")}`}</span></div>)}
-      </div>
-    </div>
-  );
-}
-
-function Sparkline({ n }: { n: any }) {
-  const v: number[] = n.values, lo = Math.min(...v), hi = Math.max(...v), W = 160, H = 36;
-  const d = v.map((y, i) => `${i ? "L" : "M"}${((i / Math.max(1, v.length - 1)) * W).toFixed(1)},${(H - 3 - ((y - lo) / (hi - lo || 1)) * (H - 6)).toFixed(1)}`).join(" ");
-  return <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}><path d={d} fill="none" stroke={hueVar(n.hue)} strokeWidth={2} /></svg>;
-}
 
 // The driver's controls: plain inputs in the app's own styles; the value lives in the surface's state.
 function Control({ n }: { n: any }) {

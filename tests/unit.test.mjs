@@ -848,6 +848,25 @@ Anything else?`;
   assert.match(v({ type: "Switch", name: "a-b", label: "A" }), /a word/);
   assert.match(v({ type: "Picker", name: "m", bind: "q" }, { q: "SELECT 1 AS value" }), /bound Picker needs a value/);
   assert.deepEqual(L.paramsOf("SELECT ':nope', x FROM t WHERE a = :a -- :c\n AND b = :b"), ["a", "b"]);
+
+  // Chart hues: per item ("Label: value hue"), per series; a line point with no number is a gap.
+  const charts = splitReply(`<Surface title="c">
+<BarChart title="Over">
+  Eating out: 3150 bad
+  Transport: -900
+</BarChart>
+<LineChart title="Sleep">
+<Series name="Sleep" hue=teal>
+  6 Apr:
+  29 Jun: 6.94
+</Series>
+</LineChart>
+</Surface>`).segments[0].surface;
+  const [bc, lc] = charts.root.children;
+  assert.deepEqual(bc.data, [{ label: "Eating out", value: 3150, hue: "bad" }, { label: "Transport", value: -900 }]);
+  assert.deepEqual(lc.series[0], { name: "Sleep", hue: "teal", points: [{ x: "6 Apr", y: null }, { x: "29 Jun", y: 6.94 }] });
+  assert.deepEqual(validateSurface({ title: "c", root: charts.root }).errors, []);
+  assert.match(validateSurface({ title: "c", root: { type: "BarChart", data: [{ label: "a", value: 1, hue: "red" }] } }).errors.join(), /must be one of/);
 });
 
 test("a scheduled run that ends QUIET keeps the thread's place; one with news moves it to the top", async () => {
