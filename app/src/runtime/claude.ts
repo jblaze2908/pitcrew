@@ -30,7 +30,8 @@ export async function delegateToClaude(c: Brain, b: Bot, threadId: string, a: Re
   flush(r, true);
   audit(b.id, "claude.started", { id: r.card.id, threadId });
   const done = line.then(() => execute(c, b, r));
-  line = done;
+  // A run that throws must not stall every run after it.
+  line = done.catch(() => {});
   const ended = await Promise.race([done.then(() => true), new Promise<boolean>((res) => setTimeout(() => res(false), WAIT_MS).unref())]);
   if (!ended) {
     done.then(() => sendMessage(threadId, { text: `[Claude Code finished]\n${outcome(r)}`, trigger: "claude", display: "Claude Code finished", mode: "queue" }).catch(() => {}));
