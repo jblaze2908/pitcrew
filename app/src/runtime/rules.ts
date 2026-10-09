@@ -9,6 +9,13 @@ import { addEvent } from "./threads.js";
 import { roleOf } from "./grounding.js";
 import { hostOf } from "./util.js";
 
+// A command that runs a workspace script: interpreter, its own flags (python3 -B, node --no-warnings), then the path.
+// Flags that take code instead of a file (-c, -m, -e, -p, --eval, --print) never match, so `python3 -c …` isn't a script.
+export const RUNS = /\b(?:python3?|node|bash|sh|bun|deno(?:\s+run)?)(?:\s+(?:-(?![cmep]\b)[A-Za-z]+|--(?!eval\b|print\b)[\w-]+(?:=\S+)?))*\s+(\/bot\/work\/[\w.\/@+-]+\.(?:py|mjs|cjs|js|ts|sh))\b/;
+// An interpreter started without a workspace script (inline code, a heredoc, a module): too broad to generalise.
+const INLINE = /^(?:python3?|node|bash|sh|bun|deno)\b/;
+const bare = (command: unknown) => String(command).replace(/^\/bin\/(ba)?sh -l?c /, "").replace(/^['"]/, "").trim();
+
 export function signature(call: Call) {
   if (call.kind === "shell") return `cmd:${String(call.command).replace(/^\/bin\/(ba)?sh -l?c /, "").replace(/^['"]/, "").trim().split(/\s+/).slice(0, 2).join(" ")}`;
   if (call.kind === "mcp") return `mcp:${call.server}/${call.tool}`;
@@ -23,17 +30,33 @@ export function pattern(call: Call) {
     if (!host || !roles.length || roles.includes(null)) return null;
     return `browser:${call.tool!.replace(/^browser_/, "")}:${host}:${[...new Set(roles)].sort().join("+")}`;
   }
+  if (call.kind === "shell") {
+    const m = RUNS.exec(String(call.command || ""));
+    if (m) return `script:${m[1]}`;
+    if (INLINE.test(bare(call.command))) return null;
+  }
   return signature(call);
 }
+/** An exact action: one workspace script or one tool. Its standing approval holds whatever effect jev reads next time
+ *  (jev's guess for the same call moves between runs at low confidence), except paying and deleting. */
+export const exactPattern = (p: string | null | undefined) => !!p && (p.startsWith("script:") || (p.startsWith("mcp:") && !/^mcp:(browser|computer)\//.test(p)));
+export const NEVER_STANDING = ["pay", "delete"], NEVER_BROAD = ["pay", "delete", "share"];
+/** What an approval with "always" or "this thread" stands for, or null: an interpreter with no workspace script
+ *  (cmd:python3 -c, cmd:node -e) would stand for any code at all, so it gets no rule. */
+export const ruleMatch = (detail: { pattern?: string | null; signature?: string }) =>
+  detail.pattern || (detail.signature && !(INLINE.test(detail.signature.replace(/^cmd:/, "")) && !RUNS.test(detail.signature)) ? detail.signature : null);
 export function describePattern(p: string | null | undefined) {
   const m = /^browser:([^:]+):([^:]+):(.+)$/.exec(p || "");
   if (m) return `${m[1].replace(/_/g, " ")} ${m[3].replace(/\+/g, " or ")} on ${m[2]}`;
   const s = String(p || "");
-  return s.startsWith("cmd:") ? `run ${s.slice(4)}` : s.replace(/^mcp:/, "").replace("/", " ");
+  return s.startsWith("cmd:") ? `run ${s.slice(4)}` : s.startsWith("script:") ? `run ${s.slice(7)}` : s.replace(/^mcp:/, "").replace("/", " ");
 }
-// Standing approvals hold only for the effect they were granted for: "always" on a link click never covers a Send.
+// A broad standing approval holds only for the effect it was granted for: "always" on a link click never covers a Send.
+// An exact one (exactPattern) holds for any effect but paying or deleting.
 function ruleFor(botId: string, threadId: string, matches: (string | null)[], effect: string) {
-  return matches.filter(Boolean).map((m) => one<RuleRow>("SELECT * FROM rules WHERE bot_id=? AND match=? AND effect=? AND revoked_at IS NULL AND (thread_id IS NULL OR thread_id=?)", botId, m, effect, threadId)).find(Boolean);
+  return matches.filter(Boolean).map((m) => exactPattern(m)
+    ? (NEVER_STANDING.includes(effect) ? undefined : one<RuleRow>("SELECT * FROM rules WHERE bot_id=? AND match=? AND revoked_at IS NULL AND (thread_id IS NULL OR thread_id=?)", botId, m, threadId))
+    : one<RuleRow>("SELECT * FROM rules WHERE bot_id=? AND match=? AND effect=? AND revoked_at IS NULL AND (thread_id IS NULL OR thread_id=?)", botId, m, effect, threadId)).find(Boolean);
 }
 export const standingRule = (botId: string, threadId: string, call: Call, effect: string) => ruleFor(botId, threadId, call.kind === "mcp" && call.server === "browser" ? [pattern(call)] : [pattern(call), signature(call)], effect);
 
