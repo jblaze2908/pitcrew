@@ -313,6 +313,33 @@ test("jev reads a workspace script the command runs, and nothing outside the wor
   assert.equal(withScript(b.id, sh("ls /bot/work")).script, undefined);
 });
 
+test("an always approval names one exact script or tool and holds whatever effect jev reads next time", async () => {
+  const { withScript } = await import("../app/dist/src/runtime/gate.js");
+  const Ru = await import("../app/dist/src/runtime/rules.js");
+  const sh = (cmd) => ({ kind: "shell", command: `/bin/sh -lc '${cmd}'` });
+  // Interpreter flags no longer hide the script (python3 -B was judged blind and never remembered by its bytes).
+  assert.equal(withScript(b.id, sh("python3 -B /bot/work/sub/parse.py --days 14")).script?.path, "/bot/work/sub/parse.py");
+  assert.equal(withScript(b.id, sh("node --no-warnings /bot/work/sub/parse.py")).script?.path, "/bot/work/sub/parse.py");
+  assert.equal(withScript(b.id, sh("python3 -c \"print(1)\" /bot/work/sub/parse.py")).script, undefined, "-c runs inline code, not the file");
+  assert.equal(Ru.pattern(sh("python3 -B /bot/work/sub/parse.py --all")), "script:/bot/work/sub/parse.py");
+  assert.equal(Ru.pattern(sh("python3 - <<EOF")), null, "inline code has nothing exact to remember");
+  assert.equal(Ru.pattern(sh("ls -la /bot/work")), "cmd:ls -la");
+  assert.equal(Ru.ruleMatch({ pattern: null, signature: "cmd:python3 -c" }), null);
+  assert.equal(Ru.ruleMatch({ pattern: null, signature: "cmd:curl -s" }), "cmd:curl -s");
+  const add = (match, effect) => run("INSERT INTO rules(id,bot_id,thread_id,effect,match,label,created_at) VALUES(?,?,NULL,?,?,?,0)", `ru_${Math.random()}`, b.id, effect, match, match);
+  add("script:/bot/work/sub/parse.py", "send");
+  const call = sh("python3 -B /bot/work/sub/parse.py --days 14");
+  for (const e of ["send", "share", "write_workspace", "exec_untrusted"]) assert.ok(R.standingRule(b.id, null, call, e), e);
+  for (const e of ["pay", "delete"]) assert.equal(R.standingRule(b.id, null, call, e), undefined, e);
+  assert.equal(R.standingRule(b.id, null, sh("python3 -B /bot/work/sub/other.py"), "send"), undefined, "another script isn't covered");
+  add("mcp:engram/tijori__record_orders", "send");
+  assert.ok(R.standingRule(b.id, null, { kind: "mcp", server: "engram", tool: "tijori__record_orders", arguments: {} }, "write_workspace"));
+  // A broad pattern still holds only for its own effect.
+  add("cmd:curl -s", "read");
+  assert.ok(R.standingRule(b.id, null, sh("curl -s https://example.com"), "read"));
+  assert.equal(R.standingRule(b.id, null, sh("curl -s https://example.com"), "send"), undefined);
+});
+
 test("a pending command or tool pit stop names what 'allow similar' would cover", async () => {
   const { pitRow } = await import("../app/dist/src/runtime/pitstops.js");
   const row = (kind, detail, status = "pending") => pitRow({ id: "ps_x", bot_id: b.id, thread_id: null, turn_id: null, kind, effect: "browse", title: "t", detail: JSON.stringify(detail), jev: "{}", status, scope: null, note: null, created_at: 0, expires_at: 0, decided_at: null });

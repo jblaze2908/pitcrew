@@ -9,7 +9,7 @@ import { bus } from "./bus.js";
 import { pushPitStop } from "./push.js";
 import { active, waits } from "./state.js";
 import { getThread, addEvent, setThreadStatus } from "./threads.js";
-import { describePattern, learnable, learn, learnProgress } from "./rules.js";
+import { describePattern, learnable, learn, learnProgress, exactPattern, ruleMatch, NEVER_STANDING, NEVER_BROAD } from "./rules.js";
 import { addSchedule } from "./schedules.js";
 import { applySoul, applyRetire, applyMemberChange, applyFileDeletion } from "./manage.js";
 import { applyCheckDecision } from "./donecheck.js";
@@ -17,7 +17,7 @@ import { applyCheckDecision } from "./donecheck.js";
 // similar: what "allow similar" (scope thread or always) would cover, named the way the rules list names it.
 export const pitRow = (p: PitstopRow | undefined): PitStop | undefined => {
   if (!p) return p;
-  const detail = json(p.detail, {}), match = detail.pattern || detail.signature;
+  const detail = json(p.detail, {}), match = ruleMatch(detail);
   // A done-check grader sometimes opens its headline with our own "Couldn't confirm"; older rows kept both.
   return { ...p, title: p.title.replace(/^(Couldn't confirm) couldn'?t confirm:?\s*/i, "$1 "), detail, jev: json(p.jev, {}), learn: p.status === "pending" ? learnProgress(p) : null, similar: p.status === "pending" && match && ["command", "mcp"].includes(p.kind) ? describePattern(match) : null };
 };
@@ -54,8 +54,8 @@ export async function decide(id: string, decision: string, { scope = "once", not
     note = `Hired ${bot.name}`;
   }
   const detail = json(ps.detail, {});
-  const match = detail.pattern || detail.signature;
-  if (status === "approved" && ["thread", "always"].includes(scope) && match && !["pay", "delete", "share"].includes(ps.effect)) {
+  const match = ruleMatch(detail);
+  if (status === "approved" && ["thread", "always"].includes(scope) && match && !(exactPattern(match) ? NEVER_STANDING : NEVER_BROAD).includes(ps.effect)) {
     run("INSERT INTO rules(id,bot_id,thread_id,effect,match,label,created_at) VALUES(?,?,?,?,?,?,?)", uid("ru"), ps.bot_id, scope === "thread" ? ps.thread_id : null, ps.effect, match, `${describePattern(match)}${scope === "thread" ? " (this thread)" : ""}`, now());
   }
   if (ps.kind === "site") applySiteChoice(ps, status, scope);

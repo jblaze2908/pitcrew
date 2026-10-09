@@ -11,7 +11,7 @@ import { botDir, type Brain } from "../computer.js";
 import { bus } from "./bus.js";
 import { active, shellVerdicts } from "./state.js";
 import { addEvent } from "./threads.js";
-import { signature, pattern, standingRule, learnedTrust } from "./rules.js";
+import { signature, pattern, standingRule, learnedTrust, RUNS, exactPattern, NEVER_STANDING, NEVER_BROAD } from "./rules.js";
 import { siteStep, noteRefusal } from "./sitegate.js";
 import { waitLease } from "./lease.js";
 import { pitStop } from "./pitstops.js";
@@ -63,12 +63,13 @@ export async function gate(c: Brain, threadId: string, call: Call, pit: PitInfo)
   // Hands-free or YOLO stands in for the driver here; jev's verdict is still logged, so the audit shows what was waived.
   if ((v.decision !== "allow" || forced) && waived(auto, v.effect) && !v.forbidden) return logDecision(threadId, b.id, v, call, { decision: "allow", by: auto === "yolo" ? "yolo" : "hands-free", source: "standing" });
   if (v.decision === "allow" && !forced) { const lid = uid("jl"), ok = logDecision(threadId, b.id, v, call, { id: lid }); shadowVerify(lid, call, v, policy); trustScript(b.id, script, "jev"); return allowed(threadId, ok); }
-  // A standing approval covers repeats of the same action, but never money, deletion or sharing. Browser approvals
+  // A standing approval covers repeats of the same action, but never money or deletion, nor sharing unless it names one
+  // exact script or tool (rules.ts exactPattern). Browser approvals
   // match only by their host-bearing pattern, so one granted on a.example never covers b.example; on a checkout page
   // nothing stands in for the driver on pay or send.
   const effect = v.effect === "unknown" ? "ask" : v.effect;
   const standing = forced || (site.checkout && ["pay", "send"].includes(effect)) ? null : standingRule(b.id, threadId, call, effect);
-  if (standing && !["pay", "delete", "share"].includes(v.effect)) return logDecision(threadId, b.id, v, call, { decision: "allow", by: `rule:${standing.label}`, source: "standing" });
+  if (standing && !(exactPattern(standing.match) ? NEVER_STANDING : NEVER_BROAD).includes(v.effect)) return logDecision(threadId, b.id, v, call, { decision: "allow", by: `rule:${standing.label}`, source: "standing" });
   const learned = forced || site.checkout ? null : learnedTrust(b, pat, v);
   if (learned) return logDecision(threadId, b.id, v, call, { decision: "allow", by: `learned:${pat} (${learned.approvals} approvals)`, source: "learned" });
   // Logged before the pit stop opens, so decide() always finds the label row to fill in.
@@ -116,7 +117,7 @@ export function jevContext(threadId: string | null, houseRules = ""): JevContext
 // A command that runs a script in the member's workspace: jev reads the script, not just its name. A bare
 // `python3 /bot/work/x.py` used to be judged blind and asked at low confidence. One stat and one bounded read per such
 // command; the script is resolved under the bot's own work dir on the host (realpath, so no symlink leaves it).
-const RUNS = /\b(?:python3?|node|bash|sh|bun|deno(?:\s+run)?)\s+(\/bot\/work\/[\w.\/@+-]+\.(?:py|mjs|cjs|js|ts|sh))\b/, SCRIPT_MAX = 6000;
+const SCRIPT_MAX = 6000;
 export function withScript(botId: string, call: Call): Call {
   const m = call.kind === "shell" ? RUNS.exec(String(call.command || "")) : null;
   if (!m) return call;

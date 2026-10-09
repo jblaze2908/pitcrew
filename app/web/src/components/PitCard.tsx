@@ -46,7 +46,11 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
   const here = !!p.thread_id && location.hash.startsWith(`#/t/${p.thread_id}`);
   const openLink = (label: string) => p.thread_id && !here && <a className="small faint" href={`#/t/${p.thread_id}`} style={{ marginLeft: "auto" }}>{label}</a>;
   const noteInput = <input placeholder="Note for the crew (optional)" className="small" value={note} onChange={(e) => setNote(e.target.value)} />;
-  const noAlways = ["pay", "delete", "share"].includes(p.effect) || p.kind === "hire" || p.kind === "plan";
+  // One exact script or tool can be allowed for good even when jev reads it as sharing (runtime/rules.ts exactPattern).
+  const exact = /^script:|^mcp:(?!browser\/|computer\/)/.test(String(p.detail?.pattern || "")), never = exact ? ["pay", "delete"] : ["pay", "delete", "share"];
+  const noAlways = never.includes(p.effect) || p.kind === "hire" || p.kind === "plan";
+  // An interpreter running inline code has nothing exact to remember, so it is approved once at a time.
+  const noSimilar = (p.kind === "command" || p.kind === "mcp") && !p.similar;
 
   const body = p.kind === "command" ? <pre>{unwrapShell(String(d.command || ""))}</pre>
     : p.kind === "mcp" ? <pre>{`${d.server || ""}.${d.tool || ""}\n${JSON.stringify(d.args || d.message || {}, null, 1).slice(0, 1200)}`}</pre>
@@ -129,8 +133,8 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
     {openLink("Open plan")}</div>;
   else actions = <>{noteInput}<div className="acts">
     {btn("Approve once", () => decide("approve", "once"), true)}
-    {p.thread_id && btn("Allow similar in this thread", () => decide("approve", "thread"))}
-    {!noAlways && btn("Allow similar always", () => decide("approve", "always"))}
+    {p.thread_id && !noSimilar && btn("Allow similar in this thread", () => decide("approve", "thread"))}
+    {!noAlways && !noSimilar && btn("Allow similar always", () => decide("approve", "always"))}
     {btn("Deny", () => decide("deny"))}
     {openLink("Open thread")}</div></>;
 
@@ -143,7 +147,7 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
       <p className="t">{heading}</p>
       {body}
       {why}
-      {p.similar && !["pay", "delete", "share"].includes(p.effect) && <p className="small faint">{`Similar means: ${p.similar}.`}</p>}
+      {p.similar && !never.includes(p.effect) && <p className="small faint">{`Similar means: ${p.similar}.`}</p>}
       {p.learn && <p className="small faint">{p.learn.need - p.learn.streak <= 1
         ? `Approve this and ${who} stops asking for “${p.learn.label}”.`
         : `Approve “${p.learn.label}” ${p.learn.need - p.learn.streak} times in a row and ${who} stops asking.`}</p>}
