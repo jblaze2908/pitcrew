@@ -1,6 +1,10 @@
 /* App layout on top of the Pitcrew design system (ds/theme.css). Tokens only; no raw colours. */
 *{margin:0;box-sizing:border-box}
 html,body{height:100%}
+/* Native scrollbars follow the theme: without color-scheme the browser drew light tracks on the dark app. */
+:root,[data-theme="dark"]{color-scheme:dark}
+[data-theme="light"]{color-scheme:light}
+*{scrollbar-width:thin;scrollbar-color:var(--line-2) transparent}
 body{overflow:hidden}
 a{color:inherit;text-decoration:none}
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
