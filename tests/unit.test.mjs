@@ -1944,11 +1944,16 @@ test("vault: a fill types and submits server-side; the value never reaches the r
       locator: (sel) => ({ elementHandle: async () => ({ ownerFrame: async () => frame, evaluate: async () => ["input", types[sel] || "text"], fill: async (v) => log.push(["fill", sel, v]) }),
         click: async () => log.push(["click", sel]), press: async (_k) => log.push(["enter", sel]) }) };
   };
-  const run_ = async (url, types) => { const log = []; const out = await (0, eval)(code)(fakePage(url, types, log)); return { out, log }; };
+  // A bare vm context, like Playwright MCP's run_code: no URL, no Node globals.
+  const { runInNewContext } = await import("node:vm");
+  const run_ = async (url, types) => { const log = []; const out = await runInNewContext(`(${code})`, {})(fakePage(url, types, log)); return JSON.parse(JSON.stringify({ out, log })); };
   const good = await run_("https://accounts.northwind.example/login", { "aria-ref=e2": "password" });
   assert.deepEqual([good.out.ok, good.out.filled, good.log.map((x) => x[0])], [true, ["username", "password"], ["fill", "fill", "click", "sweep"]]);
   assert.deepEqual(good.log.at(-1)[1], [PW], "only the password is swept from the page afterwards");
   assert.equal((await run_("https://northwind.example.evil.test/login", { "aria-ref=e2": "password" })).out.why, "page");
+  assert.equal((await run_("https://northwind.example@evil.test/login", { "aria-ref=e2": "password" })).out.why, "page");
+  assert.equal((await run_("http://northwind.example/login", { "aria-ref=e2": "password" })).out.why, "page");
+  assert.equal((await run_("https://Accounts.Power.example:443/login", { "aria-ref=e2": "password" })).out.ok, true);
   const wrongBox = await run_("https://northwind.example/login", {});
   assert.deepEqual([wrongBox.out.why, wrongBox.out.field, wrongBox.log.some((x) => x[0] === "click")], ["field", "password", false], "a password never goes into a text box, and nothing is submitted");
   assert.ok(!JSON.stringify(r).includes(PW) && !tables().includes(PW), "nowhere else");
