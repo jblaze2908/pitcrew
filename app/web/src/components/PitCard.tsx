@@ -68,6 +68,7 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
     : p.kind === "check" ? <CheckSummary d={d} who={who} />
     : p.kind === "teach" ? <TeachSummary d={d} who={who} />
     : p.kind === "question" ? <QuestionBody p={p} onDecided={(r) => { setP(r); onDone?.(r); }} />
+    : p.kind === "login" ? <LoginBody p={p} who={who} onDecided={(r) => { setP(r); onDone?.(r); }} />
     : p.kind === "claude_run" ? <ClaudeRunBody p={p} who={who} onDecided={(r) => { setP(r); onDone?.(r); }} /> : null;
 
   const outcome = `${p.kind === "engram" && p.note ? p.note : p.status} ${ago(p.decided_at)}`;
@@ -125,8 +126,8 @@ export function PitCard({ p: given, onDone, row }: { p: PitStop; onDone?: (r: Pi
     {btn("Accept as is", () => decide("approve", "once"), here)}
     {btn("Try again", () => decide("approve", "retry"))}</div>;
   else if (p.kind === "teach") actions = <div className="acts">{btn("Save as skill", () => decide("approve", "once"), true)}{btn("Not now", () => decide("deny"))}</div>;
-  // Claude Code's question carries its own Answer button (QuestionBody).
-  else if (p.kind === "question" || p.kind === "claude_run") actions = null;
+  // Claude Code's question and a login request carry their own buttons (QuestionBody, LoginBody).
+  else if (p.kind === "question" || p.kind === "claude_run" || p.kind === "login") actions = null;
   else if (p.kind === "plan") actions = <div className="acts">
     {btn(p.effect === "browse" ? "Allow for this plan" : "Allow", () => decide("approve", "once"), true)}
     {btn(p.effect === "browse" ? "Use what they know" : "Finish with what it has", () => decide("deny"))}
@@ -266,6 +267,36 @@ function QuestionBody({ p, onDecided }: { p: PitStop; onDecided: (r: PitStop) =>
         <span className="small faint" style={{ marginLeft: "auto" }}>Claude Code is paused until you answer</span>
       </div>
     </div>
+  );
+}
+
+/** A member reached a sign-in page with no saved login. Saving here stores it in the vault for that member only, and
+ * its sign-in goes on; the values go straight to the vault, never into the pit stop. */
+function LoginBody({ p, who, onDecided }: { p: PitStop; who: string; onDecided: (r: PitStop) => void }) {
+  const d = p.detail?.login || {};
+  const [name, setName] = useState<string>(d.name || "");
+  const [user, setUser] = useState(""), [pass, setPass] = useState(""), [always, setAlways] = useState(true);
+  if (p.status !== "pending") return <p className="small faint">{p.note || (p.status === "approved" ? "Saved in Vault" : "No login added")}</p>;
+  const save = async () => {
+    const r = await api.post<PitStop>(`/api/vault/login/${p.id}`, { name, username: user, password: pass, always });
+    setPass(""); toast(`Saved as ${name}`);
+    if (r?.id) onDecided(r);
+  };
+  const skip = async () => { const r = await api.post<PitStop>(`/api/pitstops/${p.id}/decide`, { decision: "deny" }); if (r?.id) onDecided(r); };
+  return (
+    <form className="col" style={{ gap: 10 }} onSubmit={(e) => { e.preventDefault(); save(); }}>
+      <p className="small muted">{`Saved to the vault for ${d.site}. ${who} fills it by name and never sees it.`}</p>
+      <div className="grid3" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+        <label className="field"><span className="small faint">Name</span><input value={name} onChange={(e) => setName(e.target.value)} /></label>
+        <label className="field"><span className="small faint">Username</span><input autoComplete="off" spellCheck={false} value={user} onChange={(e) => setUser(e.target.value)} /></label>
+        <label className="field"><span className="small faint">Password</span><input type="password" autoComplete="new-password" value={pass} onChange={(e) => setPass(e.target.value)} /></label>
+      </div>
+      <label className="row small" style={{ gap: 8 }}><input type="checkbox" checked={always} onChange={(e) => setAlways(e.target.checked)} />{`Let ${who} use it without asking next time`}</label>
+      <div className="acts">
+        <button type="submit" className="pc-pill s" disabled={!name.trim() || !pass}>Save and continue</button>
+        <button type="button" className="pc-pill o s" onClick={skip}>Not now</button>
+      </div>
+    </form>
   );
 }
 

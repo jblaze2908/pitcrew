@@ -3,13 +3,14 @@
 // browser_read is ours: a gated browser_snapshot turned into text. Page JS and Playwright code run like any other tool:
 // gated per call (gate.ts never lets a fully allowed site skip jev for them), with secrets masked and size capped.
 import { getBot } from "../crew.js";
-import { audit, driverName } from "../db.js";
+import type { Bot } from "../../shared/types.js";
+import { audit, driverName, one, json, uid } from "../db.js";
 import { chownSync, lstatSync, mkdirSync, readFileSync, statSync, writeFileSync, openSync, writeSync, fchownSync, closeSync, constants as FS } from "node:fs";
 import { PW_SETTLE_MS, botDir, type Brain, type Rpc } from "../computer.js";
 import type { ToolResult } from "../shots.js";
 import { siteOf, lookalike, homograph } from "../sites.js";
 import { siteVerdict, siteTag, knownDomains } from "../domains.js";
-import { FIELDS, SCRUB_FIELDS, findSecret, usableBy, siteMatch, reveal, markUsed, granted, isRetry, noteFill, noteFilled, scrubbing, scrubFilled, flagNeedsUpdate, vaultRefusal, type Secret } from "../vault.js";
+import { FIELDS, SCRUB_FIELDS, findSecret, usableBy, loginForHost, grantThread, siteMatch, reveal, markUsed, granted, isRetry, noteFill, noteFilled, scrubbing, scrubFilled, flagNeedsUpdate, vaultRefusal, type Secret } from "../vault.js";
 import { bus } from "./bus.js";
 import { active, snapshots } from "./state.js";
 import { addEvent } from "./threads.js";
@@ -205,24 +206,46 @@ const WHY: Record<string, (r: FillResult) => string> = {
 const asks = new Map<string, Promise<string>>(); // thread|secret → pending sign-in pit stop, shared by calls that land meanwhile
 const roleName = (el: string) => /^[a-z]+(\s+"(?:[^"\\]|\\.)*")?/.exec(el)?.[0] || "element"; // no value after the name
 
+// A fill that names no known secret: point the member at the login saved for this page's site, or, on an https sign-in
+// page with no login yet, ask the driver to add one. The pit stop (kind "login") carries a form; POST /api/vault/login
+// saves it, granted to this member, and this same fill goes on with it. Values never pass through the pit stop.
+async function requestLogin(b: Bot, threadId: string, codexThread: string, a: Record<string, any>): Promise<Secret | ToolResult> {
+  const driver = driverName(), name = short(a.secret, 60), mine = usableBy(b.id);
+  const none = say(`No secret called "${name}". ${mine.length ? `Yours: ${mine.map((s) => `"${s.name}" (${s.site || "card"})`).join(", ")}.` : `${driver} hasn't given you any yet.`} On a sign-in page with no saved login, call browser_fill_secret with username and password fields and ${driver} is asked to add one.`, false);
+  const url = snapshots.get(codexThread)?.url, s = url ? siteOf(url) : null;
+  const loginOnly = Array.isArray(a.fields) && a.fields.length > 0 && a.fields.every((f: any) => ["username", "password"].includes(f?.field));
+  if (!url || !s || !s.https || s.ip || !loginOnly) return none;
+  const have = loginForHost(s.host);
+  if (have) return say(`No secret called "${name}". The login for ${s.host} is "${have.name}"${have.allowed.includes(b.id) ? "" : `, which ${driver} hasn't allowed you to use yet`}: use that name.`, false);
+  if (siteVerdict(b, threadId, url, {}).action !== "go") return none;
+  const label = s.host.split(".")[0], id = uid("ps");
+  const suggested = name.trim() || label.charAt(0).toUpperCase() + label.slice(1);
+  const d = await pitStop({ id, botId: b.id, threadId, kind: "login", effect: "signin", title: `${b.name} needs a login for ${s.host}`, detail: { login: { name: suggested, site: s.host } } });
+  if (d !== "approved") return say(`No login for ${s.host}: ${d === "expired" ? `${driver} didn't answer in time` : `${driver} chose not to add one now`}. Don't retry; say what's waiting.`, false);
+  const saved = json(one<{ detail: string }>("SELECT detail FROM pitstops WHERE id=?", id)?.detail, {}).saved, sec = saved?.name ? findSecret(saved.name) : null;
+  if (!sec) return say(`No login for ${s.host} was saved. Say what's waiting.`, false);
+  grantThread(threadId, sec.id);
+  return sec;
+}
+
 export async function fillSecret(br: Brain, threadId: string, p: ToolCall, deps: { mcp?: Pick<Rpc, "request"> } = {}): Promise<ToolResult> {
   const b = getBot(br.bot.id)!, turnId = active.get(threadId)?.turnId, a = p.arguments || {}, driver = driverName();
   if (!(await planLive(threadId))) return say("This plan runs on what the crew already knows: the driver turned live lookups off.", false);
-  const sec = findSecret(String(a.secret || ""));
+  let sec = findSecret(String(a.secret || ""));
   const refuse = (why: string, event = true) => {
     audit("crew", "vault.refused", { botId: b.id, threadId, secret: sec?.name || String(a.secret || "").slice(0, 60), why });
     if (event) addEvent(threadId, turnId, "system", { text: `Not filled: ${why}.`, tone: "bad" });
     return say(`Not filled: ${why}. Don't type it another way or retry; tell ${driver} what's waiting.`, false);
   };
-  if (!sec) { const mine = usableBy(b.id); return say(`No secret called "${short(a.secret, 60)}". ${mine.length ? `Yours: ${mine.map((s) => `"${s.name}" (${s.site || "card"})`).join(", ")}.` : `${driver} hasn't given you any; they keep them in Settings → Permissions → Vault.`}`, false); }
-  if (!sec.allowed.includes(b.id)) return refuse(`${b.name} isn't allowed to use "${sec.name}" (${driver} sets who may in Settings → Permissions → Vault)`);
+  if (!sec) { const r = await requestLogin(b, threadId, p.threadId, a); if (!("blob" in r)) return r; sec = r; }
+  if (!sec.allowed.includes(b.id)) return refuse(`${b.name} isn't allowed to use "${sec.name}" (${driver} sets who may in Settings → Vault)`);
   if (sec.needs_update) return refuse(`"${sec.name}" failed before and waits for ${driver} to update it in Vault`);
   const card = sec.kind === "card", given = Array.isArray(a.fields) ? a.fields : [];
   const fields = given.map((f: any) => ({ field: String(f?.field || ""), target: String(f?.target || f?.ref || "") }));
   const bad = fields.find((f: { field: string; target: string }) => !FIELDS[sec.kind].includes(f.field) || !f.target);
   if (!fields.length || fields.length > 4 || bad || new Set(fields.map((f: { field: string }) => f.field)).size < fields.length) return say(`fields: 1 to 4 of {field, target}, field one of ${FIELDS[sec.kind].join(", ")}, target a ref from the latest snapshot.`, false);
   const missing = fields.find((f: { field: string }) => !sec.has.includes(f.field));
-  if (missing) return say(`"${sec.name}" has no ${missing.field} saved; ask ${driver} to add it in Settings → Permissions → Vault.`, false);
+  if (missing) return say(`"${sec.name}" has no ${missing.field} saved; ask ${driver} to add it in Settings → Vault.`, false);
   const submit = a.submit ? String(a.submit) : null;
   if (card && !submit) return say("A card fill needs submit: the ref of the pay button. It fills and pays in one step once the driver approves.", false);
   const seen = snapshots.get(p.threadId), url = seen?.url;

@@ -1,4 +1,4 @@
-// Settings: six tabs on one template (views/settings/kit.tsx). Old links (#/settings/phone, /engram, /vault/<id>…)
+// Settings: seven tabs on one template (views/settings/kit.tsx). Old links (#/settings/phone, /engram, /vault/<id>…)
 // land on the tab that holds them now, scrolled to their section.
 import { useEffect } from "react";
 import { api } from "../lib/api";
@@ -10,12 +10,13 @@ import { General } from "./settings/General";
 import { Models, type Providers } from "./settings/Models";
 import { Notifications } from "./settings/Notifications";
 import { Permissions } from "./settings/Permissions";
+import { VaultSettings } from "../components/Vault";
 
-const TABS = [["general", "General"], ["models", "Models"], ["notifications", "Notifications"], ["connections", "Connections"], ["permissions", "Permissions"], ["account", "Account"]] as const;
+const TABS = [["general", "General"], ["models", "Models"], ["notifications", "Notifications"], ["connections", "Connections"], ["permissions", "Permissions"], ["vault", "Vault"], ["account", "Account"]] as const;
 type Tab = (typeof TABS)[number][0];
 const MOVED: Record<string, [Tab, string?]> = {
   phone: ["notifications"], email: ["connections", "email"], engram: ["connections", "memory"], memory: ["connections", "memory"],
-  sites: ["permissions", "sites"], vault: ["permissions", "vault"], safety: ["permissions", "stop"],
+  sites: ["permissions", "sites"], safety: ["permissions", "stop"],
 };
 
 export function Settings({ tab: asked, item }: { tab: string; item?: string }) {
@@ -45,7 +46,8 @@ export function Settings({ tab: asked, item }: { tab: string; item?: string }) {
           {tab === "models" && <Models prov={p} reload={prov.reload} />}
           {tab === "notifications" && <Notifications />}
           {tab === "connections" && <Connections />}
-          {tab === "permissions" && <Permissions check={!!p.openrouter?.connected} item={vaultItem} />}
+          {tab === "permissions" && <Permissions check={!!p.openrouter?.connected} />}
+          {tab === "vault" && <VaultSettings item={vaultItem} />}
           {tab === "account" && <Account />}
         </div>
       </div>

@@ -2467,3 +2467,38 @@ test("Claude Code: the member must recommend a model and effort from the offered
   assert.deepEqual(t.inputSchema.properties.model.enum, CLAUDE_MODELS.map((m) => m.id));
   assert.deepEqual(t.inputSchema.properties.effort.enum, [...CLAUDE_EFFORTS]);
 });
+
+test("vault: a sign-in page with no saved login asks the driver for one, then the same fill signs in with it", async () => {
+  const Bz = await import("../app/dist/src/runtime/browser.js");
+  const { snapshots } = await import("../app/dist/src/runtime/state.js");
+  const { setSite } = await import("../app/dist/src/domains.js");
+  setSite("b_v", "radarr.example", "allowed");
+  run("INSERT INTO threads(id,bot_id,title,created_at,updated_at) VALUES('th_vl','b_v','vl',0,0)");
+  snapshots.set("cx_vl", { ...LOGIN_PAGE, url: "https://radarr.example/login" });
+  const c = { bot: { id: "b_v" }, mems: new Map() }, ok = { ok: true, filled: ["username", "password"], url: "https://radarr.example/", moved: true, left: 0, pw: false, err: false };
+  const fields = [{ field: "username", target: "e1" }, { field: "password", target: "e2" }];
+  const fill = (secret, mcp) => Bz.fillSecret(c, "th_vl", { tool: "browser_fill_secret", threadId: "cx_vl", arguments: { secret, fields } }, { mcp });
+  const waitPit = async () => { let ps; for (let i = 0; i < 50 && !(ps = one("SELECT * FROM pitstops WHERE kind='login' AND status='pending'")); i++) await new Promise((r) => setTimeout(r, 5)); return ps; };
+
+  const mcp = fakeMcp(ok), first = fill("Radarr", mcp), ps = await waitPit();
+  assert.equal(ps.title, "Bill Keeper needs a login for radarr.example");
+  assert.deepEqual(JSON.parse(ps.detail).login, { name: "Radarr", site: "radarr.example" });
+  // What POST /api/vault/login/:ps does: save for this member only, note the name on the pit stop, approve.
+  const v = V.saveVault({ kind: "login", name: "Radarr", site: "radarr.example", username: "driver", password: "Radarr-synthetic-1", allowed: ["b_v"], always: [] });
+  run("UPDATE pitstops SET detail=? WHERE id=?", JSON.stringify({ ...JSON.parse(ps.detail), saved: { id: v.id, name: v.name } }), ps.id);
+  await R.decide(ps.id, "approve", {});
+  const r = await first;
+  assert.equal(r.success, true, r.contentItems[0].text);
+  assert.ok(mcp.calls[0].arguments.code.includes('"Radarr-synthetic-1"'));
+  assert.equal(one("SELECT COUNT(*) n FROM pitstops WHERE kind='secret' AND thread_id='th_vl'").n, 0, "saving it was the approval; no second ask");
+  assert.ok(!one("SELECT detail FROM pitstops WHERE id=?", ps.id).detail.includes("Radarr-synthetic-1"), "the value never lands on the pit stop");
+
+  // A guessed name on a site that already has a login: told the real name, no pit stop.
+  const guess = await fill("Radarr admin", fakeMcp(ok));
+  assert.match(guess.contentItems[0].text, /The login for radarr\.example is "Radarr": use that name/);
+  assert.equal(one("SELECT COUNT(*) n FROM pitstops WHERE kind='login'").n, 1);
+  // Codes and cards never open a request; neither does a page that isn't https.
+  snapshots.set("cx_vl", { ...LOGIN_PAGE, url: "http://other.example/login" });
+  assert.match((await fill("Other", fakeMcp(ok))).contentItems[0].text, /^No secret called "Other"/);
+  assert.equal(one("SELECT COUNT(*) n FROM pitstops WHERE kind='login'").n, 1);
+});

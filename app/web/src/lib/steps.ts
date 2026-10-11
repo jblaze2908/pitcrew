@@ -100,6 +100,7 @@ export function pitLabel(p: { kind: string; title: string; detail?: Record<strin
   if (p.kind === "mcp" && d.server && tool) { const v = stepView(`${d.server}.${tool}`); return { ...v, detail: "" }; }
   // Worded like the fill's own step, so an approved ask folds into the row it allowed (Events gatedCalls).
   if (p.kind === "secret") return d.secret?.kind === "card" ? { icon: "lock", label: "Used card", detail: `${d.secret?.name} on ${d.site?.host}` } : { icon: "lock", label: "Signed in to", detail: `${d.site?.host} with ${d.secret?.name}` };
+  if (p.kind === "login") return { icon: "lock", label: "Login for", detail: d.login?.site || "" };
   if (p.kind === "vault") return { icon: "lock", label: `${d.secret?.name || "A secret"} failed`, detail: "update it in Vault" };
   return { icon: "tool", label: plainWords(p.title), detail: "" };
 }

@@ -1,4 +1,4 @@
-// Settings → Permissions → Vault: secrets the crew fills by name. Values are write-only: the API never returns one, so the editor
+// Settings → Vault: secrets the crew fills by name. Values are write-only: the API never returns one, so the editor
 // only knows which fields are "set". Imports (Google Passwords CSV, Authenticator QR) are parsed here in the browser;
 // only the rows or the one seed the driver picks are sent.
 import { useState } from "react";
@@ -20,6 +20,7 @@ export function VaultSettings({ item }: { item?: string }) {
   const { S } = useStore();
   const { data, error, reload } = useFetch(() => api.get<VaultEntry[]>("/api/vault"), []);
   const [importing, setImporting] = useState(false);
+  const [adding, setAdding] = useState<boolean | null>(null);
   if (error && !data) return <p className="badc">{error}</p>;
   if (!data) return null;
   const editing = item === "new" ? null : data.find((x) => x.id === item);
@@ -27,8 +28,9 @@ export function VaultSettings({ item }: { item?: string }) {
   const name = (id: string | null) => S.bots.find((b) => b.id === id)?.name || "a member";
   return (
     <Section id="vault" title="Vault" intro="Logins, one-time codes and cards the crew uses without seeing them. Pitcrew types the value in; the model only knows the name."
-      action={<><button className="pc-pill o s" onClick={() => setImporting((x) => !x)}>Import</button><a className="pc-pill s" href="#/settings/vault/new">Add secret</a></>}>
+      action={<><button className="pc-pill o s" onClick={() => setImporting((x) => !x)}>Import</button><a className="pc-pill o s" href="#/settings/vault/new">Add one</a><button className="pc-pill s" onClick={() => setAdding((x) => !(x ?? !data.length))}>Add logins</button></>}>
       {importing && <Wide><CsvImport bots={S.bots} done={() => { setImporting(false); reload(); }} /></Wide>}
+      {(adding ?? !data.length) && <Wide><AddLogins bots={S.bots} done={() => { setAdding(false); reload(); }} /></Wide>}
       {data.length ? (
         <div className="vtbl st-vault">
           <div className="vh"><span>Name</span><span>Kind</span><span>Who may use it</span><span>Last used</span></div>
@@ -42,7 +44,7 @@ export function VaultSettings({ item }: { item?: string }) {
             </a>
           ))}
         </div>
-      ) : <Wide><p className="st-empty">No secrets yet. Add one, or import the sites your crew needs from a Google Passwords export.</p></Wide>}
+      ) : null}
       <p className="st-foot">Open a secret to replace its value or change who may use it. Values are encrypted on this server, never shown again, and never enter a member's computer. Pitcrew checks the page is that secret's site before it types.</p>
     </Section>
   );
@@ -75,7 +77,7 @@ function VaultEditor({ v, bots, done }: { v: VaultEntry | null; bots: BotCard[];
   const accessOpts = kind === "card" ? ([["no", "no"], ["ask", "asks every time"]] as const) : ([["no", "no"], ["ask", "asks each thread"], ["always", "without asking"]] as const);
   return (
     <div className="pc-card col" style={{ maxWidth: 640 }}>
-      <div className="spread"><b className="pc-h3">{v ? v.name : "New secret"}</b><a className="small faint" href="#/settings/vault">Back to Permissions</a></div>
+      <div className="spread"><b className="pc-h3">{v ? v.name : "New secret"}</b><a className="small faint" href="#/settings/vault">Back to Vault</a></div>
       {v?.needs_update && <p className="small badc">{`A sign-in with this failed: ${v.needs_update}. Save the current value from your password manager and the crew can use it again.`}</p>}
       <div className="field"><label>Kind</label><Seg options={KINDS} value={kind} onChange={setKind} /></div>
       <Field label="Name the crew uses"><input value={f.name} placeholder="Northwind Power login" onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
@@ -132,6 +134,46 @@ function TotpField({ has, value, onChange }: { has: boolean; value: string; onCh
         {accounts.map((a) => <label key={a.uri} className="row small"><input type="radio" name="otp" checked={picked === a.uri} onChange={() => { setPicked(a.uri); onChange(a.uri); }} />{a.issuer ? `${a.issuer} · ${a.name}` : a.name}</label>)}
       </div>}
     </Field>
+  );
+}
+
+// Several logins at once: one row each (site, username, password), named from the site, all given to one member.
+// Enter in a row's password adds the next row. Sent through /api/vault/import, which reports each row that failed.
+type LoginRow = { site: string; username: string; password: string };
+const blank = (): LoginRow => ({ site: "", username: "", password: "" });
+const hostOf = (s: string) => s.trim().replace(/^[a-z]+:\/\//i, "").split(/[/?#:]/)[0].toLowerCase();
+const nameOf = (s: string) => { const l = hostOf(s).replace(/^www\./, "").split(".")[0]; return l ? l[0].toUpperCase() + l.slice(1) : ""; };
+function AddLogins({ bots, done }: { bots: BotCard[]; done: () => void }) {
+  const [rows, setRows] = useState<LoginRow[]>([blank()]);
+  const [who, setWho] = useState(""), [access, setAccess] = useState<Access>("always");
+  const ready = rows.filter((r) => hostOf(r.site) && r.password);
+  const edit = (i: number, k: keyof LoginRow, v: string) => setRows((rs) => { const n = rs.map((r, j) => (j === i ? { ...r, [k]: v } : r)); return n[n.length - 1].site ? [...n, blank()] : n; });
+  const send = async () => {
+    const r = await api.post<{ added: string[]; failed: { name: string; error: string }[] }>("/api/vault/import", { rows: ready.map((x) => ({ name: nameOf(x.site), site: hostOf(x.site), username: x.username, password: x.password, allowed: who ? [who] : [], always: who && access === "always" ? [who] : [] })) });
+    toast(`Saved ${r.added.length}${r.failed.length ? `; ${r.failed.length} failed (${r.failed.map((x) => `${x.name}: ${x.error}`).join("; ")})` : ""}`, r.failed.length > 0);
+    if (!r.failed.length) { setRows([blank()]); done(); } else setRows((rs) => rs.filter((x) => !r.added.includes(nameOf(x.site))));
+  };
+  return (
+    <div className="pc-card col">
+      <div className="spread"><b className="pc-h3">Add logins</b><span className="small faint">Paste a site's address; the name fills itself.</span></div>
+      <div className="vadd">
+        <span className="small faint">Site</span><span className="small faint">Username</span><span className="small faint">Password</span><span />
+        {rows.map((r, i) => <div key={i} className="vadd-r">
+          <input aria-label="Site" placeholder="radarr.example.com" value={r.site} onChange={(e) => edit(i, "site", e.target.value)} />
+          <input aria-label="Username" autoComplete="off" spellCheck={false} value={r.username} onChange={(e) => edit(i, "username", e.target.value)} />
+          <input aria-label="Password" type="password" autoComplete="new-password" value={r.password} onChange={(e) => edit(i, "password", e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (i === rows.length - 1) setRows((rs) => [...rs, blank()]); } }} />
+          {rows.length > 1 && r.site ? <button className="small faint" aria-label="Remove row" onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))}>×</button> : <span />}
+        </div>)}
+      </div>
+      <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
+        <span className="small muted">Who may use them</span>
+        <select value={who} onChange={(e) => setWho(e.target.value)}><option value="">Nobody yet</option>{bots.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>
+        {who && <Seg options={[["ask", "asks each thread"], ["always", "without asking"]] as const} value={access === "no" ? "ask" : access} onChange={setAccess} />}
+      </div>
+      {ready.length > 0 && <p className="small faint">{`Saved as ${ready.map((x) => `“${nameOf(x.site)}”`).join(", ")}. Open one later to add a one-time code or a note.`}</p>}
+      <div className="row"><BusyButton className="pc-pill s" onClick={async () => (ready.length ? send() : toast("Add a site and its password", true))}>{ready.length ? `Save ${ready.length} login${ready.length === 1 ? "" : "s"}` : "Save"}</BusyButton><button className="pc-pill o s" onClick={done}>Cancel</button></div>
+    </div>
   );
 }
 

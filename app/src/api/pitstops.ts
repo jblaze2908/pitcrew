@@ -38,7 +38,8 @@ export const pitstopRoutes = new Hono<Env>()
     const out: unknown[] = [];
     for (const id of b.ids) {
       const ps = one<{ kind: string }>("SELECT kind FROM pitstops WHERE id=?", id as string);
-      if (ps && ps.kind !== "hire" && ps.kind !== "engram") out.push(await R.decide(id as string, b.decision, { scope: "once", note: "batch" }));
+      // A login request needs its form; batch approve would only tell the member nothing was saved.
+      if (ps && !["hire", "engram", "login"].includes(ps.kind)) out.push(await R.decide(id as string, b.decision, { scope: "once", note: "batch" }));
     }
     return c.json({ decided: out.length });
   })
