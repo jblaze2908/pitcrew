@@ -1942,7 +1942,7 @@ test("vault: a fill types and submits server-side; the value never reaches the r
     const frame = { url: () => url, evaluate: async (_fn, vals) => { log.push(["sweep", vals]); return { left: 0, pw: false, err: false }; } };
     return { url: () => url, mainFrame: () => frame, waitForTimeout: async () => {}, waitForLoadState: async () => {},
       locator: (sel) => ({ elementHandle: async () => ({ ownerFrame: async () => frame, evaluate: async () => ["input", types[sel] || "text"], fill: async (v) => log.push(["fill", sel, v]) }),
-        click: async () => log.push(["click", sel]), press: async (_k) => log.push(["enter", sel]) }) };
+        click: async () => log.push(["click", sel]), press: async (_k) => log.push(["enter", sel]), count: async () => 0 }) };
   };
   // A bare vm context, like Playwright MCP's run_code: no URL, no Node globals.
   const { runInNewContext } = await import("node:vm");
