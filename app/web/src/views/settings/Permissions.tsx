@@ -1,7 +1,6 @@
-// Permissions: the stop switch, the safety check, the mode new threads start in, approvals you've given, sites, the vault.
+// Permissions: the stop switch, the safety check, the mode new threads start in, approvals you've given, sites.
 import type { Learned, Rule, State } from "../../../../shared/types";
 import { RuleLabel } from "../../components/RuleLabel";
-import { VaultSettings } from "../../components/Vault";
 import { ConfirmButton, Face, Seg } from "../../components/ui";
 import { api } from "../../lib/api";
 import { dayMonth, plural } from "../../lib/format";
@@ -20,9 +19,7 @@ const MODES: readonly (readonly [Mode, string, string])[] = [
   ["yolo", "YOLO", "Never stops to ask, paying and sending included. Blocked sites, hard blocks and house rules still hold."],
 ];
 
-export function Permissions({ check, item }: { check: boolean; item?: string }) {
-  // A vault entry (#/settings/vault/<id> or /new) opens its editor in place of the tab.
-  if (item) return <VaultSettings item={item} />;
+export function Permissions({ check }: { check: boolean }) {
   return (
     <>
       <TabHead title="Permissions" intro="What the crew may do on its own, and the switch that stops everything." />
@@ -32,7 +29,6 @@ export function Permissions({ check, item }: { check: boolean; item?: string }) 
       <Section id="sites" title="Sites" intro="Which sites the crew may open and how much it may do there. A member's own list wins, except Blocked here. Paying always asks.">
         <Wide className="st-flush"><Sites scope="global" /></Wide>
       </Section>
-      <VaultSettings />
     </>
   );
 }

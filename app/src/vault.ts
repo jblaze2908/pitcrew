@@ -114,6 +114,9 @@ export function findSecret(name: string): Secret | null {
   return r ? { ...meta(r), blob: r.blob } : null;
 }
 export const usableBy = (botId: string) => listVault().filter((s) => s.allowed.includes(botId));
+// The login whose site covers this host, so a member that guessed a name is pointed at the real one. Lists the vault;
+// runs only when a fill names no known secret.
+export const loginForHost = (host: string) => listVault().find((s) => s.kind !== "card" && siteMatch(host, s.site)) || null;
 // The page's host is the secret's site or a subdomain of it: accounts.bescom.co.in passes for bescom.co.in.
 export const siteMatch = (host: string, site: string) => !!site && (host === site || host.endsWith(`.${site}`));
 // The value to type for one field, decrypted (or the TOTP computed) at the moment of the fill.
@@ -129,10 +132,11 @@ export function markUsed(id: string, botId: string) { run("UPDATE vault SET last
 // Per-thread approvals ("Allow for this task"): in memory, like a site allowed once, so a restart asks again.
 const grants = new Map<string, Set<string>>(); // thread id → secret ids
 export const granted = (threadId: string, secretId: string) => !!grants.get(threadId)?.has(secretId);
+export const grantThread = (threadId: string, secretId: string) => void (grants.get(threadId) || grants.set(threadId, new Set()).get(threadId)!).add(secretId);
 export function applySecretChoice(ps: PitstopRow, status: string, scope: string) {
   const s = json(ps.detail, {}).secret;
   if (status !== "approved" || !s?.id || s.kind === "card") return;
-  if (scope === "thread" && ps.thread_id) (grants.get(ps.thread_id) || grants.set(ps.thread_id, new Set()).get(ps.thread_id)!).add(s.id);
+  if (scope === "thread" && ps.thread_id) grantThread(ps.thread_id, s.id);
   if (scope === "always") {
     const r = one<VaultRow>("SELECT allowed, always FROM vault WHERE id=?", s.id);
     if (!r) return;

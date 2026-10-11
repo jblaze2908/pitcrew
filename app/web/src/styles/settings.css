@@ -124,3 +124,8 @@
   .st-add{flex-wrap:wrap}
   .st-sech{flex-direction:column;gap:10px}
 }
+
+/* Vault: several logins at once (components/Vault.tsx AddLogins). */
+.vadd{display:grid;grid-template-columns:1.5fr 1fr 1fr 20px;gap:6px 10px;align-items:center}
+.vadd-r{display:contents}
+.vadd input{min-width:0}

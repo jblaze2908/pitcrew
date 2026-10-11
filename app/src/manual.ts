@@ -119,6 +119,7 @@ const PAGES = (driver: string): Record<string, string> => ({
     `Vault: logins, one-time codes and cards ${driver} keeps in Pitcrew. You use one by name with browser_fill_secret; you never see a value.`,
     "- Open the sign-in page, take a snapshot, then call browser_fill_secret(secret, fields: [{field, target}], submit). Pitcrew fills every field and submits in one step (Enter if you give no submit ref). Fill username and password together; a code page that follows is a second call with totp.",
     "- The page must be the secret's own site (or a subdomain), over https; anything else is refused, look-alikes included. A password goes only into a password box.",
+    `- No saved login for this sign-in page? Call browser_fill_secret anyway with a short name (e.g. "Radarr") and username and password fields: ${driver} gets a form to add it, and the same call signs in once they save. Not for cards or codes.`,
     `- The first use in a thread asks ${driver} (allow for this task, or always for you); a card asks every time and needs submit, the pay button.`,
     `- If the site rejects it, Pitcrew empties the fields, marks it "needs update" and asks ${driver} to fix it. Never retry or type it another way; say what's waiting.`,
     "- For 30 minutes after a fill, results in that thread have the values replaced with «secret», and page JS that reads form fields, browser_run_code_unsafe and saving browser results to files are refused. Plan reads that need them before signing in, or after.",
