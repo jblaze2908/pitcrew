@@ -193,6 +193,9 @@ export function fillCode(spec: { site: string; card: boolean; fields: FillField[
     await page.waitForTimeout(600);
     await page.waitForLoadState("load", { timeout: 8000 }).catch(() => {});
     await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
+    // Single-page apps (Jellyfin) sign in after the load events settle: give the password box up to 6 s to go before the
+    // sweep reads "still on the form" as a rejected login. Costs time only when the form stays.
+    for (let i = 0; i < 12 && page.url() === before; i++) { if (!(await page.locator("input[type=password]:visible").count().catch(() => 0))) break; await page.waitForTimeout(500); }
     const s = await sweep();
     return { ok: true, filled, url: page.url(), moved: page.url() !== before, ...s };
   } catch (e) { await sweep().catch(() => {}); return { ok: false, why: "error", filled, error: hide(e) }; }
