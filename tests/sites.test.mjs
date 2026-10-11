@@ -378,6 +378,8 @@ test("jev reads the driver's own words and house rules: an explicit ask allows, 
   assert.equal(J.applyContext(v("pay"), 0.99, 0, P).decision, "ask", "paying always needs the driver");
   assert.equal(J.applyContext(v("signin"), 0.99, 0, P).decision, "ask");
   assert.equal(J.applyContext(v("browse", "allow"), 0, 0.7, P).decision, "block");
+  const asked = J.applyContext(v("delete"), 0.9, 0.81, P);
+  assert.deepEqual([asked.decision, asked.forbidden], ["ask", true], "a rule against what the driver just asked for asks them instead of blocking");
   const maybe = J.applyContext(v("browse", "allow"), 0, 0.5, P); assert.deepEqual([maybe.decision, maybe.forbidden], ["ask", true]);
 
   thread("t_ctx");

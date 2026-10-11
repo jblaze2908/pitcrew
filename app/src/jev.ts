@@ -24,6 +24,9 @@ const CONTEXT_QUESTIONS = {
 // Applies the driver's words and house rules to a verdict: a likely breach blocks or asks (and no autonomy waives it);
 // an explicit request allows anything but paying and signing in. Pure.
 export function applyContext(v: Verdict, authorized: number | undefined, forbidden: number | undefined, policy: Policy): Verdict {
+  // The driver asking for this exact action outranks a house rule against it: ask them, never refuse what they just asked
+  // for ("Never delete media without asking" + "delete these four" was a silent block, 2026-10-11). Still asks in YOLO.
+  if (forbidden != null && forbidden >= 0.6 && authorized != null && authorized >= 0.8) return { ...v, decision: stricter(v.decision, "ask"), forbidden: true, authorized: true, reason: `${v.reason} · the driver asked for this ${authorized.toFixed(2)} but a house rule says no ${forbidden.toFixed(2)}` };
   if (forbidden != null && forbidden >= 0.6) return { ...v, decision: "block", forbidden: true, reason: `${v.reason} · breaks a house rule or the driver's instruction ${forbidden.toFixed(2)}` };
   if (forbidden != null && forbidden >= 0.45) return { ...v, decision: stricter(v.decision, "ask"), forbidden: true, reason: `${v.reason} · may break a house rule ${forbidden.toFixed(2)}` };
   if (authorized != null && authorized >= 0.8 && !NEEDS_DRIVER.has(v.effect) && policy[v.effect] !== "block") return { ...v, decision: "allow", authorized: true, reason: `${v.reason} · the driver asked for this ${authorized.toFixed(2)}` };

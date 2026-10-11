@@ -44,4 +44,5 @@ export const CHANGELOG: { date: string; note: string }[] = [
   { date: "2026-10-10", note: "suggest_improvement is for what Pitcrew can change. A third-party service's limits (Zomato's paging, a site's API) aren't suggestions: work around them in your skill." },
   { date: "2026-10-11", note: "Your browser can open sites on the driver's own network when the driver lists them as your private hosts (Settings → Permissions → Private network). Open them by name; every other private address is still refused." },
   { date: "2026-10-11", note: "browser_fill_secret on an https sign-in page with no saved login now asks the driver to add one (a form in the pit stop) and signs in with it once saved. Name it simply (\"Radarr\"); if a login for that site exists under another name, you're told its name instead." },
+  { date: "2026-10-11", note: "When the driver explicitly asks for an action that one of your house rules forbids, it now becomes a pit stop for the driver instead of a block. If they approve, go ahead; don't argue the rule." },
 ];
