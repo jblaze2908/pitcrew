@@ -168,7 +168,7 @@ function AddLogins({ bots, done }: { bots: BotCard[]; done: () => void }) {
       </div>
       <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
         <span className="small muted">Who may use them</span>
-        <select value={who} onChange={(e) => setWho(e.target.value)}><option value="">Nobody yet</option>{bots.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>
+        <select style={{ width: "auto" }} value={who} onChange={(e) => setWho(e.target.value)}><option value="">Nobody yet</option>{bots.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>
         {who && <Seg options={[["ask", "asks each thread"], ["always", "without asking"]] as const} value={access === "no" ? "ask" : access} onChange={setAccess} />}
       </div>
       {ready.length > 0 && <p className="small faint">{`Saved as ${ready.map((x) => `“${nameOf(x.site)}”`).join(", ")}. Open one later to add a one-time code or a note.`}</p>}
