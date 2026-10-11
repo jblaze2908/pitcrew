@@ -157,7 +157,9 @@ export function fillCode(spec: { site: string; card: boolean; fields: FillField[
   return `async (page) => {
   const spec = ${JSON.stringify(spec)};
   // A card's fields may sit in a payment provider's frame (any https host); the page itself must be the site when one is set.
-  const onSite = (u, any) => { try { const x = new URL(u), h = x.hostname.toLowerCase(); return x.protocol === "https:" && (any || h === spec.site || h.endsWith("." + spec.site)); } catch { return false; } };
+  // No URL global here: Playwright MCP runs this in a bare vm context (measured on @playwright/mcp 0.0.82), so new URL threw
+  // and every fill failed as "page moved". Parse by hand; userinfo (user@host) is refused rather than parsed.
+  const onSite = (u, any) => { const m = /^https:[/][/]([^/?#\\\\]*)/i.exec(String(u || "")); if (!m || m[1].includes("@")) return false; const h = m[1].replace(/:[0-9]+$/, "").toLowerCase(); return any || h === spec.site || h.endsWith("." + spec.site); };
   const okHost = (u) => onSite(u, spec.card && !spec.site), okFrame = (u) => onSite(u, spec.card);
   const hide = (e) => spec.fields.reduce((t, f) => t.split(f.value).join("«secret»"), String((e && e.message) || e)).split("\\n")[0].slice(0, 300);
   const loc = (t) => page.locator(/^f?\\d*e\\d+$/.test(t) ? "aria-ref=" + t : t);
