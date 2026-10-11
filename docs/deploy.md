@@ -121,6 +121,8 @@ If your proxy runs in Docker on its own network, give it a route to the bridge a
 
 **Shared memory (Engram).** If you run an [Engram](https://github.com/jblaze2908/engram) server, Settings → Shared memory takes its address and a link token; members then read and file memories there and its MCP gateway serves their connectors. `PITCREW_ENGRAM_URL` pre-fills the address. Without it, members keep per-member memory and MCP connections in Pitcrew.
 
+**Sites on your own network.** Member browsers refuse private addresses (LAN, VPN, cloud metadata). To let one member manage services you keep off the internet, put the Pitcrew host on a private network that reaches them (Tailscale, WireGuard), then list each site under that member's Settings → Permissions → Private network as `name address`, e.g. `nas.example.com 100.101.102.103`. The member's computer resolves the name to that address and its browser opens only those names; it applies when the computer next starts. Serve the sites over https with a real certificate (a reverse proxy using a DNS challenge works without any public route), and limit what the Pitcrew host may reach on that network: with Tailscale, tag it and grant it only the proxy's port.
+
 ## Updating
 
 - Option A updates itself within ~2 minutes of a push to the tracked branch. The database is snapshotted to `/srv/pitcrew/data/backups/` before each rollout (last 14 kept).

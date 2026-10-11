@@ -316,6 +316,8 @@ export class Computer {
       "--cpus", "1.5", "--memory", "2g", "--pids-limit", "768", "--shm-size", "512m",
       "--read-only", "--tmpfs", "/tmp:size=768m,mode=1777", "--tmpfs", `/home/crew:size=128m,uid=${CREW_UID},gid=${CREW_UID},mode=700`,
       "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--network", net, "-v", `${botDir(id)}:/bot`, ...policyMount(id),
+      // Private hosts resolve to their pinned address; the PAC lets the browser reach only these names (domains.ts).
+      ...(b.private_hosts || []).flatMap((h) => ["--add-host", `${h.host}:${h.address}`]),
       // Codex's image_gen saves in the brain and points the agent at that path; this makes the path real on the computer.
       "-v", `${brainDir(id)}/generated_images:/brains/${id}/generated_images:ro`,
       "-e", `TZ=${TZ}`, "-e", `PITCREW_HUE=${HEX[b.hue] || HEX.c1}`, "-e", `PITCREW_NAME=${b.name.replace(/[^\w .'-]/g, "")}`,
