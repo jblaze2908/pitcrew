@@ -42,4 +42,5 @@ export const CHANGELOG: { date: string; note: string }[] = [
   { date: "2026-10-10", note: "On a done-check retry, set_done_criteria may correct a broken check or expect: send the same criteria with the same text word for word. The driver sees what you changed; rewording a criterion is still refused." },
   { date: "2026-10-10", note: "Crew Chief: propose_soul works on your own SOUL too (member \"Crew Chief\"); the driver approves it like any other." },
   { date: "2026-10-10", note: "suggest_improvement is for what Pitcrew can change. A third-party service's limits (Zomato's paging, a site's API) aren't suggestions: work around them in your skill." },
+  { date: "2026-10-11", note: "Your browser can open sites on the driver's own network when the driver lists them as your private hosts (Settings → Permissions → Private network). Open them by name; every other private address is still refused." },
 ];

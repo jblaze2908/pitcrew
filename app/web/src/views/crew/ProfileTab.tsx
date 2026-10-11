@@ -90,6 +90,9 @@ export function ProfileTab({ b, d, section, reload }: { b: BotCard; d: BotDetail
             <Area aria-label="Rules" value={b.house_rules || ""} rows={3} placeholder={"Never place, change or cancel orders.\nFine to download my own statements."} onSave={(v) => save("rules", { house_rules: v })} />
           </Block>
           <Sites b={b} />
+          <Block label="Private network" help="Sites on your own network it may open, one per line: name, then address (nas.example.com 192.168.1.20). Every other private address stays off-limits. Takes effect when its computer next starts." saved={ok("private")}>
+            <Area aria-label="Private network" value={(b.private_hosts || []).map((h) => `${h.host} ${h.address}`).join("\n")} rows={2} placeholder="nas.example.com 192.168.1.20" onSave={(v) => save("private", { private_hosts: v })} />
+          </Block>
           <Learned d={d} reload={reload} />
         </Section>
 

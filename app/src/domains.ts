@@ -3,7 +3,7 @@
 // domains a member visited ride along for look-alike checks. Blocked domains are also written into the member's
 // Chromium managed policy (mounted read-only into its computer), which Chrome re-reads without a restart.
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
-import { all, run, now, audit, json, getSetting, setSetting } from "./db.js";
+import { one, all, run, now, audit, json, getSetting, setSetting } from "./db.js";
 import { siteOf, registrable, domainChain, normHost, checkoutWhy, lookalike, homograph, type Site } from "./sites.js";
 import type { Bot, Decision } from "../shared/types.js";
 import type { SiteRow, PitstopRow } from "./models.js";
@@ -199,7 +199,24 @@ export function browserPolicy(botId: string) {
   const blocked = [...new Set(entries.filter((r) => r.mode === "blocked" && siteFor(botId, r.domain).mode === "blocked").map((r) => r.domain))];
   // A more specific allowed host under a blocked domain (member's own, or global without a global block over it).
   const allowed = entries.filter((r) => r.mode !== "blocked" && !["blocked", "unknown"].includes(siteFor(botId, r.domain).mode) && blocked.some((d) => r.domain.endsWith(`.${d}`))).map((r) => r.domain);
-  return { ...b, URLBlocklist: [...(b.URLBlocklist || []), ...blocked], URLAllowlist: [...new Set([...(b.URLAllowlist || []), ...allowed])] };
+  const hosts = json<{ host: string }[]>(one<{ private_hosts: string }>("SELECT private_hosts FROM bots WHERE id=?", botId)?.private_hosts, []).map((h) => h.host);
+  const proxy = b.ProxySettings && hosts.length ? { ProxySettings: { ...b.ProxySettings, ProxyPacUrl: pacWith(b.ProxySettings.ProxyPacUrl, hosts) } } : {};
+  return { ...b, ...proxy, URLBlocklist: [...(b.URLBlocklist || []), ...blocked], URLAllowlist: [...new Set([...(b.URLAllowlist || []), ...allowed])] };
+}
+// The image's PAC sends every name that resolves to a private range to a dead proxy (computer/private-net.pac). A
+// member's private hosts (validated names, sites.ts) go DIRECT by exact name; everything else keeps that check.
+const PAC = "data:application/x-ns-proxy-autoconfig;base64,";
+export function pacWith(url: unknown, hosts: string[]) {
+  if (!hosts.length || typeof url !== "string" || !url.startsWith(PAC)) return url;
+  const src = Buffer.from(url.slice(PAC.length), "base64").toString("utf8");
+  if (!src.includes("function FindProxyForURL(")) return url;
+  const wrapped = `${src.replace("function FindProxyForURL(", "function privateNetProxy(")}
+var PRIVATE_HOSTS = ${JSON.stringify(hosts)};
+function FindProxyForURL(url, host) {
+  return PRIVATE_HOSTS.indexOf(String(host).toLowerCase()) >= 0 ? "DIRECT" : privateNetProxy(url, host);
+}
+`;
+  return PAC + Buffer.from(wrapped).toString("base64");
 }
 export function writeBrowserPolicy(botId: string) {
   const p = browserPolicy(botId);
@@ -212,7 +229,7 @@ export function writeBrowserPolicy(botId: string) {
 export function policyMount(botId: string): string[] {
   try { const dir = writeBrowserPolicy(botId); return dir ? ["-v", `${dir}:${POLICY_DIR}:ro`] : []; } catch { return []; }
 }
-function refreshBrowserPolicy(scope: string) {
+export function refreshBrowserPolicy(scope: string) {
   if (!basePolicy()) return;
   let ids = [scope];
   if (scope === "global") try { ids = readdirSync(`${ROOT}/policy`); } catch { ids = []; }

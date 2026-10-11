@@ -520,3 +520,21 @@ test("a blocked tool call hears jev's reason, not a generic decline", async () =
   assert.match(note, /Blocked, not run: "crm: wipe"/); assert.match(note, /breaks a house rule/); assert.match(note, /didn't refuse it/);
   run("UPDATE bots SET house_rules='' WHERE id=?", b.id);
 });
+
+test("private hosts: only named LAN/CGNAT addresses, and the PAC lets exactly those names through", async () => {
+  assert.deepEqual(S.parsePrivateHosts("Radarr.Example.com 100.101.102.103\n\nnas.example.com 192.168.1.20"), [{ host: "radarr.example.com", address: "100.101.102.103" }, { host: "nas.example.com", address: "192.168.1.20" }]);
+  for (const bad of ["nas.example.com 169.254.169.254", "nas.example.com 127.0.0.1", "nas.example.com 8.8.8.8", "192.168.1.5 192.168.1.5", "localhost 10.0.0.1", "nas 10.0.0.1", "nas.example.com", "a.example.com 10.0.0.1 extra", "a.example.com 10.0.0.1\na.example.com 10.0.0.2"])
+    assert.throws(() => S.parsePrivateHosts(bad), undefined, bad);
+  assert.throws(() => S.parsePrivateHosts(Array.from({ length: 21 }, (_, i) => `h${i}.example.com 10.0.0.${i + 1}`).join("\n")));
+
+  const { runInNewContext } = await import("node:vm");
+  const pac = readFileSync(new URL("../computer/private-net.pac", import.meta.url), "utf8");
+  const url = D.pacWith(`data:application/x-ns-proxy-autoconfig;base64,${Buffer.from(pac).toString("base64")}`, ["radarr.example.com"]);
+  const ctx = { dnsResolveEx: () => "100.101.102.103", isInNetEx: (ip, net) => net === "100.64.0.0/10" && ip.startsWith("100.") };
+  runInNewContext(Buffer.from(url.split(",")[1], "base64").toString(), ctx);
+  assert.equal(ctx.FindProxyForURL("https://radarr.example.com/", "radarr.example.com"), "DIRECT");
+  assert.equal(ctx.FindProxyForURL("https://other.example.com/", "other.example.com"), "PROXY 127.0.0.1:9");
+  assert.equal(ctx.FindProxyForURL("https://metadata/", "metadata"), "PROXY 127.0.0.1:9");
+  assert.equal(D.pacWith("data:text/plain,x", ["radarr.example.com"]), "data:text/plain,x");
+  assert.equal(D.pacWith(url, []), url);
+});

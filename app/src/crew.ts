@@ -7,6 +7,8 @@ import type { Bot, EngramScope, Hue, Shape, Personality, ProviderId } from "../s
 import type { BotRow } from "./models.js";
 import { FILES_URL, TOPICS } from "./manual.js";
 import { httpErr } from "./auth.js";
+import { parsePrivateHosts } from "./sites.js";
+import { refreshBrowserPolicy } from "./domains.js";
 
 export const HUES: Hue[] = ["c1", "c2", "c3", "c5", "c6"];
 /** A colour no active member wears yet, else the least worn; ties go to palette order. One query per hire. */
@@ -23,7 +25,7 @@ const CONN_ID = /^[a-z0-9][a-z0-9-]{0,11}$/;
 // New crew members start with read/draft allowed; sign-in, pay and send ask first; delete and share always ask.
 export const STARTING_POLICY = { ...DEFAULT_POLICY };
 
-const row = (b: BotRow | undefined): Bot | undefined => b && ({ ...b, personality: json(b.personality, {}), policy: { ...STARTING_POLICY, ...json(b.policy, {}) }, mcp: json(b.mcp, []), archived: !!b.archived, private: !!b.private, engram_scope: ENGRAM_SCOPES.includes(b.engram_scope as EngramScope) ? b.engram_scope : "personal", engram_household: !!b.engram_household, house_rules: b.house_rules || "", soul: b.soul || "" } as Bot);
+const row = (b: BotRow | undefined): Bot | undefined => b && ({ ...b, personality: json(b.personality, {}), policy: { ...STARTING_POLICY, ...json(b.policy, {}) }, mcp: json(b.mcp, []), archived: !!b.archived, private: !!b.private, engram_scope: ENGRAM_SCOPES.includes(b.engram_scope as EngramScope) ? b.engram_scope : "personal", engram_household: !!b.engram_household, house_rules: b.house_rules || "", soul: b.soul || "", private_hosts: json(b.private_hosts, []) } as Bot);
 export const getBot = (id: string | null | undefined) => row(one<BotRow>("SELECT * FROM bots WHERE id=?", id));
 export const listBots = () => all<BotRow>("SELECT * FROM bots WHERE archived=0 ORDER BY kind='chief' DESC, created_at").map(row) as Bot[];
 
@@ -95,6 +97,9 @@ export function retireBot(id: string, by: string) {
 export function updateBot(id: string, patch: HireSpec) {
   const b = getBot(id);
   if (!b) throw httpErr(404, "No such crew member");
+  // Validated before anything is written, so a bad line saves nothing.
+  const raw = (patch as { private_hosts?: unknown }).private_hosts;
+  let hosts; if (raw !== undefined) try { hosts = parsePrivateHosts(raw); } catch (e) { throw httpErr(400, (e as Error).message); }
   const n = normaliseSpec({ ...b, ...patch, personality: { ...b.personality, ...(patch.personality || {}) } });
   const policy = { ...b.policy };
   // Policy edits may only use known effect classes and allow/ask; "always" for delete/share is refused.
@@ -107,6 +112,7 @@ export function updateBot(id: string, patch: HireSpec) {
   if (patch.engram_household !== undefined) run("UPDATE bots SET engram_household=? WHERE id=?", n.engram_household ? 1 : 0, id);
   if (typeof (patch as { soul?: unknown }).soul === "string") run("UPDATE bots SET soul=? WHERE id=?", String((patch as { soul: string }).soul).slice(0, SOUL_MAX), id);
   if (typeof (patch as { house_rules?: unknown }).house_rules === "string") run("UPDATE bots SET house_rules=? WHERE id=?", String((patch as { house_rules: string }).house_rules).slice(0, 3000), id);
+  if (hosts) { run("UPDATE bots SET private_hosts=? WHERE id=?", JSON.stringify(hosts), id); refreshBrowserPolicy(id); }
   audit("driver", "crew.updated", { id, fields: Object.keys(patch) });
   return getBot(id);
 }

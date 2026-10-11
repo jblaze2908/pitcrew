@@ -50,6 +50,7 @@ const PAGES = (driver: string): Record<string, string> => ({
     "- Cookies, localStorage and sessionStorage tools exist; secret values come back masked. Page JS and storage writes are checked by jev like any action.",
     "- browser_fill_form handles radios, checkboxes and selects too, several fields per call. computer_* pixel actions return a screenshot already.",
     `- file:// is blocked: open workspace files at ${FILES_URL}<path under /bot/work>.`,
+    "- Private network addresses are refused, except the private hosts the driver set for you: those open by name only.",
   ].join("\n"),
   dashboards: SURFACES_DOC(driver),
   schedules: [

@@ -124,6 +124,34 @@ export function siteOf(url: string, known: string[] | null = null): Site | null 
     lookalike: web && known ? lookalike(host, known) : null, homograph: web && known ? homograph(host) : null };
 }
 
+// ---------- private hosts ----------
+// A member's private hosts: names on the driver's own network that its browser may open, each pinned to one address.
+// Only LAN and CGNAT/Tailscale ranges; link-local (cloud metadata), loopback and reserved ranges never qualify.
+export interface PrivateHost { host: string; address: string }
+const HOST_NAME = /^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$/;
+const LAN_V4: [number, number][] = [[10 << 24, 8], [172 << 24 | 16 << 16, 12], [192 << 24 | 168 << 16, 16], [100 << 24 | 64 << 16, 10]];
+const lanV4 = (s: string) => {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
+  if (!m || m.slice(1).some((x) => +x > 255)) return false;
+  const n = m.slice(1).reduce((a, x) => (a << 8) | +x, 0);
+  return LAN_V4.some(([net, bits]) => ((n ^ net) >>> (32 - bits)) === 0);
+};
+export const MAX_PRIVATE_HOSTS = 20;
+// Lines of "name address" (or {host, address} objects). Throws on the first bad entry, naming it.
+export function parsePrivateHosts(v: unknown): PrivateHost[] {
+  const items = Array.isArray(v) ? v : String(v ?? "").split("\n").map((l) => l.trim()).filter(Boolean).map((l) => { const [host, address, ...rest] = l.split(/\s+/); return rest.length ? { host: l, address: "" } : { host, address }; });
+  const out: PrivateHost[] = [], seen = new Set<string>();
+  for (const it of items) {
+    const host = normHost((it as PrivateHost)?.host), address = String((it as PrivateHost)?.address || "").trim();
+    if (!HOST_NAME.test(host) || ipKind(host)) throw new Error(`"${host}" isn't a site name like nas.example.com`);
+    if (!lanV4(address)) throw new Error(`${host}: "${address}" isn't a private network address (10.x, 172.16–31.x, 192.168.x or 100.64–127.x)`);
+    if (seen.has(host)) throw new Error(`${host} is listed twice`);
+    seen.add(host); out.push({ host, address });
+  }
+  if (out.length > MAX_PRIVATE_HOSTS) throw new Error(`At most ${MAX_PRIVATE_HOSTS} private hosts`);
+  return out;
+}
+
 // ---------- page signals ----------
 const CHECKOUT_WORDS = new Set(["checkout", "checkouts", "cart", "carts", "basket", "payment", "payments", "pay", "billing", "order", "orders", "subscribe", "subscription", "confirm", "confirmation", "place-order", "placeorder"]);
 const PAY_HOSTS = new Set(["stripe.com", "razorpay.com", "paypal.com", "paytm.com", "paytm.in", "phonepe.com", "adyen.com", "braintreegateway.com", "braintree-api.com", "checkout.com",
