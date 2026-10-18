@@ -1,6 +1,33 @@
 // Formatting shared by every view. Times show in the browser's zone, which is the driver's.
 const ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
+// Money in surfaces is in the host's currency (/api/state currency, set once at boot); numbers use the browser's locale.
+let currency = "USD";
+const numFmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+const compactFmt = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
+let moneyFmt = new Intl.NumberFormat(undefined, { style: "currency", currency, minimumFractionDigits: 0, maximumFractionDigits: 2 });
+let moneyCompact = new Intl.NumberFormat(undefined, { style: "currency", currency, notation: "compact", minimumFractionDigits: 0, maximumFractionDigits: 1 });
+export function setCurrency(code: string | undefined) {
+  if (!code || code === currency) return;
+  try {
+    moneyFmt = new Intl.NumberFormat(undefined, { style: "currency", currency: code, minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    moneyCompact = new Intl.NumberFormat(undefined, { style: "currency", currency: code, notation: "compact", minimumFractionDigits: 0, maximumFractionDigits: 1 });
+    currency = code;
+  } catch { /* an unknown code keeps the last one */ }
+}
+export const currencyCode = () => currency;
+export const currencySymbol = () => moneyFmt.formatToParts(0).find((p) => p.type === "currency")?.value || currency;
+export const num = (v: number) => numFmt.format(v);
+export const money = (v: number) => moneyFmt.format(v);
+/** Short forms for axis ticks and tight spots: 1.2K, $3.5M (the locale's own, e.g. ₹1.2L in en-IN). */
+export const numShort = (v: number) => (Math.abs(v) >= 1e4 ? compactFmt.format(v) : numFmt.format(v));
+export const moneyShort = (v: number) => (Math.abs(v) >= 1e4 ? moneyCompact.format(v) : moneyFmt.format(v));
+
+/** A zone as people say it: "India Standard Time", "Central European Time"; the IANA name if the browser has none. */
+export const zoneName = (timeZone: string) => {
+  try { return new Intl.DateTimeFormat(undefined, { timeZone, timeZoneName: "longGeneric" }).formatToParts(0).find((p) => p.type === "timeZoneName")?.value || timeZone; } catch { return timeZone; }
+};
+
 export const usd = (n: number | null | undefined) => { const v = n || 0; return `$${v.toFixed(v > 0 && v < 0.1 ? 3 : 2)}`; };
 
 export const ago = (t: number | null | undefined) => {

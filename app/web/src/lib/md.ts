@@ -14,7 +14,7 @@ const inline = (s: string, botId?: string) => esc(s)
 
 // GFM table: a row with pipes, then a separator row whose colons set alignment.
 const SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
-const NUM = /^[-+]?[₹$€£]?\s?[\d.,]+\s?(%|[kKmMbB]|x)?$/;
+const NUM = /^[-+]?\p{Sc}?\s?[\d.,]+\s?(%|[kKmMbB]|x)?$/u;
 
 /** Cells of one row: outer pipes dropped, `\|` and pipes inside code kept. Split before inline() so its markup can't be cut. */
 function cells(line: string): string[] {

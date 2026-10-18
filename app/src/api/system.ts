@@ -3,7 +3,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { RESPONSE_ALREADY_SENT } from "@hono/node-server/utils/response";
-import { all, setSetting, audit } from "../db.js";
+import { all, setSetting, audit, currencyCode } from "../db.js";
 import { httpErr, getSecret } from "../auth.js";
 import * as P from "../providers.js";
 import * as R from "../runtime/index.js";
@@ -21,6 +21,7 @@ const Settings = z.object({
   plainVoice: given((v) => (v ? "1" : "0")),
   plans: given((v) => (v ? "1" : "0")),
   newThreadMode: pick(AUTONOMY, null),
+  currency: given((v) => currencyCode(v) ?? ""),
 });
 const Key = z.object({ key: raw });
 
@@ -53,11 +54,13 @@ export const systemRoutes = new Hono<Env>()
   })
   .patch("/api/settings", signedIn, async (c) => {
     const sent = await readJson(c), b = Settings.parse(sent);
+    if (b.currency === "") throw httpErr(400, "Currency must be a three-letter ISO code, like USD or EUR");
     if (b.driverName !== undefined) setSetting("driver_name", b.driverName);
     if (b.defaultProvider) setSetting("default_provider", b.defaultProvider);
     if (b.plainVoice !== undefined) setSetting("plain_voice", b.plainVoice);
     if (b.plans !== undefined) setSetting("plans", b.plans);
     if (b.newThreadMode) setSetting("new_thread_mode", b.newThreadMode);
+    if (b.currency) setSetting("currency", b.currency);
     audit("driver", "settings.updated", { fields: Object.keys(sent) });
     return c.json(state());
   })

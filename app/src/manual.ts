@@ -1,6 +1,8 @@
 // The harness manual: detail a member reads on demand with harness_help(topic), so the instructions every thread carries
 // stay short (crew.ts HARNESS core). One page per topic; each a few hundred words at most.
 
+import { currency } from "./db.js";
+
 export const FILES_URL = "http://127.0.0.1:7780/";
 // The inline surface format (shared/pui.ts parses it; surfaces.ts validates it). The groceries example is the one most
 // replies need: literal values, then a bound one.
@@ -8,7 +10,7 @@ const SURFACES_DOC = (driver: string) => `Showing ${driver} a surface: write it 
 
 <Surface title="Groceries · October">
 <Grid columns=2>
-  <Stat label="Spend" value="₹8,420" delta="+12% vs Sep" tone=down/>
+  <Stat label="Spend" value="8,420" format=money delta="+12% vs Sep" tone=down/>
   <Stat label="Orders" value="14"/>
 </Grid>
 <BarChart title="Top items" format=money>
@@ -27,7 +29,7 @@ Numbers: Stat(label, value, delta, tone=up|down|flat|ok|bad, format) Meter(label
 Charts (every value shows on hover): BarChart(title, unit, format, hue; body lines "Label: value", or "Label: value bad" to colour one bar; negatives draw left of zero) Donut(title, format; body lines "Label: value", at most 8, past five fold into Other) LineChart(title, unit, format; body <Series name="…" hue=teal> with lines "x: y", at most 5; "x:" with no number is a gap, not zero) Sparkline(values="3|5|4|8", hue).
 Tables: Table(columns="key:Label|key:Label:format"; body rows "a | b | c" in column order) Compare(columns="A|B|C"; body <Row label="…" winner=index>v1 | v2 | v3</Row>) List(body <Item title="…" meta="…">detail</Item>) Timeline(body <Event time="…" state=done|running|needs|failed>text</Event>).
 Input: Form(action, submit="label", title; body fields) with fields TextField(name, label, required, placeholder, multiline) Number(name, label, min, max) Money(name, label) Date(name, label) Select(name, label, options="value:Label|…") Radio(same) Checkbox(name, label) Toggle(name, label). Choice(action, prompt; body <Option id=… label="…">detail</Option>); ids and actions are words starting with a letter. Submitting comes back to you as a message with the values.
-format is text|number|money|date|percent; money is rupees.
+format is text|number|money|date|percent; money is ${currency()}: write plain numbers, Pitcrew adds the symbol.
 
 Data you keep: put it in a SQLite ledger under /bot/work and bind components to queries, so the numbers are current whenever ${driver} opens the surface and a daily run only adds rows:
 <Surface title="Groceries" source="/bot/work/grocery/ledger.db">

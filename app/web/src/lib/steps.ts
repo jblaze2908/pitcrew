@@ -13,7 +13,7 @@ const GOOGLE: Record<string, [StepIcon, string]> = {
   drive_search: ["drive", "Search Drive"], drive_read: ["drive", "Read Drive file"], drive_save_file: ["drive", "Save to Drive"],
 };
 const ENGRAM: Record<string, string> = { search: "Search memory", get: "Read from memory", propose: "Save to memory", profile: "Read profile" };
-const CONN: Record<string, [StepIcon, string]> = { tijori: ["ledger", "Tijori"], exa: ["web", "Web"] };
+const CONN: Record<string, [StepIcon, string]> = { exa: ["web", "Web"] };
 const EXA: Record<string, string> = { web_search_exa: "Search the web", web_fetch_exa: "Read web page" };
 const BROWSER = /^(browser_)?(navigate|navigate_back|click|type|fill_form|select_option|press_key|hover|drag|snapshot|read|tabs|wait_for|file_upload|handle_dialog|take_screenshot|evaluate|close|resize)\b/;
 

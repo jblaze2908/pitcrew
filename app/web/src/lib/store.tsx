@@ -4,6 +4,7 @@ import type { BotCard, State } from "../../../shared/types";
 import { api } from "./api";
 import { GLOBAL, useLive, useResync } from "./live";
 import { expectMoment, forgetMoments, landMoments } from "./moments";
+import { setCurrency } from "./format";
 
 interface Store {
   S: State;
@@ -29,6 +30,7 @@ export function StoreProvider({ initial, children }: { initial: State; children:
   }, []);
   const latest = useRef(S);
   latest.current = S;
+  setCurrency(S.currency);
 
   useResync(() => { forgetMoments(); refresh(); });
   useLive((e) => {

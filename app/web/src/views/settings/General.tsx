@@ -1,4 +1,4 @@
-// General: your name, the theme, and the crew-wide voice and plans switches.
+// General: your name, the theme, your currency, and the crew-wide voice and plans switches.
 import { useState } from "react";
 import type { State } from "../../../../shared/types";
 import { Seg } from "../../components/ui";
@@ -7,6 +7,11 @@ import { useStore } from "../../lib/store";
 import { Row, Section, TabHead, TextSave, Toggle, useSaved } from "./kit";
 
 type Theme = "system" | "dark" | "light";
+// Every currency this browser can format, named in its own language: "EUR · Euro".
+const CURRENCIES = (() => {
+  const names = new Intl.DisplayNames(undefined, { type: "currency" });
+  return Intl.supportedValuesOf("currency").map((c) => [c, `${c} · ${names.of(c) || c}`] as const);
+})();
 const THEMES = [["system", "System"], ["dark", "Dark"], ["light", "Light"]] as const;
 
 // theme-boot.js reads the same key before first paint and follows the computer's setting while it says "system".
@@ -30,7 +35,7 @@ export function General() {
   const { S } = useStore();
   const save = useSetting();
   const [theme, setTheme] = useState<Theme>(readTheme);
-  const [nameSaved, flashName] = useSaved(), [themeSaved, flashTheme] = useSaved(), [voiceSaved, flashVoice] = useSaved(), [plansSaved, flashPlans] = useSaved();
+  const [nameSaved, flashName] = useSaved(), [themeSaved, flashTheme] = useSaved(), [voiceSaved, flashVoice] = useSaved(), [plansSaved, flashPlans] = useSaved(), [currencySaved, flashCurrency] = useSaved();
   return (
     <>
       <TabHead title="General" intro="How Pitcrew looks, and how the crew talks to you." />
@@ -40,6 +45,11 @@ export function General() {
         </Row>
         <Row label="Theme" help="System follows your computer's light or dark setting." saved={themeSaved}>
           <Seg options={THEMES} value={theme} onChange={(t) => { applyTheme(t); setTheme(t); flashTheme(); }} />
+        </Row>
+        <Row label="Currency" help="Money in dashboards and forms. Model spend always shows in US dollars." saved={currencySaved}>
+          <select className="st-sel" aria-label="Currency" value={S.currency} onChange={(e) => save({ currency: e.target.value }, flashCurrency)}>
+            {CURRENCIES.map(([c, l]) => <option key={c} value={c}>{l}</option>)}
+          </select>
         </Row>
       </Section>
       <Section title="How the crew works">

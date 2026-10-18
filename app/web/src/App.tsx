@@ -4,6 +4,7 @@ import type { Session, State } from "../../shared/types";
 import { Toasts } from "./components/Toasts";
 import { api, whenSignedOut } from "./lib/api";
 import { StoreProvider } from "./lib/store";
+import { setCurrency } from "./lib/format";
 import { Shell } from "./Shell";
 
 type Boot = { kind: "loading" } | { kind: "setup" } | { kind: "login" } | { kind: "app"; state: State } | { kind: "error"; message: string };
@@ -14,7 +15,9 @@ export function App() {
     try {
       const s = await fetch("/api/session").then((r) => r.json() as Promise<Session>);
       if (!s.authed) return setBoot({ kind: s.setup ? "login" : "setup" });
-      setBoot({ kind: "app", state: await api.get<State>("/api/state") });
+      const state = await api.get<State>("/api/state");
+      setCurrency(state.currency);
+      setBoot({ kind: "app", state });
     } catch (e) { setBoot({ kind: "error", message: (e as Error).message }); }
   }, []);
   useEffect(() => { whenSignedOut(start); start(); }, [start]);

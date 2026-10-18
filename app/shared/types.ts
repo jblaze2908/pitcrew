@@ -76,6 +76,10 @@ export interface State {
   bots: BotCard[]; pitstops: PitStop[]; providers: Record<ProviderId, ProviderStatus>;
   today: { usd: number; runs: number }; week: { usd: number; runs: number }; weekCap: number; computersUp: number;
   engram: { linked: boolean; url: string };
+  /** ISO 4217 code money in surfaces is shown in (PITCREW_CURRENCY). */
+  currency: string;
+  /** IANA zone schedules run in (PITCREW_TZ). */
+  timeZone: string;
   /** Runs that ended since the driver last opened their thread (Home's "Since you last looked"). */
   unread: number;
   /** One-time notices the driver can dismiss: the OpenRouter balance at 90% used (runtime/balance.ts). */

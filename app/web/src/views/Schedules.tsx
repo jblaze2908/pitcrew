@@ -4,7 +4,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { BusyButton, ConfirmButton, Face, Field, Inline, Loader, Seg } from "../components/ui";
 import { Icon } from "../components/Icon";
 import { api } from "../lib/api";
-import { dayLabel, dayMonth, flat, hm, plural, sinceLabel, until } from "../lib/format";
+import { dayLabel, dayMonth, flat, hm, plural, sinceLabel, until, zoneName } from "../lib/format";
 import { useStore } from "../lib/store";
 import { toast } from "../lib/toast";
 import { useFetch } from "../lib/useFetch";
@@ -68,6 +68,7 @@ function outcome(runs: Run[]): [string, boolean] {
 }
 
 export function Schedules() {
+  const { S } = useStore();
   const f = useFetch(() => api.get<Sched[]>("/api/schedules"), []);
   const [open, setOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -78,7 +79,7 @@ export function Schedules() {
   return (
     <div className="page sch2-page">
       <div className="lib-top">
-        <div><h1 className="lib-h1">Schedules</h1><p className="lib-sub">What your crew does on its own, and how each run went. Times are India time.</p></div>
+        <div><h1 className="lib-h1">Schedules</h1><p className="lib-sub">What your crew does on its own, and how each run went. Times are {zoneName(S.timeZone)}.</p></div>
         {!adding && <button className="pc-pill s" onClick={() => { setAdding(true); setOpen(null); }}><Icon name="plus" size={14} />New schedule</button>}
       </div>
       {!list.length && !adding ? <div className="pc-card"><p className="muted">No schedules yet. Use New schedule, or ask a member to check something every day.</p></div>
@@ -130,7 +131,7 @@ function Row({ s, open, onOpen, reload }: { s: Sched; open: boolean; onOpen: () 
 // ---------- the editor: a schedule's settings in plain words, built into the spec the server parses ----------
 type Freq = "daily" | "weekdays" | "weekly" | "monthly" | "hours" | "custom";
 interface When { freq: Freq; time: string; dow: string; dom: string; hours: string; custom: string }
-// A select rather than <input type=time>, which shows 12-hour times in some locales; times are India time, 24-hour.
+// A select rather than <input type=time>, which shows 12-hour times in some locales; times are in the host's zone (PITCREW_TZ), 24-hour.
 const TIMES = Array.from({ length: 96 }, (_, i) => `${String(Math.floor(i / 4)).padStart(2, "0")}:${String((i % 4) * 15).padStart(2, "0")}`);
 function parseSpec(spec: string): When {
   const w: When = { freq: "daily", time: "09:00", dow: "mon", dom: "1", hours: "6", custom: "" };

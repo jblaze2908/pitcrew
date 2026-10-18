@@ -96,7 +96,7 @@ function HireForm({ ps }: { ps: PitStop | null }) {
               </div>
             </div>
             <Field label="Name"><input value={f.name} maxLength={40} placeholder="Bills" onChange={(e) => set("name", e.target.value)} /></Field>
-            <Field label="Job" help="A sentence or two, written to them. This is what they work from every time."><textarea rows={3} maxLength={400} value={f.job} placeholder="Fetch e-bills from my email and pay them when they're under my limit. Ask me before anything over ₹5,000." onChange={(e) => set("job", e.target.value)} /></Field>
+            <Field label="Job" help="A sentence or two, written to them. This is what they work from every time."><textarea rows={3} maxLength={400} value={f.job} placeholder="Fetch e-bills from my email and pay them when they're under my limit. Ask me before paying anything over 200." onChange={(e) => set("job", e.target.value)} /></Field>
           </section>
 
           <section className="hire2-sec">

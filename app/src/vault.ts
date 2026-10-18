@@ -117,7 +117,7 @@ export const usableBy = (botId: string) => listVault().filter((s) => s.allowed.i
 // The login whose site covers this host, so a member that guessed a name is pointed at the real one. Lists the vault;
 // runs only when a fill names no known secret.
 export const loginForHost = (host: string) => listVault().find((s) => s.kind !== "card" && siteMatch(host, s.site)) || null;
-// The page's host is the secret's site or a subdomain of it: accounts.northwind.co.in passes for northwind.co.in.
+// The page's host is the secret's site or a subdomain of it: accounts.power.example passes for power.example.
 export const siteMatch = (host: string, site: string) => !!site && (host === site || host.endsWith(`.${site}`));
 // The value to type for one field, decrypted (or the TOTP computed) at the moment of the fill.
 export function reveal(s: Pick<Secret, "id" | "blob">, field: string, at = now()) {

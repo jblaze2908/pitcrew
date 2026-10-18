@@ -232,7 +232,7 @@ test("thread start: the Chief gets Engram's profile, every linked member its ski
   assert.deepEqual(ctx.skills, [{ name: "pay-bills", description: "Pay the monthly bills" }, { name: "tidy", description: "Tidy the downloads" }, { name: "bare", description: "" }]);
   assert.equal(existsSync(`${brainDir("chief")}/home/.agents`), false, "no skill files");
   const ins = C.instructions(C.getBot("chief"), [], { profile: ctx.profile, skills: G.skillsIndex(ctx.skills) });
-  assert.match(ins, /How .* works, from Engram[^\n]*\nJai prefers short answers\./);
+  assert.match(ins, /How .* works, from Engram[^\n]*\nSam prefers short answers\./);
   assert.match(ins, /load it with the engram get tool \(id "skill:<name>"\)[^\n]*\n- pay-bills — Pay the monthly bills\n- tidy — Tidy the downloads\n- bare\n/);
   assert.equal((await G.threadContext(C.getBot("bills"))).profile, null, "only the Chief gets the profile");
   await G.threadContext(C.getBot("chief"));

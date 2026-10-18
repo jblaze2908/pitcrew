@@ -2,6 +2,7 @@
 // Quiet by default: a lone series is grey ink; colour comes from the hue the member picks, or the fixed palette order
 // when several series need telling apart. Every chart shows its values on hover.
 import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { currencyCode, currencySymbol, money, moneyShort, num, numShort } from "../lib/format";
 
 // The chart palette (app.css --v1..--v5, checked for colour-blind separation in both themes) plus grey and trouble.
 // c1..c6 are the older crew-hue names, mapped so surfaces made before this keep a colour.
@@ -12,17 +13,15 @@ const ORDER = ["--v1", "--v2", "--v3", "--v4", "--v5"];
 export const chartColor = (hue?: string | null, i?: number) => (hue && HUE_VAR[hue] ? `var(${HUE_VAR[hue]})` : i != null && i < ORDER.length ? `var(${ORDER[i]})` : undefined);
 
 type Fmt = (v: number) => string;
-const inr = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
-/** A value as the tooltip and labels show it. */
+/** A value as the tooltip and labels show it. A unit that only names the currency isn't repeated. */
 export function fmtValue(v: number, format?: string, unit?: string): string {
-  const s = format === "money" ? `₹${inr.format(v)}` : format === "percent" ? `${inr.format(v)}%` : inr.format(v);
-  return unit && !(format === "money" && /₹|inr|rupee|rs/i.test(unit)) ? `${s} ${unit}` : s;
+  const s = format === "money" ? money(v) : format === "percent" ? `${num(v)}%` : num(v);
+  const u = unit?.trim().toLowerCase();
+  return u && !(format === "money" && (u === currencyCode().toLowerCase() || u === currencySymbol().toLowerCase())) ? `${s} ${unit}` : s;
 }
-// Axis ticks stay short: ₹1.2L, 25k, 3.5Cr.
+// Axis ticks stay short: $1.2K, 25K, 3.5M, in the browser's locale.
 function fmtAxis(v: number, format?: string): string {
-  const a = Math.abs(v), sign = v < 0 ? "−" : "", pre = format === "money" ? "₹" : "", post = format === "percent" ? "%" : "";
-  const short = a >= 1e7 ? `${+(a / 1e7).toFixed(1)}Cr` : a >= 1e5 ? `${+(a / 1e5).toFixed(1)}L` : a >= 1e4 ? `${+(a / 1e3).toFixed(0)}k` : `${+a.toFixed(2)}`;
-  return `${sign}${pre}${short}${post}`;
+  return format === "money" ? moneyShort(v) : format === "percent" ? `${numShort(v)}%` : numShort(v);
 }
 function niceTicks(lo: number, hi: number, n = 4): number[] {
   if (lo === hi) { lo -= 1; hi += 1; }
@@ -153,7 +152,7 @@ function Columns({ n }: { n: any }) {
 }
 
 // ---------- donut ----------
-// The figure inside the ring: in full when it fits (₹59,240), else short (₹1.2L).
+// The figure inside the ring: in full when it fits ($59,240), else short ($1.2M).
 const centre = (v: number, format?: string) => { const full = fmtValue(v, format); return full.length <= 8 ? full : fmtAxis(v, format); };
 // Up to five slices keep their own colour; the rest fold into a grey "Other". Gaps between slices, the total inside.
 export function Donut({ n }: { n: any }) {

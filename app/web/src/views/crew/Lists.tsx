@@ -23,7 +23,7 @@ export function MemoryTab({ b, memory, global, error, reload }: { b: BotCard; me
         {global && <Seg options={[["agent", "Only this member"], ["global", "Whole crew"]] as const} value={scope} onChange={setScope} />}
         <button className="pc-pill s" disabled={!text.trim()} onClick={add}>Remember</button>
       </div>
-      <MemoryList b={b} title="Only this member" note={`${used.toLocaleString("en-IN")} of 3,000 characters`} help={`How its job runs, site quirks, where things are. Only ${b.name} reads this.`} items={memory} scope="agent" reload={reload} />
+      <MemoryList b={b} title="Only this member" note={`${used.toLocaleString()} of 3,000 characters`} help={`How its job runs, site quirks, where things are. Only ${b.name} reads this.`} items={memory} scope="agent" reload={reload} />
       {global && <MemoryList b={b} title="Shared with the crew" help={`Facts about you that every member can read, kept under ${SCOPE_LABEL[b.engram_scope]}. New ones ${b.name} saves wait for your review in shared memory.`} items={global} scope="global" reload={reload} />}
       {error && <p className="small badc">{`Couldn't read shared memory: ${error}`}</p>}
       <section>

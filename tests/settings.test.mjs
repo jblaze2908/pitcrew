@@ -1,4 +1,4 @@
-// Settings over the HTTP API: the "New threads start in" default and where it applies. No Docker, no network.
+// Settings over the HTTP API: the "New threads start in" default and where it applies, and the currency. No Docker, no network.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync } from "node:fs";
@@ -14,6 +14,7 @@ const C = await import("../app/dist/src/crew.js");
 const { state } = await import("../app/dist/src/api/views.js");
 const { api } = await import("../app/dist/src/api/index.js");
 const { newThreadAutonomy } = await import("../app/dist/src/runtime/autonomy.js");
+const { harnessHelp } = await import("../app/dist/src/manual.js");
 
 C.ensureChief();
 const bills = C.createBot(C.normaliseSpec({ name: "Bills", job: "Pays bills" }));
@@ -63,4 +64,14 @@ test("the mail relay secret comes only from its own signed-in endpoint", async (
   assert.equal(s.status, 200); assert.ok(s.body.secret.length >= 16);
   const anon = await api.fetch(new Request("http://pit.test/api/mail/secret", { headers: { "x-pitcrew": "1" } }), { outgoing: { headersSent: false } });
   assert.equal(anon.status, 401);
+});
+
+test("currency: USD until set, saved from Settings, junk refused, and the manual says it", async () => {
+  assert.equal(state().currency, "USD");
+  const r = await req("PATCH", "/api/settings", { currency: "eur" });
+  assert.equal(r.status, 200); assert.equal(r.body.currency, "EUR");
+  assert.match(harnessHelp("dashboards", "Sam"), /money is EUR/);
+  assert.equal((await req("PATCH", "/api/settings", { currency: "EURO" })).status, 400);
+  assert.equal((await req("PATCH", "/api/settings", { currency: "ZZZ" })).status, 400);
+  assert.equal(state().currency, "EUR", "a refused code leaves the saved one");
 });

@@ -16,7 +16,7 @@ export function MailboxCard({ botId, name, domain }: { botId: string; name: stri
     <div className="pc-card col">
       <div className="spread"><b className="pc-h3">{name}</b><span className={`pc-chip ${box ? "ok" : ""}`}>{box ? `${box.handle}@${domain}` : "No address"}</span></div>
       <div className="row" style={{ alignItems: "flex-end" }}><Field label="Address"><input value={h} onChange={(e) => setHandle(e.target.value)} /></Field><span className="small faint" style={{ paddingBottom: 10 }}>{`@${domain}`}</span></div>
-      <Field label="Who else may wake it" help="Addresses, or a whole domain as @northwind.co.in"><input placeholder="@northwind.co.in, billing@isp.example" value={snd} onChange={(e) => setSenders(e.target.value)} /></Field>
+      <Field label="Who else may wake it" help="Addresses, or a whole domain as @power.example"><input placeholder="@power.example, billing@isp.example" value={snd} onChange={(e) => setSenders(e.target.value)} /></Field>
       <Field label="Anyone else"><Seg options={[["hold", "Hold for me"], ["drop", "Drop"]] as const} value={oth} onChange={setOthers} /></Field>
       <div className="row"><BusyButton className="pc-pill s" onClick={save}>{box ? "Save" : "Give it an address"}</BusyButton>{box && <BusyButton className="pc-pill o s" onClick={off}>Turn off</BusyButton>}</div>
     </div>

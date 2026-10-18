@@ -4,7 +4,7 @@ import { Component, createContext, useContext, useId, useRef, useState, type CSS
 import type { Surface as SurfaceRow } from "../../../shared/types";
 import { controlDefaults, whenHolds } from "../../../shared/pui";
 import { api } from "../lib/api";
-import { ago } from "../lib/format";
+import { ago, currencySymbol, money, num } from "../lib/format";
 import { toast } from "../lib/toast";
 import { BarChart, Donut, LineChart, Sparkline, chartColor } from "./Charts";
 
@@ -13,13 +13,15 @@ type State = Record<string, string | number | boolean>;
 interface Ctx { onAction: (action: string, values: Values) => Promise<void> | void; locked: boolean; state: State; setControl: (name: string, v: string | number | boolean) => void }
 const SurfaceCtx = createContext<Ctx>({ onAction: () => {}, locked: false, state: {}, setControl: () => {} });
 
-const inr = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
+// A Stat's value is text ("8,420"); a plain number in it is formatted like a bound one.
+const asNumber = (v: unknown) => (typeof v === "number" ? v : typeof v === "string" && /^-?[\d,]*\.?\d+$/.test(v.trim()) ? Number(v.replace(/,/g, "")) : null);
 function fmt(v: unknown, f?: string): string {
   if (v == null || v === "") return "";
-  if (typeof v === "number") {
-    if (f === "money") return `₹${inr.format(v)}`;
-    if (f === "percent") return `${inr.format(v)}%`;
-    if (f === "number") return inr.format(v);
+  const n = asNumber(v);
+  if (n != null) {
+    if (f === "money") return money(n);
+    if (f === "percent") return `${num(n)}%`;
+    if (f === "number") return num(n);
   }
   return String(v);
 }
@@ -163,7 +165,7 @@ function FormField({ n, values }: { n: any; values: Values }) {
     case "TextField": input = n.multiline
       ? <textarea id={id} placeholder={n.placeholder} required={n.required} defaultValue={n.value || ""} disabled={locked} onChange={(e) => set(e.target.value)} />
       : <input id={id} placeholder={n.placeholder} required={n.required} defaultValue={n.value ?? ""} disabled={locked} onChange={(e) => set(e.target.value)} />; break;
-    case "Number": case "Money": input = <input id={id} type="number" step="any" defaultValue={n.value ?? ""} min={n.min} max={n.max} required={n.required} placeholder={n.type === "Money" ? "₹" : ""} disabled={locked}
+    case "Number": case "Money": input = <input id={id} type="number" step="any" defaultValue={n.value ?? ""} min={n.min} max={n.max} required={n.required} placeholder={n.type === "Money" ? currencySymbol() : ""} disabled={locked}
       onChange={(e) => set(e.target.value === "" ? null : Number(e.target.value))} />; break;
     case "Date": input = <input id={id} type="date" defaultValue={n.value || ""} required={n.required} disabled={locked} onChange={(e) => set(e.target.value)} />; break;
     case "Select": input = <select id={id} required={n.required} defaultValue={n.value} disabled={locked} onChange={(e) => set(e.target.value)}>{n.options.map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>; break;

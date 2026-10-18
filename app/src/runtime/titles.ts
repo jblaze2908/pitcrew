@@ -9,7 +9,7 @@ import { getThread, isSmallTalk } from "./threads.js";
 import type { ThreadRow } from "../models.js";
 
 const PROMPT = `You title conversations for a list of threads. Reply with the title only: 2 to 6 words, sentence case, no quotes, no trailing period, in the conversation's language.
-Name the concrete task or topic with its specifics (the site, merchant, person, place or file), not the request: "Swiggy order history export", "Goa trip in December", "Dentist near the office on Saturday".
+Name the concrete task or topic with its specifics (the site, merchant, person, place or file), not the request: "Food delivery order history export", "Lisbon trip in December", "Dentist near the office on Saturday".
 If the conversation is only greetings or small talk with no task yet, reply NONE.`;
 const MAX_RUNS = 6; // a thread still on small talk after this many runs keeps its provisional title
 

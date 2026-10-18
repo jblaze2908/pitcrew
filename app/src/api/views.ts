@@ -1,5 +1,5 @@
 // View models: what the web app's main reads (state, a thread, a member card) assemble from the store. Telemetry is in lists.ts.
-import { one, all, now, json, getSetting, marks, driverName } from "../db.js";
+import { one, all, now, json, getSetting, marks, driverName, currency } from "../db.js";
 import { resolveSurface } from "../ledger.js";
 import { httpErr } from "../auth.js";
 import * as P from "../providers.js";
@@ -13,7 +13,7 @@ import type { PitstopRow, EventRow, LearnedRow, SurfaceRow } from "../models.js"
 import { liveCommands } from "../runtime/state.js";
 import { balanceAlerts } from "../runtime/balance.js";
 import { shownTitle } from "../runtime/threads.js";
-import { localDayAt } from "../runtime/util.js";
+import { localDayAt, TZ } from "../runtime/util.js";
 
 // An Engram proposal waits on the driver, not on the member it's filed under, so it doesn't make that member "needs".
 function mood(b: Bot, threads: ThreadSummary[], pending: { bot_id: string; kind?: string }[], up: boolean, last: string | null): Mood {
@@ -57,6 +57,7 @@ export function state(): State {
     weekCap: one<{ c: number }>("SELECT COALESCE(SUM(weekly_cap_usd),0) c FROM bots WHERE archived=0")!.c,
     computersUp: allComputers().filter((c) => c.up).length,
     engram: { linked: linked(), url: engramUrl() },
+    currency: currency(), timeZone: TZ,
     unread: R.inbox().unread,
     alerts: balanceAlerts(),
     formerNames: Object.fromEntries(all<{ id: string; name: string }>("SELECT id, name FROM bots WHERE archived=1").map((b) => [b.id, b.name])),

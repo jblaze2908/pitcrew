@@ -152,7 +152,7 @@ function Area({ value, max, onSave, ...rest }: { value: string; max?: number; on
   useEffect(() => setV(value), [value]);
   return <>
     <textarea {...rest} value={v} maxLength={max} onChange={(e) => setV(e.target.value)} onBlur={() => v !== value && onSave(v)} />
-    {max && <p className="cnt">{`${v.length.toLocaleString("en-IN")} / ${max.toLocaleString("en-IN")}`}</p>}
+    {max && <p className="cnt">{`${v.length.toLocaleString()} / ${max.toLocaleString()}`}</p>}
   </>;
 }
 const Toggle = (p: { on: boolean; label: string; onChange: (v: boolean) => void }) => <Switch className="tg" {...p} />;

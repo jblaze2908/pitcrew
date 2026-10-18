@@ -332,8 +332,8 @@ test("an always approval names one exact script or tool and holds whatever effec
   for (const e of ["send", "share", "write_workspace", "exec_untrusted"]) assert.ok(R.standingRule(b.id, null, call, e), e);
   for (const e of ["pay", "delete"]) assert.equal(R.standingRule(b.id, null, call, e), undefined, e);
   assert.equal(R.standingRule(b.id, null, sh("python3 -B /bot/work/sub/other.py"), "send"), undefined, "another script isn't covered");
-  add("mcp:engram/tijori__record_orders", "send");
-  assert.ok(R.standingRule(b.id, null, { kind: "mcp", server: "engram", tool: "tijori__record_orders", arguments: {} }, "write_workspace"));
+  add("mcp:engram/ledger__record_orders", "send");
+  assert.ok(R.standingRule(b.id, null, { kind: "mcp", server: "engram", tool: "ledger__record_orders", arguments: {} }, "write_workspace"));
   // A broad pattern still holds only for its own effect.
   add("cmd:curl -s", "read");
   assert.ok(R.standingRule(b.id, null, sh("curl -s https://example.com"), "read"));

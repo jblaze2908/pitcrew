@@ -191,6 +191,12 @@ export function getSetting(k: string): string | null;
 export function getSetting(k: string, d: string | null = null) { return one<{ value: string }>("SELECT value FROM settings WHERE key=?", k)?.value ?? d; }
 /** The driver's name as the crew says it; d stands in until they set one. */
 export const driverName = (d = "the driver") => getSetting("driver_name", d);
+// Intl formats any three letters ("ZZZ" too); this is the list it knows by name, the Settings picker's list.
+const CURRENCIES = new Set(Intl.supportedValuesOf("currency"));
+/** A known ISO 4217 code, upper-cased, or null. */
+export const currencyCode = (v: unknown) => { const c = String(v ?? "").trim().toUpperCase(); return CURRENCIES.has(c) ? c : null; };
+/** The currency money in surfaces is in: Settings → General, else PITCREW_CURRENCY, else USD. Model spend is always USD. */
+export const currency = () => currencyCode(getSetting("currency")) || currencyCode(process.env.PITCREW_CURRENCY) || "USD";
 export const setSetting = (k: string, v: unknown) => run("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", k, String(v));
 
 export const LABEL_DAYS = 120;

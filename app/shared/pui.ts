@@ -76,7 +76,7 @@ export function parseTags(src: string): { root: El; errors: string[] } {
 const bodyText = (el: El) => el.children.filter((c): c is string => typeof c === "string").join("").trim();
 const kids = (el: El, tag: string) => el.children.filter((c): c is El => typeof c === "object" && c.tag === tag);
 const list = (v: unknown) => String(v).split("|").map((x) => x.trim()).filter((x) => x !== "");
-const numOf = (v: unknown) => (typeof v === "number" ? v : Number(String(v).replace(/[₹,%\s]/g, "")));
+const numOf = (v: unknown) => (typeof v === "number" ? v : Number(String(v).replace(/[\p{Sc},%\s]/gu, "")));
 const options = (v: unknown) => list(v).map((o) => { const k = o.indexOf(":"); return k < 0 ? { value: o, label: o } : { value: o.slice(0, k).trim(), label: o.slice(k + 1).trim() }; });
 // "Label: 12" lines, optionally "Label: 12 teal" for that item's hue; "x:" with no number is a gap (null). The last
 // colon splits, so labels may hold colons.
