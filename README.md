@@ -22,7 +22,7 @@ Every feature sits under one of three verbs, or it doesn't get a screen:
 
 Also: per-member memory and skills, generated UI panels, a code view of each workspace, email addresses for members (Cloudflare Email Routing), phone push via ntfy, and an optional link to [Engram](https://github.com/jblaze2908/engram) for memory shared across all your agents.
 
-Product brief: [`docs/brief.md`](docs/brief.md). What v1 contains and the defaults it took: [`docs/v1-build.md`](docs/v1-build.md).
+What v1 contains and the defaults it took: [`docs/v1-build.md`](docs/v1-build.md).
 
 ## How it fits together
 
